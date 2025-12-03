@@ -24,6 +24,7 @@
   max-height: calc(100vh - 100px) !important;
   overflow-y: auto !important;
 
+  // Position will be set dynamically by JavaScript relative to timeline
   .tally-status-widget {
     background: #fff;
     border: 1px solid #e5e7eb;

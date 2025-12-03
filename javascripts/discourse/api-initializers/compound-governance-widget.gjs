@@ -236,9 +236,8 @@ export default apiInitializer((api) => {
     return null;
   }
 
-  // Removed unused resolveProposalId function
-  // eslint-disable-next-line no-unused-vars
-  async function resolveProposalId_UNUSED(urlProposalNumber, govId) {
+  // Resolve URL proposal number to internal ID by matching onchainId
+  async function resolveProposalId(urlProposalNumber, govId) {
     try {
       console.log("🔵 [RESOLVE] Resolving proposal ID - URL number:", urlProposalNumber, "govId:", govId);
 
@@ -756,7 +755,7 @@ export default apiInitializer((api) => {
     const queuedStatuses = ["queued", "queuing"];
     const pendingStatuses = ["pending"];
     const defeatStatuses = ["defeat", "defeated", "rejected"];
-    // Removed unused quorumStatuses - using inline checks instead
+    const quorumStatuses = ["quorum not reached", "quorumnotreached"];
     
     // Check for "pending execution" first (most specific) - handle various formats
     // API might return: "Pending execution", "pending execution", "pendingexecution", "pending_execution"
@@ -1014,20 +1013,51 @@ export default apiInitializer((api) => {
     const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id]'));
     console.log("🔍 [TOPIC] Found", allPosts.length, "posts to search");
     
+    if (allPosts.length === 0) {
+      console.warn("⚠️ [TOPIC] No posts found! Trying alternative selectors...");
+      // Try alternative selectors
+      const altPosts = Array.from(document.querySelectorAll('article, .cooked, .post-content, [class*="post"]'));
+      console.log("🔍 [TOPIC] Alternative search found", altPosts.length, "potential posts");
+      if (altPosts.length > 0) {
+        allPosts.push(...altPosts);
+      }
+    }
+    
     // Search through posts in order (first post first)
     for (let i = 0; i < allPosts.length; i++) {
       const post = allPosts[i];
       
-      // Find Tally link in this post
+      // Method 1: Find Tally link in this post (check href attribute)
       const tallyLink = post.querySelector('a[href*="tally.xyz"], a[href*="tally.so"]');
       if (tallyLink) {
-        const url = tallyLink.href;
-        console.log("✅ [TOPIC] Found first Tally proposal in post", i + 1, ":", url);
+        const url = tallyLink.href || tallyLink.getAttribute('href');
+        if (url) {
+          console.log("✅ [TOPIC] Found first Tally proposal in post", i + 1, "(via link):", url);
+          return url;
+        }
+      }
+      
+      // Method 2: Search text content for Tally URLs (handles oneboxes, plain text, etc.)
+      const postText = post.textContent || post.innerText || '';
+      const textMatches = postText.match(TALLY_URL_REGEX);
+      if (textMatches && textMatches.length > 0) {
+        const url = textMatches[0];
+        console.log("✅ [TOPIC] Found first Tally proposal in post", i + 1, "(via text):", url);
+        return url;
+      }
+      
+      // Method 3: Search HTML content (handles oneboxes and other embeds)
+      const postHtml = post.innerHTML || '';
+      const htmlMatches = postHtml.match(TALLY_URL_REGEX);
+      if (htmlMatches && htmlMatches.length > 0) {
+        const url = htmlMatches[0];
+        console.log("✅ [TOPIC] Found first Tally proposal in post", i + 1, "(via HTML):", url);
         return url;
       }
     }
     
     console.log("⚠️ [TOPIC] No Tally proposal found in any post");
+    console.log("🔍 [TOPIC] Debug: TALLY_URL_REGEX pattern:", TALLY_URL_REGEX);
     return null;
   }
 
@@ -1105,6 +1135,8 @@ export default apiInitializer((api) => {
       return;
     }
     
+    console.log("🔵 [TOPIC] Extracted proposal info:", JSON.stringify(proposalInfo, null, 2));
+    
     // Create widget ID
     let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
     if (!widgetId) {
@@ -1117,12 +1149,26 @@ export default apiInitializer((api) => {
     // Set current proposal
     currentVisibleProposal = proposalUrl;
     
-    console.log("🔵 [TOPIC] Fetching data for proposal:", proposalUrl);
+    console.log("🔵 [TOPIC] Fetching data for proposal:");
+    console.log("  - URL:", proposalUrl);
+    console.log("  - Proposal ID:", proposalInfo.isInternalId ? proposalInfo.internalId : "none");
+    console.log("  - Gov ID:", proposalInfo.govId || "none");
+    console.log("  - URL Proposal Number:", proposalInfo.urlProposalNumber || "none");
+    console.log("  - Widget ID:", widgetId);
     
     // Fetch and display proposal data
     const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
     fetchProposalData(proposalId, proposalUrl, proposalInfo.govId, proposalInfo.urlProposalNumber)
       .then(data => {
+        console.log("🔵 [TOPIC] Received data from API:", data ? {
+          hasTitle: !!data.title,
+          title: data.title,
+          hasStatus: !!data.status,
+          status: data.status,
+          hasVoteStats: !!data.voteStats,
+          hasDescription: !!data.description
+        } : "null");
+        
         if (data && data.title && data.title !== "Tally Proposal") {
           console.log("✅ [TOPIC] Rendering widget for:", data.title);
           renderStatusWidget(data, proposalUrl, widgetId, proposalInfo);
@@ -1130,11 +1176,13 @@ export default apiInitializer((api) => {
           setupAutoRefresh(widgetId, proposalInfo, proposalUrl);
         } else {
           console.warn("⚠️ [TOPIC] Invalid proposal data - hiding widget");
+          console.warn("⚠️ [TOPIC] Full data received:", JSON.stringify(data, null, 2));
           hideWidgetIfNoProposal();
         }
       })
       .catch(error => {
         console.error("❌ [TOPIC] Error fetching proposal data:", error);
+        console.error("❌ [TOPIC] Error stack:", error.stack);
         hideWidgetIfNoProposal();
       });
   }
@@ -1522,6 +1570,97 @@ export default apiInitializer((api) => {
     }
 
     console.log("🔵 [POST] Found", matches.length, "Tally URL(s) in saved post");
+    
+    // Watch for oneboxes being added dynamically (Discourse creates them asynchronously)
+    const oneboxObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === 1) {
+              // Check if a onebox was added
+              const onebox = node.classList?.contains('onebox') || node.classList?.contains('onebox-body') 
+                ? node 
+                : node.querySelector?.('.onebox, .onebox-body');
+              
+              if (onebox) {
+                const oneboxText = onebox.textContent || onebox.innerHTML || '';
+                const oneboxLinks = onebox.querySelectorAll?.('a[href*="tally.xyz"], a[href*="tally.so"]') || [];
+                if (oneboxText.match(TALLY_URL_REGEX) || (oneboxLinks && oneboxLinks.length > 0)) {
+                  console.log("🔵 [POST] Onebox detected, will replace with custom preview");
+                  // Re-run the replacement logic for all matches
+                  setTimeout(() => {
+                    for (const match of matches) {
+                      const url = match[0];
+                      const proposalInfo = extractProposalInfo(url);
+                      if (proposalInfo) {
+                        let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
+                        if (!widgetId) {
+                          const urlHash = url.split('').reduce((acc, char) => {
+                            return ((acc << 5) - acc) + char.charCodeAt(0);
+                          }, 0);
+                          widgetId = `proposal_${Math.abs(urlHash)}`;
+                        }
+                        const existingPreview = element.querySelector(`[data-tally-preview-id="${widgetId}"]`);
+                        if (!existingPreview) {
+                          // Onebox was added, need to replace it
+                          const previewContainer = document.createElement("div");
+                          previewContainer.className = "tally-url-preview";
+                          previewContainer.setAttribute("data-tally-preview-id", widgetId);
+                          previewContainer.innerHTML = `
+                            <div class="tally-preview-content">
+                              <div class="tally-preview-loading">Loading proposal...</div>
+                            </div>
+                          `;
+                          if (onebox.parentNode) {
+                            onebox.parentNode.replaceChild(previewContainer, onebox);
+                            // Fetch and render data
+                            const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
+                            fetchProposalData(proposalId, url, proposalInfo.govId, proposalInfo.urlProposalNumber)
+                              .then(data => {
+                                if (data && data.title && data.title !== "Tally Proposal") {
+                                  const title = (data.title || 'Tally Proposal').trim();
+                                  const description = (data.description || '').trim();
+                                  previewContainer.innerHTML = `
+                                    <div class="tally-preview-content">
+                                      <a href="${url}" target="_blank" rel="noopener" class="tally-preview-link">
+                                        <strong>${escapeHtml(title)}</strong>
+                                      </a>
+                                      ${description ? `
+                                        <div class="tally-preview-description">${escapeHtml(description)}</div>
+                                      ` : '<div class="tally-preview-description" style="color: #9ca3af; font-style: italic;">No description available</div>'}
+                                    </div>
+                                  `;
+                                }
+                              })
+                              .catch(() => {
+                                previewContainer.innerHTML = `
+                                  <div class="tally-preview-content">
+                                    <a href="${url}" target="_blank" rel="noopener" class="tally-preview-link">
+                                      <strong>Tally Proposal</strong>
+                                    </a>
+                                  </div>
+                                `;
+                              });
+                          }
+                        }
+                      }
+                    }
+                  }, 100);
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    // Start observing for onebox additions
+    oneboxObserver.observe(element, { childList: true, subtree: true });
+    
+    // Stop observing after 10 seconds (oneboxes are usually created within a few seconds)
+    setTimeout(() => {
+      oneboxObserver.disconnect();
+    }, 10000);
 
     for (const match of matches) {
       const url = match[0];
@@ -1551,46 +1690,6 @@ export default apiInitializer((api) => {
         continue;
       }
 
-      // Find URL element (link or onebox) - try multiple methods
-      let urlElement = null;
-      
-      // Method 1: Find by href
-      const links = element.querySelectorAll('a');
-      for (const link of links) {
-        const linkHref = link.href || link.getAttribute('href') || '';
-        const linkText = link.textContent || '';
-        if (linkHref.includes(url) || linkText.includes(url) || linkHref === url) {
-          urlElement = link;
-          console.log("✅ [POST] Found URL in <a> tag");
-          break;
-        }
-      }
-      
-      // Method 2: Find onebox
-      if (!urlElement) {
-        const oneboxes = element.querySelectorAll('.onebox, .onebox-body');
-        for (const onebox of oneboxes) {
-          if (onebox.textContent && onebox.textContent.includes(url)) {
-            urlElement = onebox;
-            console.log("✅ [POST] Found URL in onebox");
-            break;
-          }
-        }
-      }
-      
-      // Method 3: Find by text content (plain text URL)
-      if (!urlElement) {
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        let node;
-        while (node = walker.nextNode()) {
-          if (node.textContent && node.textContent.includes(url)) {
-            urlElement = node.parentElement;
-            console.log("✅ [POST] Found URL in text node");
-            break;
-          }
-        }
-      }
-
       // Create simple preview container
       const previewContainer = document.createElement("div");
       previewContainer.className = "tally-url-preview";
@@ -1602,15 +1701,77 @@ export default apiInitializer((api) => {
           <div class="tally-preview-loading">Loading proposal...</div>
         </div>
       `;
+
+      // Function to find and replace URL element with our preview
+      const findAndReplaceUrl = (retryCount = 0) => {
+        // Find URL element (link or onebox) - try multiple methods
+        let urlElement = null;
+        
+        // Method 1: Find onebox first (Discourse creates these asynchronously)
+        const oneboxes = element.querySelectorAll('.onebox, .onebox-body, .onebox-result');
+        for (const onebox of oneboxes) {
+          const oneboxText = onebox.textContent || onebox.innerHTML || '';
+          const oneboxLinks = onebox.querySelectorAll('a[href*="tally.xyz"], a[href*="tally.so"]');
+          if (oneboxText.includes(url) || oneboxLinks.length > 0) {
+            urlElement = onebox;
+            console.log("✅ [POST] Found URL in onebox");
+            break;
+          }
+        }
+        
+        // Method 2: Find by href (link)
+        if (!urlElement) {
+          const links = element.querySelectorAll('a');
+          for (const link of links) {
+            const linkHref = link.href || link.getAttribute('href') || '';
+            const linkText = link.textContent || '';
+            if (linkHref.includes(url) || linkText.includes(url) || linkHref === url) {
+              urlElement = link;
+              console.log("✅ [POST] Found URL in <a> tag");
+              break;
+            }
+          }
+        }
+        
+        // Method 3: Find by text content (plain text URL)
+        if (!urlElement) {
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+          let node;
+          while (node = walker.nextNode()) {
+            if (node.textContent && node.textContent.includes(url)) {
+              urlElement = node.parentElement;
+              console.log("✅ [POST] Found URL in text node");
+              break;
+            }
+          }
+        }
+
+        // If we found the element, replace it
+        if (urlElement && urlElement.parentNode) {
+          // Check if we already replaced it
+          if (urlElement.classList.contains('tally-url-preview') || urlElement.closest('.tally-url-preview')) {
+            console.log("🔵 [POST] Already replaced, skipping");
+            return true;
+          }
+          
+          console.log("✅ [POST] Replacing URL element with preview");
+          urlElement.parentNode.replaceChild(previewContainer, urlElement);
+          return true;
+        } else if (retryCount < 5) {
+          // Onebox might not be created yet, retry after a delay
+          console.log(`🔵 [POST] URL element not found (attempt ${retryCount + 1}/5), retrying in 500ms...`);
+          setTimeout(() => findAndReplaceUrl(retryCount + 1), 500);
+          return false;
+        } else {
+          // Last resort: append to post
+          console.log("✅ [POST] Appending preview to post (URL element not found after retries)");
+          element.appendChild(previewContainer);
+          return true;
+        }
+      };
       
-      // Insert preview immediately (before fetch completes)
-      if (urlElement && urlElement.parentNode) {
-        console.log("✅ [POST] Replacing URL element with preview");
-        urlElement.parentNode.replaceChild(previewContainer, urlElement);
-      } else {
-        console.log("✅ [POST] Appending preview to post (URL element not found)");
-        element.appendChild(previewContainer);
-      }
+      // Try to find and replace immediately, with retries for async oneboxes
+      findAndReplaceUrl();
       
       // Fetch and show preview (title + description + link)
       const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
@@ -2089,7 +2250,6 @@ export default apiInitializer((api) => {
     };
     
     // Check periodically and on DOM changes
-    // eslint-disable-next-line no-unused-vars
     const checkInterval = setInterval(() => {
       checkAllComposers();
       checkAllVisibleTextareas(); // Also do aggressive check
