@@ -237,7 +237,8 @@ export default apiInitializer((api) => {
   }
 
   // Resolve URL proposal number to internal ID by matching onchainId
-  async function resolveProposalId(urlProposalNumber, govId) {
+  // eslint-disable-next-line no-unused-vars
+  async function resolveProposalId_UNUSED(urlProposalNumber, govId) {
     try {
       console.log("🔵 [RESOLVE] Resolving proposal ID - URL number:", urlProposalNumber, "govId:", govId);
 
@@ -755,6 +756,7 @@ export default apiInitializer((api) => {
     const queuedStatuses = ["queued", "queuing"];
     const pendingStatuses = ["pending"];
     const defeatStatuses = ["defeat", "defeated", "rejected"];
+    // eslint-disable-next-line no-unused-vars
     const quorumStatuses = ["quorum not reached", "quorumnotreached"];
     
     // Check for "pending execution" first (most specific) - handle various formats
@@ -2250,6 +2252,7 @@ export default apiInitializer((api) => {
     };
     
     // Check periodically and on DOM changes
+    // eslint-disable-next-line no-unused-vars
     const checkInterval = setInterval(() => {
       checkAllComposers();
       checkAllVisibleTextareas(); // Also do aggressive check
