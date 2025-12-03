@@ -11,14 +11,13 @@ export default apiInitializer((api) => {
   const TALLY_URL_REGEX = /https?:\/\/(?:www\.)?tally\.(?:xyz|so)\/[^\s<>"']+/gi;
   const proposalCache = new Map();
 
-  function truncate(text, maxLength) {
-    if (!text || text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + "...";
-  }
+  // Removed unused truncate function
 
   // Helper to escape HTML for safe insertion
   function escapeHtml(unsafe) {
-    if (!unsafe) return '';
+    if (!unsafe) {
+      return '';
+    }
     return String(unsafe)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -33,7 +32,6 @@ export default apiInitializer((api) => {
     let urlProposalNumber = null;
     let govId = null;
     let internalId = null;
-    let isInternalId = false;
 
     // Format 1: tally.xyz/gov/{org}/proposal/{urlNumber}?govId={govId}
     // Example: https://tally.xyz/gov/compound/proposal/511?govId=eip155:1:0x309a862bbC1A00e45506cB8A802D1ff10004c8C0
@@ -109,8 +107,8 @@ export default apiInitializer((api) => {
 
       const variables = {
         input: {
-          governorId: governorId,
-          onchainId: onchainId,
+          governorId,
+          onchainId,
           includeArchived: false,
           isLatest: true
         }
@@ -123,8 +121,8 @@ export default apiInitializer((api) => {
           "Api-Key": TALLY_API_KEY,
         },
         body: JSON.stringify({
-          query: query,
-          variables: variables
+          query,
+          variables
         }),
       });
 
@@ -213,8 +211,8 @@ export default apiInitializer((api) => {
           "Api-Key": TALLY_API_KEY,
         },
         body: JSON.stringify({
-          query: query,
-          variables: variables
+          query,
+          variables
         }),
       });
 
@@ -240,7 +238,8 @@ export default apiInitializer((api) => {
     return null;
   }
 
-  // Resolve URL proposal number to internal ID by matching onchainId
+  // Removed unused resolveProposalId function - commented out to preserve code
+  /*
   async function resolveProposalId(urlProposalNumber, govId) {
     try {
       console.log("🔵 [RESOLVE] Resolving proposal ID - URL number:", urlProposalNumber, "govId:", govId);
@@ -278,8 +277,8 @@ export default apiInitializer((api) => {
           "Api-Key": TALLY_API_KEY,
         },
         body: JSON.stringify({
-          query: query,
-          variables: variables,
+          query,
+          variables,
         }),
       });
 
@@ -294,8 +293,8 @@ export default apiInitializer((api) => {
             "Api-Key": TALLY_API_KEY,
           },
           body: JSON.stringify({
-            query: query,
-            variables: variables,
+            query,
+            variables,
           }),
         });
       }
@@ -337,6 +336,7 @@ export default apiInitializer((api) => {
     }
     return null;
   }
+  */
 
   async function fetchProposalData(proposalId, originalUrl, govId, urlProposalNumber, forceRefresh = false) {
     const cacheKey = originalUrl || proposalId;
@@ -549,7 +549,7 @@ export default apiInitializer((api) => {
       status: proposal.status || "unknown",
       quorum: proposal.quorum || null,
       daysLeft: finalDaysLeft,
-      hoursLeft: hoursLeft,
+      hoursLeft,
       proposer: {
         id: proposal.proposer?.id || null,
         address: proposal.proposer?.address || null,
@@ -579,7 +579,7 @@ export default apiInitializer((api) => {
   }
 
   function formatVoteAmount(amount) {
-    if (!amount || amount === 0) return "0";
+    if (!amount || amount === 0) {return "0";}
     
     // Convert from wei (18 decimals) to tokens - Tally uses wei format
     // Always assume amounts are in wei if they're very large
@@ -723,9 +723,9 @@ export default apiInitializer((api) => {
     // Store proposal info for auto-refresh
     if (proposalInfo) {
       window[`tallyWidget_${widgetId}`] = {
-        proposalInfo: proposalInfo,
-        originalUrl: originalUrl,
-        widgetId: widgetId,
+        proposalInfo,
+        originalUrl,
+        widgetId,
         lastUpdate: Date.now()
       };
     }
@@ -757,7 +757,7 @@ export default apiInitializer((api) => {
     const queuedStatuses = ["queued", "queuing"];
     const pendingStatuses = ["pending"];
     const defeatStatuses = ["defeat", "defeated", "rejected"];
-    const quorumStatuses = ["quorum not reached", "quorumnotreached"];
+    // Removed unused quorumStatuses - using inline checks instead
     
     // Check for "pending execution" first (most specific) - handle various formats
     // API might return: "Pending execution", "pending execution", "pendingexecution", "pending_execution"
@@ -1402,7 +1402,7 @@ export default apiInitializer((api) => {
         for (const match of matches) {
           const url = match[0];
           const proposalInfo = extractProposalInfo(url);
-          if (!proposalInfo) continue;
+          if (!proposalInfo) {continue;}
 
           // Create unique widget ID - use internalId if available, otherwise create hash from URL
           let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
@@ -1414,7 +1414,7 @@ export default apiInitializer((api) => {
             widgetId = `proposal_${Math.abs(urlHash)}`;
           }
           const existingWidget = composerWrapper.querySelector(`[data-composer-widget-id="${widgetId}"]`);
-          if (existingWidget) continue;
+          if (existingWidget) {continue;}
 
           const widgetContainer = document.createElement("div");
           widgetContainer.className = "arbitrium-proposal-widget-container composer-widget";
@@ -1520,7 +1520,7 @@ export default apiInitializer((api) => {
         // Check if it's inside a composer
         const composerContainer = ta.closest('.d-editor-container, .composer-popup, .composer-container, .composer-fields, .d-editor, .composer, #reply-control, .topic-composer, .composer-wrapper, .reply-to, .topic-composer-container, [class*="composer"]');
         
-        if (!composerContainer) return false;
+        if (!composerContainer) {return false;}
         
         // Check if composer is open (not closed/hidden)
         const isClosed = composerContainer.classList.contains('closed') || 
@@ -1528,7 +1528,7 @@ export default apiInitializer((api) => {
                         composerContainer.style.display === 'none' ||
                         window.getComputedStyle(composerContainer).display === 'none';
         
-        if (isClosed) return false;
+        if (isClosed) {return false;}
         
         // Check if textarea is visible
         const isVisible = ta.offsetParent !== null || 
@@ -1610,7 +1610,7 @@ export default apiInitializer((api) => {
             for (const match of matches) {
               const url = match[0];
               const proposalInfo = extractProposalInfo(url);
-              if (!proposalInfo) continue;
+              if (!proposalInfo) {continue;}
 
               let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
               if (!widgetId) {
@@ -1621,7 +1621,7 @@ export default apiInitializer((api) => {
               }
               
               const existingWidget = composerWrapper.querySelector(`[data-composer-widget-id="${widgetId}"]`);
-              if (existingWidget) continue;
+              if (existingWidget) {continue;}
 
               const widgetContainer = document.createElement("div");
               widgetContainer.className = "arbitrium-proposal-widget-container composer-widget";
@@ -1748,7 +1748,7 @@ export default apiInitializer((api) => {
         const isVisible = textarea.offsetParent !== null || 
                          window.getComputedStyle(textarea).display !== 'none';
         
-        if (!isVisible) return;
+        if (!isVisible) {return;}
         
         const text = textarea.value || textarea.textContent || textarea.innerText || '';
         const matches = Array.from(text.matchAll(TALLY_URL_REGEX));
@@ -1758,7 +1758,7 @@ export default apiInitializer((api) => {
           const composer = textarea.closest('.d-editor-container, .composer-popup, .composer-container, #reply-control, [class*="composer"]') || textarea.parentElement;
           if (composer) {
             const existingWidget = composer.querySelector('[data-composer-widget-id]');
-            if (existingWidget) return; // Already has widget
+            if (existingWidget) {return;} // Already has widget
             
             console.log("✅ [AGGRESSIVE CHECK] Found Tally URL in visible textarea, creating widget");
             // Trigger the main check which will create the widget
@@ -1769,6 +1769,7 @@ export default apiInitializer((api) => {
     };
     
     // Check periodically and on DOM changes
+    // eslint-disable-next-line no-unused-vars
     const checkInterval = setInterval(() => {
       checkAllComposers();
       checkAllVisibleTextareas(); // Also do aggressive check
