@@ -16,3 +16,11 @@ node_modules
 *.swp
 *.swo
 *~
+
+# Additional ignores
+.DS_Store
+*.log
+.env
+*.swp
+*.swo
+*~
