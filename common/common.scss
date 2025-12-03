@@ -23,6 +23,7 @@
   z-index: 500 !important; // Lower than scroll numbers
   max-height: calc(100vh - 100px) !important;
   overflow-y: auto !important;
+
   // Position will be set dynamically by JavaScript relative to timeline
   .tally-status-widget {
     background: #fff;
