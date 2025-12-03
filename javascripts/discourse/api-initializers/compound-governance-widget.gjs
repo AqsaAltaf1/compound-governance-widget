@@ -11,13 +11,14 @@ export default apiInitializer((api) => {
   const TALLY_URL_REGEX = /https?:\/\/(?:www\.)?tally\.(?:xyz|so)\/[^\s<>"']+/gi;
   const proposalCache = new Map();
 
-  // Removed unused truncate function
+  function truncate(text, maxLength) {
+    if (!text || text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + "...";
+  }
 
   // Helper to escape HTML for safe insertion
   function escapeHtml(unsafe) {
-    if (!unsafe) {
-      return '';
-    }
+    if (!unsafe) return '';
     return String(unsafe)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -32,6 +33,7 @@ export default apiInitializer((api) => {
     let urlProposalNumber = null;
     let govId = null;
     let internalId = null;
+    let isInternalId = false;
 
     // Format 1: tally.xyz/gov/{org}/proposal/{urlNumber}?govId={govId}
     // Example: https://tally.xyz/gov/compound/proposal/511?govId=eip155:1:0x309a862bbC1A00e45506cB8A802D1ff10004c8C0
@@ -107,8 +109,8 @@ export default apiInitializer((api) => {
 
       const variables = {
         input: {
-          governorId,
-          onchainId,
+          governorId: governorId,
+          onchainId: onchainId,
           includeArchived: false,
           isLatest: true
         }
@@ -121,8 +123,8 @@ export default apiInitializer((api) => {
           "Api-Key": TALLY_API_KEY,
         },
         body: JSON.stringify({
-          query,
-          variables
+          query: query,
+          variables: variables
         }),
       });
 
@@ -211,8 +213,8 @@ export default apiInitializer((api) => {
           "Api-Key": TALLY_API_KEY,
         },
         body: JSON.stringify({
-          query,
-          variables
+          query: query,
+          variables: variables
         }),
       });
 
@@ -238,8 +240,7 @@ export default apiInitializer((api) => {
     return null;
   }
 
-  // Removed unused resolveProposalId function - commented out to preserve code
-  /*
+  // Resolve URL proposal number to internal ID by matching onchainId
   async function resolveProposalId(urlProposalNumber, govId) {
     try {
       console.log("🔵 [RESOLVE] Resolving proposal ID - URL number:", urlProposalNumber, "govId:", govId);
@@ -277,8 +278,8 @@ export default apiInitializer((api) => {
           "Api-Key": TALLY_API_KEY,
         },
         body: JSON.stringify({
-          query,
-          variables,
+          query: query,
+          variables: variables,
         }),
       });
 
@@ -293,8 +294,8 @@ export default apiInitializer((api) => {
             "Api-Key": TALLY_API_KEY,
           },
           body: JSON.stringify({
-            query,
-            variables,
+            query: query,
+            variables: variables,
           }),
         });
       }
@@ -336,7 +337,6 @@ export default apiInitializer((api) => {
     }
     return null;
   }
-  */
 
   async function fetchProposalData(proposalId, originalUrl, govId, urlProposalNumber, forceRefresh = false) {
     const cacheKey = originalUrl || proposalId;
@@ -549,7 +549,7 @@ export default apiInitializer((api) => {
       status: proposal.status || "unknown",
       quorum: proposal.quorum || null,
       daysLeft: finalDaysLeft,
-      hoursLeft,
+      hoursLeft: hoursLeft,
       proposer: {
         id: proposal.proposer?.id || null,
         address: proposal.proposer?.address || null,
@@ -579,7 +579,7 @@ export default apiInitializer((api) => {
   }
 
   function formatVoteAmount(amount) {
-    if (!amount || amount === 0) {return "0";}
+    if (!amount || amount === 0) return "0";
     
     // Convert from wei (18 decimals) to tokens - Tally uses wei format
     // Always assume amounts are in wei if they're very large
@@ -701,6 +701,8 @@ export default apiInitializer((api) => {
   function renderStatusWidget(proposalData, originalUrl, widgetId, proposalInfo = null) {
     const statusWidgetId = `tally-status-widget-${widgetId}`;
     
+    // Removed scroll-based check - we show the first proposal found, regardless of scroll position
+    
     // Remove ALL existing widgets first to prevent duplicates
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     allWidgets.forEach(widget => {
@@ -723,9 +725,9 @@ export default apiInitializer((api) => {
     // Store proposal info for auto-refresh
     if (proposalInfo) {
       window[`tallyWidget_${widgetId}`] = {
-        proposalInfo,
-        originalUrl,
-        widgetId,
+        proposalInfo: proposalInfo,
+        originalUrl: originalUrl,
+        widgetId: widgetId,
         lastUpdate: Date.now()
       };
     }
@@ -757,7 +759,7 @@ export default apiInitializer((api) => {
     const queuedStatuses = ["queued", "queuing"];
     const pendingStatuses = ["pending"];
     const defeatStatuses = ["defeat", "defeated", "rejected"];
-    // Removed unused quorumStatuses - using inline checks instead
+    const quorumStatuses = ["quorum not reached", "quorumnotreached"];
     
     // Check for "pending execution" first (most specific) - handle various formats
     // API might return: "Pending execution", "pending execution", "pendingexecution", "pending_execution"
@@ -1002,8 +1004,41 @@ export default apiInitializer((api) => {
     }
   }
 
-  // Track which proposal is currently displayed in the widget (one per topic)
+  // Track which proposal is currently visible and update widget on scroll
   let currentVisibleProposal = null;
+  let scrollUpdateTimeout = null;
+
+  // Get current post number from Discourse timeline (e.g., "3/5" -> 3)
+  function getCurrentPostNumber() {
+    // Try to find Discourse timeline numbers (e.g., "3/5")
+    const timelineContainer = document.querySelector('.topic-timeline-container, .timeline-container, .topic-timeline');
+    if (timelineContainer) {
+      // Look for numbers like "3/5" in the timeline
+      const text = timelineContainer.textContent || '';
+      const match = text.match(/(\d+)\/(\d+)/);
+      if (match) {
+        const currentPost = parseInt(match[1], 10);
+        const totalPosts = parseInt(match[2], 10);
+        console.log("🔵 [SCROLL] Timeline shows:", currentPost, "/", totalPosts);
+        return { current: currentPost, total: totalPosts };
+      }
+    }
+    
+    // Fallback: try to find post numbers in other elements
+    const allElements = document.querySelectorAll('*');
+    for (const elem of allElements) {
+      const text = elem.textContent || '';
+      const match = text.match(/^(\d+)\/(\d+)$/);
+      if (match && elem.offsetWidth < 100 && elem.offsetHeight < 100) {
+        // Likely a small number indicator
+        const currentPost = parseInt(match[1], 10);
+        const totalPosts = parseInt(match[2], 10);
+        return { current: currentPost, total: totalPosts };
+      }
+    }
+    
+    return null;
+  }
 
   // Find the FIRST Tally proposal URL in the entire topic (any post)
   function findFirstTallyProposalInTopic() {
@@ -1030,7 +1065,7 @@ export default apiInitializer((api) => {
     return null;
   }
 
-  // Hide widget if no Tally proposal is found
+  // Hide widget if no Tally proposal is visible
   function hideWidgetIfNoProposal() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     const widgetCount = allWidgets.length;
@@ -1050,7 +1085,7 @@ export default apiInitializer((api) => {
       }
     });
     if (widgetCount > 0) {
-      console.log("🔵 [WIDGET] Removed", widgetCount, "widget(s) - no proposal found in topic");
+      console.log("🔵 [WIDGET] Removed", widgetCount, "widget(s) - no proposal in current post");
     }
     // Reset current visible proposal
     currentVisibleProposal = null;
@@ -1164,6 +1199,321 @@ export default apiInitializer((api) => {
     setTimeout(setupTopicWidget, 2000);
     
     console.log("✅ [TOPIC] Topic widget setup complete");
+  }
+
+  // OLD SCROLL TRACKING - REMOVED
+  function updateWidgetForVisibleProposal_OLD() {
+    // Clear any pending updates
+    if (scrollUpdateTimeout) {
+      clearTimeout(scrollUpdateTimeout);
+    }
+
+    // Debounce scroll updates
+    scrollUpdateTimeout = setTimeout(() => {
+      // First, try to get current post number from Discourse timeline
+      const postInfo = getCurrentPostNumber();
+      
+      if (postInfo) {
+        // Get the proposal URL for this post number
+        const proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
+        
+        // Always check if current post has a proposal - remove widgets if not
+        if (!proposalUrl) {
+          // No Tally proposal in this post - remove all widgets immediately
+          console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "has no Tally proposal - removing all widgets");
+          hideWidgetIfNoProposal();
+          return;
+        }
+        
+        // If we have a proposal URL and it's different from current, update widget
+        if (proposalUrl && proposalUrl !== currentVisibleProposal) {
+          currentVisibleProposal = proposalUrl;
+          
+          console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "- Proposal URL:", proposalUrl);
+          
+          // Extract proposal info
+          const proposalInfo = extractProposalInfo(proposalUrl);
+          if (proposalInfo) {
+            // Create widget ID
+            let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
+            if (!widgetId) {
+              const urlHash = proposalUrl.split('').reduce((acc, char) => {
+                return ((acc << 5) - acc) + char.charCodeAt(0);
+              }, 0);
+              widgetId = `proposal_${Math.abs(urlHash)}`;
+            }
+            
+            // Fetch and display proposal data
+            const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
+            fetchProposalData(proposalId, proposalUrl, proposalInfo.govId, proposalInfo.urlProposalNumber)
+              .then(data => {
+                if (data && data.title && data.title !== "Tally Proposal") {
+                  console.log("🔵 [SCROLL] Updating widget for post", postInfo.current, "-", data.title);
+                  renderStatusWidget(data, proposalUrl, widgetId, proposalInfo);
+                  showWidget(); // Make sure widget is visible
+                  setupAutoRefresh(widgetId, proposalInfo, proposalUrl);
+                } else {
+                  // Invalid data - hide widget
+                  console.log("🔵 [SCROLL] Invalid proposal data - hiding widget");
+                  hideWidgetIfNoProposal();
+                }
+              })
+              .catch(error => {
+                console.error("❌ [SCROLL] Error fetching proposal data:", error);
+                hideWidgetIfNoProposal();
+              });
+          } else {
+            // Could not extract proposal info - hide widget
+            console.log("🔵 [SCROLL] Could not extract proposal info - hiding widget");
+            hideWidgetIfNoProposal();
+          }
+          return; // Exit early if we found post number
+        } else if (proposalUrl === currentVisibleProposal) {
+          // Same proposal - widget should already be showing, just ensure it's visible
+          showWidget();
+          return;
+        }
+      } else {
+        // No post info from timeline - check fallback but hide widget if no proposal found
+        console.log("🔵 [SCROLL] No post info from timeline - checking fallback");
+      }
+      
+      // Fallback: Find the link that's most visible in viewport (original logic)
+      const allTallyLinks = document.querySelectorAll('a[href*="tally.xyz"], a[href*="tally.so"]');
+      
+      // If no Tally links found at all, hide widget
+      if (allTallyLinks.length === 0) {
+        console.log("🔵 [SCROLL] No Tally links found on page - hiding widget");
+        hideWidgetIfNoProposal();
+        currentVisibleProposal = null;
+        return;
+      }
+      
+      let mostVisibleLink = null;
+      let maxVisibility = 0;
+
+      allTallyLinks.forEach(link => {
+        const rect = link.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        
+        const linkTop = Math.max(0, rect.top);
+        const linkBottom = Math.min(viewportHeight, rect.bottom);
+        const visibleHeight = Math.max(0, linkBottom - linkTop);
+        
+        const postElement = link.closest('.topic-post, .post, [data-post-id]');
+        if (postElement) {
+          const postRect = postElement.getBoundingClientRect();
+          const postTop = Math.max(0, postRect.top);
+          const postBottom = Math.min(viewportHeight, postRect.bottom);
+          const postVisibleHeight = Math.max(0, postBottom - postTop);
+          
+          if (postVisibleHeight > maxVisibility && visibleHeight > 0) {
+            maxVisibility = postVisibleHeight;
+            mostVisibleLink = link;
+          }
+        }
+      });
+
+      // If we found a visible proposal link, update the widget
+      if (mostVisibleLink && mostVisibleLink.href !== currentVisibleProposal) {
+        const url = mostVisibleLink.href;
+        currentVisibleProposal = url;
+        
+        console.log("🔵 [SCROLL] New proposal visible (fallback):", url);
+        
+        const proposalInfo = extractProposalInfo(url);
+        if (proposalInfo) {
+          let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
+          if (!widgetId) {
+            const urlHash = url.split('').reduce((acc, char) => {
+              return ((acc << 5) - acc) + char.charCodeAt(0);
+            }, 0);
+            widgetId = `proposal_${Math.abs(urlHash)}`;
+          }
+          
+          const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
+          fetchProposalData(proposalId, url, proposalInfo.govId, proposalInfo.urlProposalNumber)
+            .then(data => {
+              if (data && data.title && data.title !== "Tally Proposal") {
+                console.log("🔵 [SCROLL] Updating widget for visible proposal:", data.title);
+                renderStatusWidget(data, url, widgetId, proposalInfo);
+                showWidget(); // Make sure widget is visible
+                setupAutoRefresh(widgetId, proposalInfo, url);
+              } else {
+                // Invalid data - hide widget
+                hideWidgetIfNoProposal();
+              }
+            })
+            .catch(error => {
+              console.error("❌ [SCROLL] Error fetching proposal data:", error);
+              hideWidgetIfNoProposal();
+            });
+        } else {
+          // Could not extract proposal info - hide widget
+          hideWidgetIfNoProposal();
+        }
+      } else if (!mostVisibleLink) {
+        // No visible proposal link found - remove all widgets
+        console.log("🔵 [SCROLL] No visible proposal link found - removing all widgets");
+        hideWidgetIfNoProposal();
+      }
+    }, 150); // Debounce scroll events
+  }
+
+  // Set up scroll listener to update widget when different proposal becomes visible
+  function setupScrollTracking() {
+    // Use Intersection Observer for better performance
+    const observerOptions = {
+      root: null,
+      rootMargin: '-20% 0px -20% 0px', // Trigger when post is in middle 60% of viewport
+      threshold: [0, 0.25, 0.5, 0.75, 1]
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      // Find the entry with highest intersection ratio
+      let mostVisible = null;
+      let maxRatio = 0;
+
+      entries.forEach(entry => {
+        if (entry.intersectionRatio > maxRatio) {
+          maxRatio = entry.intersectionRatio;
+          mostVisible = entry;
+        }
+      });
+
+      if (mostVisible && mostVisible.isIntersecting) {
+        // First, try to get current post number from Discourse timeline
+        const postInfo = getCurrentPostNumber();
+        
+        let proposalUrl = null;
+        
+        if (postInfo) {
+          // Use the post number from timeline to get the correct proposal
+          proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
+          console.log("🔵 [SCROLL] IntersectionObserver - Post", postInfo.current, "/", postInfo.total);
+          
+          // If no proposal in this post, remove all widgets
+          if (!proposalUrl) {
+            console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "has no Tally proposal - removing all widgets");
+            hideWidgetIfNoProposal();
+            return;
+          }
+        }
+        
+        // Fallback: Find Tally link in this post
+        if (!proposalUrl) {
+          const postElement = mostVisible.target;
+          const tallyLink = postElement.querySelector('a[href*="tally.xyz"], a[href*="tally.so"]');
+          if (tallyLink) {
+            proposalUrl = tallyLink.href;
+          } else {
+            // No Tally link in this post - hide widget
+            hideWidgetIfNoProposal();
+            currentVisibleProposal = null;
+            return;
+          }
+        }
+        
+        if (proposalUrl && proposalUrl !== currentVisibleProposal) {
+          currentVisibleProposal = proposalUrl;
+          
+          console.log("🔵 [SCROLL] New proposal visible via IntersectionObserver:", proposalUrl);
+          
+          const proposalInfo = extractProposalInfo(proposalUrl);
+          if (proposalInfo) {
+            let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
+            if (!widgetId) {
+              const urlHash = proposalUrl.split('').reduce((acc, char) => {
+                return ((acc << 5) - acc) + char.charCodeAt(0);
+              }, 0);
+              widgetId = `proposal_${Math.abs(urlHash)}`;
+            }
+            
+            const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
+            fetchProposalData(proposalId, proposalUrl, proposalInfo.govId, proposalInfo.urlProposalNumber)
+              .then(data => {
+                if (data && data.title && data.title !== "Tally Proposal") {
+                  console.log("🔵 [SCROLL] Updating widget for visible proposal:", data.title);
+                  renderStatusWidget(data, proposalUrl, widgetId, proposalInfo);
+                  showWidget(); // Make sure widget is visible
+                  setupAutoRefresh(widgetId, proposalInfo, proposalUrl);
+                } else {
+                  // Invalid data - hide widget
+                  hideWidgetIfNoProposal();
+                }
+              })
+              .catch(error => {
+                console.error("❌ [SCROLL] Error fetching proposal data:", error);
+                hideWidgetIfNoProposal();
+              });
+          } else {
+            // Could not extract proposal info - hide widget
+            hideWidgetIfNoProposal();
+          }
+        } else {
+          // No proposal URL found - remove all widgets
+          console.log("🔵 [SCROLL] No proposal URL found - removing all widgets");
+          hideWidgetIfNoProposal();
+        }
+      }
+    }, observerOptions);
+
+    // Observe all posts
+    const observePosts = () => {
+      const posts = document.querySelectorAll('.topic-post, .post, [data-post-id]');
+      posts.forEach(post => {
+        observer.observe(post);
+      });
+    };
+
+    // Initial observation
+    observePosts();
+
+    // Also observe new posts as they're added
+    const postObserver = new MutationObserver(() => {
+      observePosts();
+    });
+
+    const postStream = document.querySelector('.post-stream, .topic-body');
+    if (postStream) {
+      postObserver.observe(postStream, { childList: true, subtree: true });
+    }
+
+    // Fallback: also use scroll event for posts not yet observed
+    window.addEventListener('scroll', updateWidgetForVisibleProposal, { passive: true });
+    
+      // Initial check: remove all widgets by default, then show only if current post has proposal
+      const initialCheck = () => {
+        // First, remove all widgets by default
+        hideWidgetIfNoProposal();
+        
+        const postInfo = getCurrentPostNumber();
+        if (postInfo) {
+          const proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
+          if (!proposalUrl) {
+            console.log("🔵 [INIT] Initial post", postInfo.current, "/", postInfo.total, "has no Tally proposal - all widgets removed");
+            // Widgets already removed above
+          } else {
+            console.log("🔵 [INIT] Initial post", postInfo.current, "/", postInfo.total, "has proposal - showing widget");
+            // Trigger update to show widget for current post
+            updateWidgetForVisibleProposal();
+          }
+        } else {
+          // No post info - check if any visible post has proposal
+          console.log("🔵 [INIT] No post info from timeline, checking visible posts");
+          updateWidgetForVisibleProposal();
+        }
+      };
+      
+      // Run immediately
+      initialCheck();
+      
+      // Also run after delays to catch late-loading content
+      setTimeout(initialCheck, 500);
+      setTimeout(initialCheck, 1000);
+      setTimeout(initialCheck, 2000);
+    
+    console.log("✅ [SCROLL] Scroll tracking set up for widget updates");
   }
 
   // Auto-refresh widget when Tally data changes
@@ -1402,7 +1752,7 @@ export default apiInitializer((api) => {
         for (const match of matches) {
           const url = match[0];
           const proposalInfo = extractProposalInfo(url);
-          if (!proposalInfo) {continue;}
+          if (!proposalInfo) continue;
 
           // Create unique widget ID - use internalId if available, otherwise create hash from URL
           let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
@@ -1414,7 +1764,7 @@ export default apiInitializer((api) => {
             widgetId = `proposal_${Math.abs(urlHash)}`;
           }
           const existingWidget = composerWrapper.querySelector(`[data-composer-widget-id="${widgetId}"]`);
-          if (existingWidget) {continue;}
+          if (existingWidget) continue;
 
           const widgetContainer = document.createElement("div");
           widgetContainer.className = "arbitrium-proposal-widget-container composer-widget";
@@ -1520,7 +1870,7 @@ export default apiInitializer((api) => {
         // Check if it's inside a composer
         const composerContainer = ta.closest('.d-editor-container, .composer-popup, .composer-container, .composer-fields, .d-editor, .composer, #reply-control, .topic-composer, .composer-wrapper, .reply-to, .topic-composer-container, [class*="composer"]');
         
-        if (!composerContainer) {return false;}
+        if (!composerContainer) return false;
         
         // Check if composer is open (not closed/hidden)
         const isClosed = composerContainer.classList.contains('closed') || 
@@ -1528,7 +1878,7 @@ export default apiInitializer((api) => {
                         composerContainer.style.display === 'none' ||
                         window.getComputedStyle(composerContainer).display === 'none';
         
-        if (isClosed) {return false;}
+        if (isClosed) return false;
         
         // Check if textarea is visible
         const isVisible = ta.offsetParent !== null || 
@@ -1610,7 +1960,7 @@ export default apiInitializer((api) => {
             for (const match of matches) {
               const url = match[0];
               const proposalInfo = extractProposalInfo(url);
-              if (!proposalInfo) {continue;}
+              if (!proposalInfo) continue;
 
               let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
               if (!widgetId) {
@@ -1621,7 +1971,7 @@ export default apiInitializer((api) => {
               }
               
               const existingWidget = composerWrapper.querySelector(`[data-composer-widget-id="${widgetId}"]`);
-              if (existingWidget) {continue;}
+              if (existingWidget) continue;
 
               const widgetContainer = document.createElement("div");
               widgetContainer.className = "arbitrium-proposal-widget-container composer-widget";
@@ -1748,7 +2098,7 @@ export default apiInitializer((api) => {
         const isVisible = textarea.offsetParent !== null || 
                          window.getComputedStyle(textarea).display !== 'none';
         
-        if (!isVisible) {return;}
+        if (!isVisible) return;
         
         const text = textarea.value || textarea.textContent || textarea.innerText || '';
         const matches = Array.from(text.matchAll(TALLY_URL_REGEX));
@@ -1758,7 +2108,7 @@ export default apiInitializer((api) => {
           const composer = textarea.closest('.d-editor-container, .composer-popup, .composer-container, #reply-control, [class*="composer"]') || textarea.parentElement;
           if (composer) {
             const existingWidget = composer.querySelector('[data-composer-widget-id]');
-            if (existingWidget) {return;} // Already has widget
+            if (existingWidget) return; // Already has widget
             
             console.log("✅ [AGGRESSIVE CHECK] Found Tally URL in visible textarea, creating widget");
             // Trigger the main check which will create the widget
@@ -1769,7 +2119,6 @@ export default apiInitializer((api) => {
     };
     
     // Check periodically and on DOM changes
-    // eslint-disable-next-line no-unused-vars
     const checkInterval = setInterval(() => {
       checkAllComposers();
       checkAllVisibleTextareas(); // Also do aggressive check

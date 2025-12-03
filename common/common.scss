@@ -23,8 +23,8 @@
   z-index: 500 !important; // Lower than scroll numbers
   max-height: calc(100vh - 100px) !important;
   overflow-y: auto !important;
-  // Position will be set dynamically by JavaScript relative to timeline
 
+  // Position will be set dynamically by JavaScript relative to timeline
   .tally-status-widget {
     background: #fff;
     border: 1px solid #e5e7eb;
@@ -321,7 +321,7 @@
 // Make composer container use flexbox for horizontal layout: Reply Box | Numbers | Widget
 .composer-popup,
 .composer-container {
-  @media (min-width: 769px) {
+  @media (width >= 769px) {
     display: flex !important;
     flex-wrap: nowrap !important;
     align-items: flex-start !important;
@@ -347,7 +347,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 0;
-  background: #ffffff;
+  background: #fff;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
