@@ -945,60 +945,102 @@ export default apiInitializer((api) => {
       </div>
     `;
 
-    // Position widget next to timeline scroll indicator
-    // Find main-outlet-wrapper to constrain widget within main content area
-    const mainOutlet = document.getElementById('main-outlet-wrapper');
-    const mainOutletRect = mainOutlet ? mainOutlet.getBoundingClientRect() : null;
+    // Check if mobile (width <= 1024px)
+    const isMobile = window.innerWidth <= 1024;
     
-    // Find timeline container and position widget relative to it
-    const timelineContainer = document.querySelector('.topic-timeline-container, .timeline-container, .topic-timeline');
-    if (timelineContainer) {
-      // Find the actual numbers/text content within timeline to get precise right edge
-      const timelineNumbers = timelineContainer.querySelector('.timeline-numbers, .topic-timeline-numbers, [class*="number"]');
-      const timelineRect = timelineContainer.getBoundingClientRect();
-      let rightEdge = timelineRect.right;
-      let topPosition = timelineRect.top;
+    if (isMobile) {
+      // Mobile: Insert widget at the top of the first post with Tally proposal
+      const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id]'));
+      let targetPost = null;
       
-      // If we find the numbers element, use its right edge and position below it
-      if (timelineNumbers) {
-        const numbersRect = timelineNumbers.getBoundingClientRect();
-        rightEdge = numbersRect.right;
-        // Position below the scroll numbers
-        topPosition = numbersRect.bottom + 10; // 10px gap below the numbers
+      // Find the first post containing this Tally URL
+      for (const post of allPosts) {
+        const postText = post.textContent || post.innerHTML || '';
+        if (postText.includes(originalUrl)) {
+          targetPost = post;
+          break;
+        }
+      }
+      
+      if (targetPost) {
+        // Find the post content area (cooked content)
+        const postContent = targetPost.querySelector('.cooked, .post-content, .topic-body, [class*="content"]');
+        if (postContent) {
+          // Insert widget at the top of post content
+          postContent.insertBefore(statusWidget, postContent.firstChild);
+          console.log("✅ [MOBILE] Status widget inserted at top of post");
+        } else {
+          // Fallback: insert at top of post
+          targetPost.insertBefore(statusWidget, targetPost.firstChild);
+          console.log("✅ [MOBILE] Status widget inserted at top of post (fallback)");
+        }
       } else {
-        // If no numbers found, position below the timeline container
-        topPosition = timelineRect.bottom + 10;
+        // Fallback: append to first post or body
+        const firstPost = allPosts[0];
+        if (firstPost) {
+          firstPost.insertBefore(statusWidget, firstPost.firstChild);
+          console.log("✅ [MOBILE] Status widget inserted at top of first post (fallback)");
+        } else {
+          document.body.appendChild(statusWidget);
+          console.log("✅ [MOBILE] Status widget appended to body (fallback)");
+        }
       }
-      
-      // Constrain widget to stay within main-outlet-wrapper bounds if it exists
-      let leftPosition = rightEdge;
-      if (mainOutletRect) {
-        // Ensure widget doesn't go beyond the right edge of main content
-        const maxRight = mainOutletRect.right - 320 - 50; // widget width + margin
-        leftPosition = Math.min(rightEdge, maxRight);
-      }
-      
-      // Position next to timeline, below the scroll numbers
-      statusWidget.style.position = 'fixed';
-      statusWidget.style.left = `${leftPosition}px`;
-      statusWidget.style.top = `${topPosition}px`;
-      statusWidget.style.transform = 'none'; // No vertical centering, align to top
-      
-      // Append to body but constrain visually within main content
-      document.body.appendChild(statusWidget);
-      console.log("✅ [POST] Status widget positioned below timeline scroll indicator");
     } else {
-      // Fallback: position on right side, constrained to main content
-      let rightPosition = 50;
-      if (mainOutletRect) {
-        // Position relative to main content right edge
-        rightPosition = window.innerWidth - mainOutletRect.right + 50;
+      // Desktop: Position widget next to timeline scroll indicator
+      // Find main-outlet-wrapper to constrain widget within main content area
+      const mainOutlet = document.getElementById('main-outlet-wrapper');
+      const mainOutletRect = mainOutlet ? mainOutlet.getBoundingClientRect() : null;
+      
+      // Find timeline container and position widget relative to it
+      const timelineContainer = document.querySelector('.topic-timeline-container, .timeline-container, .topic-timeline');
+      if (timelineContainer) {
+        // Find the actual numbers/text content within timeline to get precise right edge
+        const timelineNumbers = timelineContainer.querySelector('.timeline-numbers, .topic-timeline-numbers, [class*="number"]');
+        const timelineRect = timelineContainer.getBoundingClientRect();
+        let rightEdge = timelineRect.right;
+        let topPosition = timelineRect.top;
+        
+        // If we find the numbers element, use its right edge and position below it
+        if (timelineNumbers) {
+          const numbersRect = timelineNumbers.getBoundingClientRect();
+          rightEdge = numbersRect.right;
+          // Position below the scroll numbers
+          topPosition = numbersRect.bottom + 10; // 10px gap below the numbers
+        } else {
+          // If no numbers found, position below the timeline container
+          topPosition = timelineRect.bottom + 10;
+        }
+        
+        // Constrain widget to stay within main-outlet-wrapper bounds if it exists
+        let leftPosition = rightEdge;
+        if (mainOutletRect) {
+          // Ensure widget doesn't go beyond the right edge of main content
+          const maxRight = mainOutletRect.right - 320 - 50; // widget width + margin
+          leftPosition = Math.min(rightEdge, maxRight);
+        }
+        
+        // Position next to timeline, below the scroll numbers
+        statusWidget.style.position = 'fixed';
+        statusWidget.style.left = `${leftPosition}px`;
+        statusWidget.style.top = `${topPosition}px`;
+        statusWidget.style.transform = 'none'; // No vertical centering, align to top
+        
+        // Append to body but constrain visually within main content
+        document.body.appendChild(statusWidget);
+        console.log("✅ [DESKTOP] Status widget positioned below timeline scroll indicator");
+      } else {
+        // Fallback: position on right side, constrained to main content
+        let rightPosition = 50;
+        if (mainOutletRect) {
+          // Position relative to main content right edge
+          rightPosition = window.innerWidth - mainOutletRect.right + 50;
+        }
+        statusWidget.style.position = 'fixed';
+        statusWidget.style.right = `${rightPosition}px`;
+        statusWidget.style.top = '50px';
+        document.body.appendChild(statusWidget);
+        console.log("✅ [DESKTOP] Status widget rendered on right side (timeline not found)");
       }
-      statusWidget.style.position = 'fixed';
-      statusWidget.style.right = `${rightPosition}px`;
-      statusWidget.style.top = '50px';
-      document.body.appendChild(statusWidget);
-      console.log("✅ [POST] Status widget rendered on right side (timeline not found)");
     }
   }
 

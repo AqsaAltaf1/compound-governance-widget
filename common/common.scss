@@ -208,9 +208,19 @@
     }
   }
 
-  // Mobile: Hide on small screens
+  // Mobile: Show on top of post instead of side
   @media (width <= 1024px) {
-    display: none !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 0 20px 0 !important;
+    z-index: auto !important;
+    max-height: none !important;
+    overflow-y: visible !important;
   }
 }
 
