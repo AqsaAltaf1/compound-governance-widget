@@ -1076,13 +1076,17 @@ export default apiInitializer((api) => {
   // Re-position existing widgets when viewport changes (desktop <-> mobile)
   function repositionAllWidgets() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-    if (allWidgets.length === 0) return;
+    if (allWidgets.length === 0) {
+      return;
+    }
     
     const isMobile = window.innerWidth <= 1024;
     
     allWidgets.forEach(widget => {
       const originalUrl = widget.getAttribute('data-tally-url');
-      if (!originalUrl) return;
+      if (!originalUrl) {
+        return;
+      }
       
       // Remove widget from current location
       const parent = widget.parentNode;
