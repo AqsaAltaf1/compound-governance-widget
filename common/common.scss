@@ -70,7 +70,9 @@
         }
 
         &.defeated,
-        &.quorum-not-reached {
+        &.quorum-not-reached,
+        &.cancelled,
+        &.failed {
           background: #fee2e2;
           color: #dc2626; // Red text like Tally website
           border: 1px solid #fca5a5;
@@ -440,6 +442,13 @@
         background: #dbeafe;
         color: #1e40af;
         border: 1px solid #93c5fd;
+      }
+
+      &.cancelled,
+      &.failed {
+        background: #fee2e2;
+        color: #dc2626; // Red text like Tally website
+        border: 1px solid #fca5a5;
       }
 
       &.inactive {

@@ -756,6 +756,8 @@ export default apiInitializer((api) => {
     const queuedStatuses = ["queued", "queuing"];
     const pendingStatuses = ["pending"];
     const defeatStatuses = ["defeat", "defeated", "rejected"];
+    const cancelledStatuses = ["cancelled", "canceled"];
+    const failedStatuses = ["failed"];
     // eslint-disable-next-line no-unused-vars
     const quorumStatuses = ["quorum not reached", "quorumnotreached"];
     
@@ -794,6 +796,21 @@ export default apiInitializer((api) => {
     });
     
     console.log("🔵 [WIDGET] Defeat check - isDefeat:", isDefeat);
+    
+    // Check for cancelled statuses
+    const isCancelled = cancelledStatuses.some(s => {
+      const cancelledWord = s.toLowerCase();
+      return status === cancelledWord || status.includes(cancelledWord);
+    });
+    
+    // Check for failed statuses
+    const isFailed = failedStatuses.some(s => {
+      const failedWord = s.toLowerCase();
+      return status === failedWord || status.includes(failedWord);
+    });
+    
+    console.log("🔵 [WIDGET] Cancelled check - isCancelled:", isCancelled);
+    console.log("🔵 [WIDGET] Failed check - isFailed:", isFailed);
     
     // Get voting data - use percent directly from API
     const voteStats = proposalData.voteStats || {};
@@ -875,18 +892,19 @@ export default apiInitializer((api) => {
     console.log("🔵 [WIDGET] Percentages from API:", { percentFor, percentAgainst, percentAbstain });
     
     // Recalculate status flags with final quorum/defeat values
-    const isActive = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && activeStatuses.includes(status);
-    const isExecuted = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && executedStatuses.includes(status);
-    const isQueued = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && queuedStatuses.includes(status);
-    const isPending = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && !isQueued && (pendingStatuses.includes(status) || (status.includes("pending") && !isPendingExecution));
+    // Exclude cancelled and failed from other status checks
+    const isActive = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && !isCancelled && !isFailed && activeStatuses.includes(status);
+    const isExecuted = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && !isCancelled && !isFailed && executedStatuses.includes(status);
+    const isQueued = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && !isCancelled && !isFailed && queuedStatuses.includes(status);
+    const isPending = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && !isCancelled && !isFailed && !isQueued && (pendingStatuses.includes(status) || (status.includes("pending") && !isPendingExecution));
     
-    console.log("🔵 [WIDGET] Status flags:", { isPendingExecution, isActive, isExecuted, isQueued, isPending, isDefeat: finalIsDefeat, isQuorumNotReached: finalIsQuorumNotReached });
+    console.log("🔵 [WIDGET] Status flags:", { isPendingExecution, isActive, isExecuted, isQueued, isPending, isDefeat: finalIsDefeat, isQuorumNotReached: finalIsQuorumNotReached, isCancelled, isFailed });
     console.log("🔵 [WIDGET] Display status:", displayStatus, "(Raw from API:", exactStatus, ")");
     
     statusWidget.innerHTML = `
       <div class="tally-status-widget">
         <div class="status-badges-row">
-          <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : 'inactive'}">
+          <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : isCancelled ? 'cancelled' : isFailed ? 'failed' : 'inactive'}">
             ${displayStatus}
           </div>
           ${(() => {
