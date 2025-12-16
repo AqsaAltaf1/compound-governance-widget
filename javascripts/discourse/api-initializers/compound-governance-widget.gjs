@@ -967,6 +967,17 @@ export default apiInitializer((api) => {
     const isMobile = window.innerWidth <= 1024;
     
     if (isMobile) {
+      // Mobile: Clear all inline positioning styles so CSS can take over
+      statusWidget.style.position = '';
+      statusWidget.style.left = '';
+      statusWidget.style.right = '';
+      statusWidget.style.top = '';
+      statusWidget.style.bottom = '';
+      statusWidget.style.transform = '';
+      statusWidget.style.width = '';
+      statusWidget.style.maxWidth = '';
+      statusWidget.style.zIndex = '';
+      
       // Mobile: Insert widget at the top of the first post with Tally proposal
       const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id]'));
       let targetPost = null;
@@ -1060,6 +1071,113 @@ export default apiInitializer((api) => {
         console.log("✅ [DESKTOP] Status widget rendered on right side (timeline not found)");
       }
     }
+  }
+
+  // Re-position existing widgets when viewport changes (desktop <-> mobile)
+  function repositionAllWidgets() {
+    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+    if (allWidgets.length === 0) return;
+    
+    const isMobile = window.innerWidth <= 1024;
+    
+    allWidgets.forEach(widget => {
+      const originalUrl = widget.getAttribute('data-tally-url');
+      if (!originalUrl) return;
+      
+      // Remove widget from current location
+      const parent = widget.parentNode;
+      if (parent) {
+        parent.removeChild(widget);
+      }
+      
+      if (isMobile) {
+        // Mobile: Clear all inline positioning styles
+        widget.style.position = '';
+        widget.style.left = '';
+        widget.style.right = '';
+        widget.style.top = '';
+        widget.style.bottom = '';
+        widget.style.transform = '';
+        widget.style.width = '';
+        widget.style.maxWidth = '';
+        widget.style.zIndex = '';
+        
+        // Find the first post containing this Tally URL
+        const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id]'));
+        let targetPost = null;
+        
+        for (const post of allPosts) {
+          const postText = post.textContent || post.innerHTML || '';
+          if (postText.includes(originalUrl)) {
+            targetPost = post;
+            break;
+          }
+        }
+        
+        if (targetPost) {
+          const postContent = targetPost.querySelector('.cooked, .post-content, .topic-body, [class*="content"]');
+          if (postContent) {
+            postContent.insertBefore(widget, postContent.firstChild);
+            console.log("✅ [RESIZE] Widget repositioned to top of post (mobile)");
+          } else {
+            targetPost.insertBefore(widget, targetPost.firstChild);
+            console.log("✅ [RESIZE] Widget repositioned to top of post (mobile, fallback)");
+          }
+        } else {
+          const firstPost = allPosts[0];
+          if (firstPost) {
+            firstPost.insertBefore(widget, firstPost.firstChild);
+            console.log("✅ [RESIZE] Widget repositioned to first post (mobile, fallback)");
+          } else {
+            document.body.appendChild(widget);
+            console.log("✅ [RESIZE] Widget appended to body (mobile, fallback)");
+          }
+        }
+      } else {
+        // Desktop: Position widget next to timeline
+        const mainOutlet = document.getElementById('main-outlet-wrapper');
+        const mainOutletRect = mainOutlet ? mainOutlet.getBoundingClientRect() : null;
+        
+        const timelineContainer = document.querySelector('.topic-timeline-container, .timeline-container, .topic-timeline');
+        if (timelineContainer) {
+          const timelineNumbers = timelineContainer.querySelector('.timeline-numbers, .topic-timeline-numbers, [class*="number"]');
+          const timelineRect = timelineContainer.getBoundingClientRect();
+          let rightEdge = timelineRect.right;
+          let topPosition = timelineRect.top;
+          
+          if (timelineNumbers) {
+            const numbersRect = timelineNumbers.getBoundingClientRect();
+            rightEdge = numbersRect.right;
+            topPosition = numbersRect.bottom + 10;
+          } else {
+            topPosition = timelineRect.bottom + 10;
+          }
+          
+          let leftPosition = rightEdge;
+          if (mainOutletRect) {
+            const maxRight = mainOutletRect.right - 320 - 50;
+            leftPosition = Math.min(rightEdge, maxRight);
+          }
+          
+          widget.style.position = 'fixed';
+          widget.style.left = `${leftPosition}px`;
+          widget.style.top = `${topPosition}px`;
+          widget.style.transform = 'none';
+          document.body.appendChild(widget);
+          console.log("✅ [RESIZE] Widget repositioned next to timeline (desktop)");
+        } else {
+          let rightPosition = 50;
+          if (mainOutletRect) {
+            rightPosition = window.innerWidth - mainOutletRect.right + 50;
+          }
+          widget.style.position = 'fixed';
+          widget.style.right = `${rightPosition}px`;
+          widget.style.top = '50px';
+          document.body.appendChild(widget);
+          console.log("✅ [RESIZE] Widget repositioned on right side (desktop, fallback)");
+        }
+      }
+    });
   }
 
   // Track which proposal is currently visible and update widget on scroll
@@ -2468,6 +2586,16 @@ export default apiInitializer((api) => {
       setupTopicWatcher();
       setupGlobalComposerDetection();
     }, 500);
+  });
+
+  // Handle viewport resize (desktop <-> mobile switching)
+  let resizeTimeout;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      console.log("🔄 [RESIZE] Viewport changed, repositioning widgets...");
+      repositionAllWidgets();
+    }, 250); // Debounce resize events
   });
 });
 
