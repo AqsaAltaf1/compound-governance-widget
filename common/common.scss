@@ -25,12 +25,11 @@
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
-
   // Position like tally widget - fixed on right side
   right: 10px !important;
   top: 180px !important;
   left: auto !important;
-
+  
   // Mobile: Show widgets inline in topic
   @media (width <= 1024px) {
     position: relative !important;
@@ -57,7 +56,7 @@
   width: 100% !important;
   max-width: 100% !important;
   margin-bottom: 0 !important;
-
+  
   // When NOT in wrapper (legacy/fallback), use fixed positioning
   &:not(.governance-widgets-wrapper > *) {
     position: fixed !important;
@@ -70,7 +69,7 @@
     z-index: 500 !important; // Lower than scroll numbers
     max-height: calc(100vh - 100px) !important;
     overflow-y: auto !important;
-
+    
     // Mobile: Override fixed positioning to show inline
     @media (width <= 1024px) {
       position: relative !important;
@@ -100,14 +99,46 @@
     box-sizing: border-box !important;
     font-family:
       -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-
+    position: relative !important;
+    
+    .widget-close-btn {
+      position: absolute !important;
+      top: 8px !important;
+      right: 8px !important;
+      background: transparent !important;
+      border: none !important;
+      font-size: 20px !important;
+      line-height: 1 !important;
+      cursor: pointer !important;
+      color: #6b7280 !important;
+      width: 24px !important;
+      height: 24px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      transition: all 0.2s !important;
+      z-index: 10 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      
+      &:hover {
+        background: #f3f4f6 !important;
+        color: #111827 !important;
+      }
+      
+      &:active {
+        background: #e5e7eb !important;
+      }
+    }
+    
     .status-badges-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 12px;
       gap: 6px;
-
+      
       .status-badge {
         display: inline-block;
         padding: 4px 10px;
@@ -117,19 +148,19 @@
         text-transform: uppercase;
         letter-spacing: 0.3px;
         white-space: nowrap;
-
+        
         &.active {
           background: #dcfce7;
           color: #166534;
           border: 1px solid #86efac;
         }
-
+        
         &.executed {
           background: #dbeafe;
           color: #1e40af;
           border: 1px solid #93c5fd;
         }
-
+        
         &.inactive {
           background: #f3f4f6;
           color: #6b7280;
@@ -137,37 +168,110 @@
         }
 
         &.defeated,
-        &.quorum-not-reached {
+        &.quorum-not-reached,
+        &.failed {
           background: #fee2e2;
           color: #dc2626; // Red text like Tally website
           border: 1px solid #fca5a5;
         }
-
+        
+        &.cancelled {
+          background: #fee2e2;
+          color: #dc2626; // Red for cancelled
+          border: 1px solid #fca5a5;
+        }
+        
+        &.expired {
+          background: #f3f4f6;
+          color: #6b7280; // Gray for expired
+          border: 1px solid #d1d5db;
+        }
+        
         &.queued {
           background: #fef3c7;
           color: #92400e;
           border: 1px solid #fde68a;
         }
-
+        
         &.pending {
           background: #fef3c7;
           color: #92400e;
           border: 1px solid #fde68a;
         }
       }
-
+      
       .days-left-badge {
         padding: 4px 10px;
         border-radius: 4px;
         font-size: 0.7em;
         font-weight: 600;
-        background: #f3f4f6;
         color: #6b7280;
-        border: 1px solid #d1d5db;
         white-space: nowrap;
       }
     }
+    
+    // Status badge styling for governance-stage (when status is on same row as stage name)
+    .governance-stage .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.7em;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      
+      &.active {
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+      
+      &.executed {
+        background: #dbeafe;
+        color: #1e40af;
+        border: 1px solid #93c5fd;
+      }
+      
+      &.inactive {
+        background: #f3f4f6;
+        color: #6b7280;
+        border: 1px solid #d1d5db;
+      }
 
+      &.defeated,
+      &.quorum-not-reached,
+      &.failed {
+        background: #fee2e2;
+        color: #dc2626; // Red text like Tally website
+        border: 1px solid #fca5a5;
+      }
+      
+      &.cancelled {
+        background: #fee2e2;
+        color: #dc2626; // Red for cancelled
+        border: 1px solid #fca5a5;
+      }
+      
+      &.expired {
+        background: #f3f4f6;
+        color: #6b7280; // Gray for expired
+        border: 1px solid #d1d5db;
+      }
+      
+      &.queued {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+      }
+      
+      &.pending {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+      }
+    }
+    
     .voting-results-inline {
       display: flex;
       flex-wrap: nowrap;
@@ -175,34 +279,34 @@
       margin-bottom: 10px;
       font-size: 0.9em;
       line-height: 1.5;
-
+      
       .vote-result-inline {
         font-weight: 600;
         white-space: nowrap;
         flex-shrink: 0;
-
+        
         &.vote-for {
           color: #10b981; // Green for "For"
         }
-
+        
         &.vote-against {
           color: #ef4444; // Red for "Against"
         }
-
+        
         &.vote-abstain {
           color: #6b7280; // Gray for "Abstain"
         }
-
+        
         .vote-number {
           color: #000; // Black for all numbers
           font-weight: 600;
         }
       }
     }
-
+    
     .progress-bar-container {
       margin-bottom: 1px;
-
+      
       .progress-bar {
         width: 100%;
         height: 6px; // Thinner progress bar
@@ -212,22 +316,22 @@
         background: #f3f4f6; // Light grey background so empty bar is visible
         border: 1px solid #e5e7eb; // Light grey border
         position: relative;
-
+        
         .progress-segment {
           height: 100%;
           transition: width 0.3s ease;
           flex-shrink: 0;
-
+          
           &.progress-for {
             background: #10b981;
             order: 1;
           }
-
+          
           &.progress-against {
             background: #ef4444;
             order: 2;
           }
-
+          
           &.progress-abstain {
             background: #6b7280;
             order: 3;
@@ -235,7 +339,7 @@
         }
       }
     }
-
+    
     .vote-button {
       display: block;
       width: 100%;
@@ -251,7 +355,7 @@
       transition: background-color 0.2s;
       margin-top: 10px;
       box-sizing: border-box;
-
+      
       &:hover {
         background-color: var(
           --d-button-primary-bg-hover-color,
@@ -260,20 +364,20 @@
         color: var(--d-button-primary-text-color, white) !important;
         text-decoration: none;
       }
-
+      
       &:active {
         background-color: var(
           --d-button-primary-bg-active-color,
           #1e40af
         ) !important;
       }
-
+      
       &:focus {
         outline: 2px solid var(--d-button-primary-bg-color, #2563eb);
         outline-offset: 2px;
       }
     }
-
+    
     // Prevent hover color change for buttons in governance stages
     .governance-stage .vote-button {
       &:hover {
@@ -282,7 +386,7 @@
       }
     }
   }
-
+  
   // Mobile: Show on top of post instead of side
   @media (width <= 1024px) {
     position: relative !important;
@@ -300,7 +404,7 @@
     visibility: visible !important;
     opacity: 1 !important;
   }
-
+  
   // When inside wrapper, remove fixed positioning
   .governance-widgets-wrapper & {
     position: relative !important;
@@ -331,7 +435,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #f9fafb;
-
+  
   .tally-preview-content {
     .tally-preview-link {
       display: block;
@@ -339,17 +443,17 @@
       text-decoration: none;
       margin-bottom: 8px;
       font-size: 1.05em;
-
+      
       &:hover {
         color: #2563eb;
         text-decoration: underline;
       }
-
+      
       strong {
         font-weight: 600;
       }
     }
-
+    
     .tally-preview-description {
       color: #4b5563;
       font-size: 0.9em;
@@ -360,7 +464,7 @@
       max-height: 400px;
       overflow-y: auto;
     }
-
+    
     .tally-preview-loading {
       color: #6b7280;
       font-size: 0.9em;
@@ -378,7 +482,7 @@
   margin: 0 0 20px 20px !important;
   clear: right !important;
   display: block !important;
-
+  
   // Ensure it floats right in all post contexts
   .topic-body &,
   .post-stream &,
@@ -396,7 +500,7 @@
     clear: right !important;
     display: block !important;
   }
-
+  
   // In composer: Position on the RIGHT side (Reply Box | Numbers | Widget)
   &.composer-widget,
   &[data-composer-widget-id] {
@@ -409,7 +513,7 @@
       order: 3 !important; // Widget comes last
     }
   }
-
+  
   // Mobile: Full width
   @media (width <= 768px) {
     width: 100% !important;
@@ -428,13 +532,13 @@
     flex-wrap: nowrap !important;
     align-items: flex-start !important;
     gap: 20px !important;
-
+    
     .d-editor-container {
       flex: 1 1 auto !important;
       order: 1 !important; // Reply box first
       min-width: 0 !important;
     }
-
+    
     // Numbers/reply indicators come in the middle (order: 2) naturally
     .arbitrium-proposal-widget-container.composer-widget {
       flex: 0 0 320px !important;
@@ -454,30 +558,30 @@
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
-
+  
   // Main content
   .proposal-content {
     padding: 20px;
     border-bottom: 1px solid #e5e7eb;
-
+    
     .proposal-title {
       margin: 0 0 8px 0;
       font-size: 1em;
       font-weight: 600;
       line-height: 1.4;
-
+      
       a {
         color: #111827;
         text-decoration: none;
         display: block;
-
+        
         &:hover {
           color: #2563eb;
           text-decoration: underline;
         }
       }
     }
-
+    
     .proposal-description {
       margin: 12px 0 0 0;
       color: #6b7280;
@@ -487,24 +591,24 @@
       max-height: 200px;
       overflow-y: auto;
     }
-
+    
     .proposal-author {
       margin: 12px 0 0 0;
       font-size: 0.8em;
       color: #9ca3af;
-
+      
       .author-label {
         font-weight: 500;
         margin-right: 6px;
       }
-
+      
       .author-name {
         color: #6b7280;
         font-weight: 600;
       }
     }
   }
-
+  
   // Sidebar
   .proposal-sidebar {
     padding: 16px;
@@ -512,7 +616,7 @@
     flex-direction: column;
     gap: 16px;
     background: #f9fafb;
-
+    
     .status-badge {
       padding: 8px 12px;
       border-radius: 6px;
@@ -521,66 +625,66 @@
       text-align: center;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-
+      
       &.active {
         background: #dcfce7;
         color: #166534;
         border: 1px solid #86efac;
       }
-
+      
       &.executed {
         background: #dbeafe;
         color: #1e40af;
         border: 1px solid #93c5fd;
       }
-
+      
       &.inactive {
         background: #f3f4f6;
         color: #6b7280;
         border: 1px solid #d1d5db;
       }
     }
-
+    
     .voting-section {
       width: 100%;
-
+      
       .voting-bar {
         display: flex;
         flex-direction: column;
         gap: 8px;
         margin-bottom: 12px;
-
+        
         .vote-option {
           display: flex;
           flex-direction: column;
           gap: 4px;
-
+          
           .vote-label-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
             font-size: 0.85em;
             color: #6b7280;
-
+            
             .vote-label {
               font-weight: 500;
               text-transform: uppercase;
               font-size: 0.8em;
             }
-
+            
             .vote-amount {
               font-weight: 600;
               color: #1f2937;
             }
           }
-
+          
           .vote-bar {
             width: 100%;
             height: 24px;
             border-radius: 4px;
             overflow: hidden;
             position: relative;
-
+            
             .vote-fill {
               height: 100%;
               border-radius: 4px;
@@ -591,15 +695,15 @@
               font-size: 0.75em;
               font-weight: 600;
               color: white;
-
+              
               &.vote-for {
                 background: linear-gradient(90deg, #10b981 0%, #059669 100%);
               }
-
+              
               &.vote-against {
                 background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
               }
-
+              
               &.vote-abstain {
                 background: linear-gradient(90deg, #6b7280 0%, #4b5563 100%);
               }
@@ -608,7 +712,7 @@
         }
       }
     }
-
+    
     .vote-button {
       width: 100%;
       padding: 12px 24px;
@@ -623,7 +727,7 @@
       display: block;
       text-align: center;
       transition: background 0.2s;
-
+      
       &:hover {
         background: #1d4ed8;
         text-decoration: none;
@@ -631,7 +735,7 @@
       }
     }
   }
-
+  
   // Loading state
   &.loading {
     display: flex;
@@ -640,7 +744,7 @@
     padding: 60px 40px;
     flex-direction: column;
     gap: 16px;
-
+    
     .loading-spinner {
       width: 32px;
       height: 32px;
@@ -650,7 +754,7 @@
       animation: spin 0.8s linear infinite;
     }
   }
-
+  
   // Error state
   &.error {
     padding: 24px;

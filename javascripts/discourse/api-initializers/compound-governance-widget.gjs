@@ -11,19 +11,23 @@ console.log("✅ Aave Governance Widget: JavaScript file loaded!");
  *    - Stages: Temp Check, ARFC
  *    - Voting: Happens on Snapshot platform
  * 
- * ⚠️ AAVE GOVERNANCE (AIP - Aave Improvement Proposals)
- *    - URL recognition: ✅ Supported
- *      - app.aave.com/governance/{proposal-id}
+ * ✅ AAVE GOVERNANCE (AIP - Aave Improvement Proposals)
+ *    - URL recognition: ✅ Supported (robust extraction)
+ *      - app.aave.com/governance/v3/proposal/?proposalId={id}
+ *      - app.aave.com/governance/{id}
  *      - governance.aave.com/t/{slug}/{id}
  *      - vote.onaave.com/proposal/?proposalId={id}
- *    - Data fetching: ⚠️ Limited (CORS restrictions)
- *      - Currently attempts to fetch from TheGraph API
- *      - CORS may block browser requests (especially from localhost)
- *      - AIP voting happens on Aave's platform (app.aave.com/governance)
- *      - IMPORTANT: AIP proposals are NOT on Snapshot, they're on Aave's own voting platform
- * 
- * For production: Consider using a backend proxy to fetch AIP data from TheGraph
- * or implement direct API calls to Aave's governance platform if available.
+ *    - Data fetching: ✅ Robust architecture
+ *      - Flow: URL → extract proposalId → fetch on-chain (source of truth) → enrich with subgraph → render
+ *      - Primary: On-chain data via ethers.js (no CORS, no API dependency, future-proof)
+ *      - Enhancement: Subgraph for metadata (titles, descriptions)
+ *      - Fallback: JSON Data API if on-chain unavailable
+ *      - IMPORTANT: proposalId is the primary key - URL is only an identifier carrier
+ *    - Benefits:
+ *      - No CORS issues (direct blockchain access)
+ *      - No backend required (pure frontend)
+ *      - Future-proof (works even if APIs change)
+ *      - Source of truth (on-chain data is authoritative)
  */
 
 export default apiInitializer((api) => {
@@ -69,9 +73,67 @@ export default apiInitializer((api) => {
   // Aave AIP Configuration
   // Support both governance.aave.com and app.aave.com/governance/
   const AAVE_GOVERNANCE_PORTAL = "https://app.aave.com/governance";
-  const AAVE_SUBGRAPH_MAINNET = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-mainnet";
-  const AAVE_SUBGRAPH_POLYGON = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-polygon";
-  const AAVE_SUBGRAPH_AVALANCHE = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-avalanche";
+  
+  // Aave Governance V3 - Using The Graph API with API key (method from ava.mjs)
+  const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
+  const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
+  const AAVE_V3_SUBGRAPH = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
+  
+  // REMOVED: All fallback methods (on-chain, Data API, markdown) - using only The Graph API
+  // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
+  
+  // Unused function - kept for reference but not called
+  async function ensureEthersLoaded() {
+    // Check if already loaded
+    if (window.ethers) {
+      return window.ethers;
+    }
+    
+    // If already loading, return the existing promise
+    if (ethersPromise) {
+      return ethersPromise;
+    }
+    
+    // Start loading ethers.js v5 (stable version)
+    ethersPromise = new Promise((resolve, reject) => {
+      try {
+        const script = document.createElement('script');
+        // Use jsDelivr CDN for reliable loading
+        script.src = 'https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js';
+        script.async = true;
+        script.crossOrigin = 'anonymous';
+        
+        script.onload = () => {
+          ethersLoaded = true;
+          if (window.ethers) {
+            resolve(window.ethers);
+          } else {
+            reject(new Error("ethers.js loaded but not available on window"));
+          }
+        };
+        
+        script.onerror = () => {
+          console.warn("⚠️ [AIP] Failed to load ethers.js, on-chain fetching disabled");
+          ethersPromise = null; // Reset so we can try again
+          reject(new Error("Failed to load ethers.js"));
+        };
+        
+        document.head.appendChild(script);
+      } catch (error) {
+        console.warn("⚠️ [AIP] Error loading ethers.js:", error);
+        ethersPromise = null;
+        reject(error);
+      }
+    });
+    
+    return ethersPromise;
+  }
+  
+  // NOTE: TheGraph subgraphs have been removed by TheGraph
+  // The endpoints below are kept for reference but will not work
+  // const AAVE_SUBGRAPH_MAINNET = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-mainnet"; // REMOVED
+  // const AAVE_SUBGRAPH_POLYGON = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-polygon"; // REMOVED
+  // const AAVE_SUBGRAPH_AVALANCHE = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-avalanche"; // REMOVED
   
   // Match governance.aave.com, app.aave.com/governance/, and vote.onaave.com URLs
   const AIP_URL_REGEX = /https?:\/\/(?:www\.)?(?:governance\.aave\.com|app\.aave\.com\/governance|vote\.onaave\.com)\/[^\s<>"']+/gi;
@@ -131,54 +193,92 @@ export default apiInitializer((api) => {
     }
   }
 
-  // Extract AIP proposal info from URL
-  // Supports both formats:
-  // - https://governance.aave.com/t/{slug}/{id}
-  // - https://app.aave.com/governance/{proposal-id}
-  // Example: https://governance.aave.com/t/aip-4-activation-of-aave-protocol-governance-v2/1749
-  // Example: https://app.aave.com/governance/proposal/156
+  // Extract AIP proposal ID from URL (robust approach)
+  // The URL is NOT the data source - it's only an identifier carrier
+  // Flow: URL → extract proposalId → fetch from canonical source (on-chain)
+  // Supports:
+  // - app.aave.com/governance/v3/proposal/?proposalId=420
+  // - app.aave.com/governance/?proposalId=420
+  // - vote.onaave.com/proposal/?proposalId=420
+  // - governance.aave.com/t/{slug}/{id} (extract numeric ID from path)
+  // - app.aave.com/governance/{id} (extract numeric ID from path)
   function extractAIPProposalInfo(url) {
-    console.log("🔍 Extracting AIP proposal info from URL:", url);
+    console.log("🔍 Extracting AIP proposal ID from URL:", url);
     
     try {
-      // Match pattern: vote.onaave.com/proposal/?proposalId={id}
+      let proposalId = null;
+      let urlSource = 'app.aave.com'; // Default to app.aave.com (Aave V3 enum mapping)
+      
+      // Step 1: Try to extract from query parameter (most reliable)
+      // This works for: app.aave.com/governance/v3/proposal/?proposalId=420
+      try {
+        const urlObj = new URL(url);
+        const queryParam = urlObj.searchParams.get("proposalId");
+        if (queryParam) {
+          const numericId = parseInt(queryParam, 10);
+          if (!isNaN(numericId) && numericId > 0) {
+            proposalId = numericId.toString();
+            // Detect URL source for state enum mapping
+            if (url.includes('vote.onaave.com')) {
+              urlSource = 'vote.onaave.com';
+            } else if (url.includes('app.aave.com')) {
+              urlSource = 'app.aave.com';
+            }
+            console.log("✅ Extracted proposalId from query parameter:", proposalId, "Source:", urlSource);
+            return { proposalId, type: 'aip', urlSource };
+          }
+        }
+      } catch (e) {
+        // URL parsing failed, try regex fallback
+      }
+      
+      // Step 2: Try regex patterns for various URL formats
+      // Pattern: vote.onaave.com/proposal/?proposalId={id}
       const voteMatch = url.match(/vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i);
       if (voteMatch) {
-        const proposalId = voteMatch[1];
-        const aipNumber = proposalId;
-        console.log("✅ Extracted AIP format (vote.onaave.com):", { aipNumber, proposalId });
-        return { aipNumber, topicId: aipNumber, type: 'aip' };
+        proposalId = voteMatch[1];
+        urlSource = 'vote.onaave.com';
+        console.log("✅ Extracted from vote.onaave.com:", proposalId);
+        return { proposalId, type: 'aip', urlSource };
       }
       
-      // Match pattern: governance.aave.com/t/{slug}/{id}
-      const match = url.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
-      if (match) {
-        const topicId = match[1];
-        console.log("✅ Extracted AIP format (governance.aave.com):", { topicId });
-        return { topicId, type: 'aip' };
+      // Pattern: app.aave.com/governance/v3/proposal/?proposalId={id}
+      const appV3Match = url.match(/app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i);
+      if (appV3Match) {
+        proposalId = appV3Match[1];
+        urlSource = 'app.aave.com';
+        console.log("✅ Extracted from app.aave.com/governance/v3:", proposalId);
+        return { proposalId, type: 'aip', urlSource };
       }
       
-      // Match pattern: app.aave.com/governance/{proposal-id} or app.aave.com/governance/proposal/{id}
-      const appMatch = url.match(/app\.aave\.com\/governance\/(?:proposal\/)?([a-zA-Z0-9-]+)/i);
+      // Pattern: governance.aave.com/t/{slug}/{id} - extract numeric ID from path
+      const forumMatch = url.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
+      if (forumMatch) {
+        proposalId = forumMatch[1];
+        urlSource = 'app.aave.com'; // Default to app.aave.com for forum links
+        console.log("✅ Extracted from governance.aave.com forum:", proposalId);
+        return { proposalId, type: 'aip', urlSource };
+      }
+      
+      // Pattern: app.aave.com/governance/{id} or app.aave.com/governance/proposal/{id}
+      const appMatch = url.match(/app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i);
       if (appMatch) {
-        const proposalId = appMatch[1];
-        // Try to extract numeric ID if it's in the format
-        const numericMatch = proposalId.match(/(\d+)/);
-        const aipNumber = numericMatch ? numericMatch[1] : proposalId;
-        console.log("✅ Extracted AIP format (app.aave.com/governance):", { aipNumber, proposalId });
-        return { aipNumber, topicId: aipNumber, type: 'aip' };
+        proposalId = appMatch[1];
+        urlSource = 'app.aave.com';
+        console.log("✅ Extracted from app.aave.com/governance:", proposalId);
+        return { proposalId, type: 'aip', urlSource };
       }
       
-      // Also check for direct AIP URL pattern if it exists
-      // Format: governance.aave.com/aip/{number}
+      // Pattern: governance.aave.com/aip/{number}
       const aipMatch = url.match(/governance\.aave\.com\/aip\/(\d+)/i);
       if (aipMatch) {
-        const aipNumber = aipMatch[1];
-        console.log("✅ Extracted AIP direct format:", { aipNumber });
-        return { aipNumber, type: 'aip' };
+        proposalId = aipMatch[1];
+        urlSource = 'app.aave.com'; // Default to app.aave.com for AIP links
+        console.log("✅ Extracted from governance.aave.com/aip:", proposalId);
+        return { proposalId, type: 'aip', urlSource };
       }
       
-      console.warn("❌ Could not extract AIP proposal info from URL:", url);
+      console.warn("❌ Could not extract proposalId from URL:", url);
       return null;
     } catch (e) {
       console.warn("❌ Error extracting AIP proposal info:", e);
@@ -205,10 +305,13 @@ export default apiInitializer((api) => {
     const aipInfo = extractAIPProposalInfo(url);
     if (aipInfo) {
       // Return format compatible with existing code
+      // proposalId is now the primary key extracted from URL
       return {
         ...aipInfo,
-        urlProposalNumber: aipInfo.topicId || aipInfo.aipNumber, // For compatibility
-        internalId: aipInfo.topicId || aipInfo.aipNumber // For compatibility
+        proposalId: aipInfo.proposalId, // Primary key
+        urlProposalNumber: aipInfo.proposalId, // For compatibility
+        internalId: aipInfo.proposalId, // For compatibility
+        topicId: aipInfo.proposalId // For compatibility
       };
     }
     
@@ -239,8 +342,21 @@ export default apiInitializer((api) => {
         return response;
       } catch (error) {
         lastError = error;
+        
+        // Handle AbortError gracefully (timeout) - don't log as error, just retry
+        if (error.name === 'AbortError') {
+          if (attempt < maxRetries - 1) {
+            const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
+            console.warn(`⚠️ [FETCH] Request timeout (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
+            handledErrors.add(error);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          // Last attempt - return null or throw
+          break;
+        }
+        
         const isNetworkError = error.name === 'TypeError' || 
-                              error.name === 'AbortError' ||
                               error.name === 'NetworkError' ||
                               error.message?.includes('Failed to fetch') ||
                               error.message?.includes('QUIC') ||
@@ -250,7 +366,7 @@ export default apiInitializer((api) => {
         
         if (isNetworkError && attempt < maxRetries - 1) {
           const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
-          console.warn(`⚠️ [SNAPSHOT] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message || error.toString());
+          console.warn(`⚠️ [FETCH] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message || error.toString());
           // Mark error as handled since we're retrying
           handledErrors.add(error);
           await new Promise(resolve => setTimeout(resolve, delay));
@@ -470,11 +586,594 @@ export default apiInitializer((api) => {
     return null;
   }
 
-  // Fetch Aave AIP proposal data from Subgraph (multi-chain support)
-  // Tries Mainnet, Polygon, and Avalanche subgraphs
-  async function fetchAIPProposal(topicId, cacheKey, chain = 'mainnet') {
+  // Fetch Aave AIP proposal data using The Graph API (method from ava.mjs)
+  async function fetchAIPProposal(proposalId, cacheKey, chain = 'mainnet', urlSource = 'app.aave.com') {
     try {
-      console.log("🔵 [AIP] Fetching proposal - topicId:", topicId, "chain:", chain);
+      console.log("🔵 [AIP] Fetching proposal from The Graph API - proposalId:", proposalId, "URL Source:", urlSource);
+      
+      const result = await fetchAIPFromSubgraph(proposalId);
+      if (result) {
+        console.log("✅ [AIP] Successfully fetched from The Graph API");
+        result._cachedAt = Date.now();
+        result.chain = 'thegraph';
+        result.urlSource = urlSource; // Store URL source for state mapping
+        proposalCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Try on-chain fetch as fallback
+      const onChainResult = await fetchAIPFromOnChain(proposalId, urlSource);
+      if (onChainResult) {
+        console.log("✅ [AIP] Successfully fetched from on-chain");
+        onChainResult._cachedAt = Date.now();
+        onChainResult.chain = 'onchain';
+        onChainResult.urlSource = urlSource; // Store URL source for state mapping
+        proposalCache.set(cacheKey, onChainResult);
+        return onChainResult;
+      }
+      
+      console.warn("⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain");
+      return null;
+    } catch (error) {
+      console.error("❌ [AIP] Error fetching proposal:", error);
+      return null;
+    }
+  }
+
+  // Merge on-chain data with markdown and subgraph metadata
+  // Priority: markdown > subgraph > on-chain defaults
+  // On-chain data is the source of truth for votes/state
+  // Subgraph can provide voting data if on-chain is unavailable
+  function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
+    // Start with on-chain data (source of truth for votes/state)
+    const merged = { ...onChainData };
+
+    // Enrich with markdown (richest source for content)
+    if (markdownData) {
+      merged.title = markdownData.title || merged.title;
+      merged.description = markdownData.description || merged.description;
+      merged.markdown = markdownData.markdown;
+      merged.markdownMetadata = markdownData.metadata;
+      merged._contentSource = 'markdown';
+    } else if (subgraphMetadata) {
+      // Fallback to subgraph if no markdown
+      merged.title = subgraphMetadata.title || merged.title;
+      merged.description = subgraphMetadata.description || merged.description;
+      merged._contentSource = 'subgraph';
+      
+      // If on-chain votes are missing, use subgraph votes as fallback
+      if (!merged.forVotes && subgraphMetadata.forVotes) {
+        merged.forVotes = subgraphMetadata.forVotes;
+      }
+      if (!merged.againstVotes && subgraphMetadata.againstVotes) {
+        merged.againstVotes = subgraphMetadata.againstVotes;
+      }
+      
+      // Enrich with additional subgraph data
+      if (subgraphMetadata.creator && !merged.creator) {
+        merged.creator = subgraphMetadata.creator;
+      }
+      if (subgraphMetadata.votingDuration && !merged.votingDuration) {
+        merged.votingDuration = subgraphMetadata.votingDuration;
+      }
+      if (subgraphMetadata.ipfsHash && !merged.ipfsHash) {
+        merged.ipfsHash = subgraphMetadata.ipfsHash;
+      }
+    }
+
+    // Keep on-chain data for votes/state (source of truth) if available
+    if (onChainData.forVotes !== undefined) {
+      merged.forVotes = onChainData.forVotes;
+    }
+    if (onChainData.againstVotes !== undefined) {
+      merged.againstVotes = onChainData.againstVotes;
+    }
+    if (onChainData.status !== undefined) {
+      merged.status = onChainData.status; // On-chain state is authoritative
+    }
+    merged._dataSource = onChainData ? 'on-chain' : (subgraphMetadata ? 'subgraph' : 'unknown');
+
+    return merged;
+  }
+
+  // Parse front-matter from markdown (browser-compatible, no gray-matter needed)
+  // Handles YAML front-matter in markdown files
+  function parseFrontMatter(text) {
+    if (!text || !text.startsWith('---')) {
+      return { metadata: {}, markdown: text, raw: text };
+    }
+
+    // Find the end of front-matter (second ---)
+    const endIndex = text.indexOf('\n---', 4);
+    if (endIndex === -1) {
+      return { metadata: {}, markdown: text, raw: text };
+    }
+
+    // Extract front-matter and content
+    const frontMatterText = text.substring(4, endIndex).trim();
+    const markdown = text.substring(endIndex + 5).trim();
+
+    // Simple YAML parser for basic key-value pairs
+    const metadata = {};
+    const lines = frontMatterText.split('\n');
+    for (const line of lines) {
+      const colonIndex = line.indexOf(':');
+      if (colonIndex > 0) {
+        const key = line.substring(0, colonIndex).trim();
+        let value = line.substring(colonIndex + 1).trim();
+        // Remove quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) || 
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        metadata[key] = value;
+      }
+    }
+
+    return { metadata, markdown, raw: text };
+  }
+
+  // Fetch proposal markdown from vote.onaave.com
+  // This provides rich content: title, description, full markdown body
+  // Returns markdown with front-matter parsed
+  async function fetchAIPMarkdown(proposalId) {
+    try {
+      const apiUrl = `${AAVE_VOTE_SITE}?proposalId=${proposalId}`;
+      const response = await fetchWithRetry(apiUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "text/plain",
+        },
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        const parsed = parseFrontMatter(text);
+        
+        return {
+          title: parsed.metadata.title || parsed.metadata.name || null,
+          description: parsed.metadata.description || parsed.markdown.substring(0, 200) || null,
+          markdown: parsed.markdown,
+          metadata: parsed.metadata,
+          raw: parsed.raw
+        };
+      }
+      return null;
+    } catch (error) {
+      console.debug("🔵 [AIP] Markdown fetch error:", error.message);
+      return null;
+    }
+  }
+
+  // Fetch proposal metadata from subgraph (for enrichment only)
+  // This provides titles, descriptions, voting data, and other metadata
+  // NOTE: This is an enhancement, not the primary source
+  // If this fails due to CORS, the Data API or on-chain data will be used as fallback
+  // Fetch Aave proposal from The Graph API (method from ava.mjs)
+  async function fetchAIPFromSubgraph(proposalId) {
+    try {
+      // Convert proposalId to string and ensure it's a number
+      const proposalIdStr = String(proposalId).trim();
+      console.log("🔵 [AIP] Fetching proposal with ID:", proposalIdStr);
+      
+      const query = `
+        {
+          proposals(where: { proposalId: "${proposalIdStr}" }) {
+            proposalId
+            state
+            creator
+            ipfsHash
+            votingDuration
+            proposalMetadata {
+              title
+            }
+            votes {
+              forVotes
+              againstVotes
+            }
+          }
+        }
+      `;
+      
+      console.log("🔵 [AIP] GraphQL Query:", query);
+
+      const response = await fetchWithRetry(AAVE_V3_SUBGRAPH, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log("🔵 [AIP] GraphQL Response:", JSON.stringify(result, null, 2));
+        
+        if (result.errors) {
+          console.error("❌ [AIP] GraphQL Errors:", JSON.stringify(result.errors, null, 2));
+          return null;
+        }
+
+        const proposals = result.data?.proposals;
+        if (!proposals || proposals.length === 0) {
+          console.log(`❌ [AIP] No proposal found with ID: ${proposalId}`);
+          console.log("🔵 [AIP] Full response data:", result.data);
+          return null;
+        }
+        
+        console.log(`✅ [AIP] Found ${proposals.length} proposal(s) with ID: ${proposalId}`);
+
+        const p = proposals[0];
+        
+        // Debug: Log the raw proposal data
+        console.log("🔵 [AIP] Raw proposal data:", JSON.stringify(p, null, 2));
+        console.log("🔵 [AIP] Raw votes object:", p.votes);
+        console.log("🔵 [AIP] Votes type:", typeof p.votes, "Is array:", Array.isArray(p.votes));
+        
+        // Handle votes - could be object, array, or null
+        let votesData = null;
+        let votesAvailable = false;
+        
+        if (p.votes) {
+          votesAvailable = true;
+          // If votes is an array, take the first element (or aggregate)
+          if (Array.isArray(p.votes)) {
+            votesData = p.votes[0] || p.votes;
+            console.log("🔵 [AIP] Votes is array, using:", votesData);
+          } else {
+            votesData = p.votes;
+            console.log("🔵 [AIP] Votes is object:", votesData);
+          }
+        } else {
+          console.warn("⚠️ [AIP] No votes data found in subgraph for proposal", proposalId);
+          console.warn("⚠️ [AIP] This is common for failed/cancelled proposals - votes may not be indexed");
+          votesAvailable = false;
+        }
+        
+        console.log("🔵 [AIP] forVotes raw:", votesData?.forVotes, "type:", typeof votesData?.forVotes);
+        console.log("🔵 [AIP] againstVotes raw:", votesData?.againstVotes, "type:", typeof votesData?.againstVotes);
+        
+        // Convert votes from wei to AAVE (exact same as ava.mjs)
+        const decimals = BigInt(10 ** 18);
+        
+        // Get raw vote values - handle null/undefined
+        // NOTE: Aave V3 subgraph does NOT have abstainVotes field - only forVotes and againstVotes
+        const forVotesRaw = votesData?.forVotes || p.forVotes || null;
+        const againstVotesRaw = votesData?.againstVotes || p.againstVotes || null;
+        
+        console.log("🔵 [AIP] Extracted - forVotesRaw:", forVotesRaw, "againstVotesRaw:", againstVotesRaw);
+        
+        // Convert to BigInt - exact same logic as ava.mjs: BigInt(p.votes?.forVotes || 0)
+        // Handle string numbers and null/undefined
+        // If votes are not available, set to null (not 0) so UI can show "N/A" or similar
+        const forVotesBigInt = forVotesRaw ? BigInt(String(forVotesRaw)) : (votesAvailable ? BigInt(0) : null);
+        const againstVotesBigInt = againstVotesRaw ? BigInt(String(againstVotesRaw)) : (votesAvailable ? BigInt(0) : null);
+        
+        console.log("🔵 [AIP] BigInt values - For:", forVotesBigInt?.toString() || 'null', "Against:", againstVotesBigInt?.toString() || 'null');
+        console.log("🔵 [AIP] Decimals:", decimals.toString());
+        
+        // Divide by decimals to get AAVE amount (BigInt division truncates, which is correct)
+        // If votes are null (not available), keep as null string for UI to handle
+        const forVotes = forVotesBigInt !== null ? (forVotesBigInt / decimals).toString() : null;
+        const againstVotes = againstVotesBigInt !== null ? (againstVotesBigInt / decimals).toString() : null;
+        // Aave V3 doesn't support abstain - always 0
+        const abstainVotes = '0';
+        
+        console.log("🔵 [AIP] Final converted votes - For:", forVotes || 'null (not available)', "Against:", againstVotes || 'null (not available)', "Abstain:", abstainVotes);
+
+        // Map state to status string - use default app.aave.com mapping for subgraph
+        // (Subgraph uses Aave V3 enum, but we'll allow override if urlSource is provided)
+        const stateMap = getStateMapping('app.aave.com'); // Subgraph always uses Aave V3 enum
+        const status = stateMap[p.state] || 'unknown';
+
+        return {
+          id: p.proposalId?.toString() || proposalId.toString(),
+          proposalId: p.proposalId?.toString() || proposalId.toString(),
+          title: p.proposalMetadata?.title || `Proposal ${proposalId}`,
+          description: null, // Description not available in this query
+          status: status,
+          state: p.state,
+          creator: p.creator,
+          proposer: p.creator,
+          ipfsHash: p.ipfsHash,
+          votingDuration: p.votingDuration,
+          forVotes: forVotes,
+          againstVotes: againstVotes,
+          abstainVotes: abstainVotes,
+          quorum: null,
+        };
+      } else {
+        console.error("❌ [AIP] Subgraph response not OK:", response.status, response.statusText);
+        return null;
+      }
+    } catch (error) {
+      console.error("❌ [AIP] Subgraph fetch error:", error.message);
+      return null;
+    }
+  }
+
+  // Fetch AIP proposal data directly from Ethereum blockchain (source of truth)
+  // This is the most reliable method - no CORS, no backend, will never randomly break
+  async function fetchAIPFromOnChain(topicId, urlSource = 'app.aave.com') {
+    try {
+      // Ensure ethers.js is loaded
+      const ethers = await ensureEthersLoaded();
+      if (!ethers) {
+        console.error("❌ [AIP] ethers.js not available - on-chain fetch disabled");
+        console.error("❌ [AIP] This is the PRIMARY method - ethers.js must be loaded!");
+        return null;
+      }
+
+      // Parse proposal ID (should be a number)
+      // Handle both string and number inputs, extract numeric part if needed
+      let proposalId;
+      if (typeof topicId === 'string') {
+        // Extract numeric part from string (e.g., "420" or "proposal-420")
+        const numericMatch = topicId.match(/\d+/);
+        if (numericMatch) {
+          proposalId = parseInt(numericMatch[0], 10);
+        } else {
+          proposalId = parseInt(topicId, 10);
+        }
+      } else {
+        proposalId = parseInt(topicId, 10);
+      }
+      
+      if (isNaN(proposalId) || proposalId <= 0) {
+        console.debug("🔵 [AIP] Invalid proposal ID for on-chain fetch:", topicId);
+        return null;
+      }
+
+      // Create provider and contract
+      const provider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
+      const governanceContract = new ethers.Contract(
+        AAVE_GOVERNANCE_V3_ADDRESS,
+        AAVE_GOVERNANCE_V3_ABI,
+        provider
+      );
+
+      // Fetch proposal data using simplified ABI
+      let proposal;
+      let state = 0;
+      
+      try {
+        // Call getProposal with simplified return structure
+        proposal = await governanceContract.getProposal(proposalId);
+        
+        // Check if proposal exists (id should match proposalId)
+        if (!proposal || !proposal.id || proposal.id.toString() !== proposalId.toString()) {
+          console.debug("🔵 [AIP] Proposal does not exist on-chain:", proposalId);
+          return null;
+        }
+        
+        // Get proposal state
+        try {
+          state = await governanceContract.getProposalState(proposalId);
+        } catch (error) {
+          // Use state from proposal if available, otherwise default to 0
+          state = proposal.state || 0;
+          console.debug("🔵 [AIP] Using state from proposal data");
+        }
+      } catch (error) {
+        // Enhanced error logging - on-chain is PRIMARY, so log errors clearly
+        console.error("❌ [AIP] Error fetching proposal from chain:", error.message);
+        if (error.message?.includes("ABI decoding")) {
+          console.error("❌ [AIP] ABI decoding error - contract address or ABI may be incorrect");
+          console.error("❌ [AIP] Contract:", AAVE_GOVERNANCE_V3_ADDRESS);
+        }
+        if (error.message?.includes("network") || error.message?.includes("timeout")) {
+          console.error("❌ [AIP] RPC connection error - check ETH_RPC_URL:", ETH_RPC_URL);
+        }
+        return null;
+      }
+
+      // Transform on-chain data to our format (use URL source for correct state mapping)
+      return transformAIPDataFromOnChain(proposal, state, proposalId, urlSource);
+    } catch (error) {
+      console.error("❌ [AIP] On-chain fetch error (outer catch):", error.message);
+      console.error("❌ [AIP] This is the PRIMARY method - errors should be investigated");
+      return null;
+    }
+  }
+
+  // Get state mapping based on URL source
+  // vote.onaave.com uses: 0='created', 1='voting', 2='passed', 3='failed', 4='executed', 5='expired', 6='cancelled', 7='active'
+  // app.aave.com uses: 0='null', 1='created', 2='active', 3='queued', 4='executed', 5='failed', 6='cancelled', 7='expired'
+  function getStateMapping(urlSource) {
+    if (urlSource === 'vote.onaave.com') {
+      return {
+        0: 'created',
+        1: 'voting',
+        2: 'passed',
+        3: 'failed',
+        4: 'executed',
+        5: 'expired',
+        6: 'cancelled',
+        7: 'active'
+      };
+    } else {
+      // Default to app.aave.com (Aave Governance V3) enum mapping
+      return {
+        0: 'null',
+        1: 'created',
+        2: 'active',
+        3: 'queued',
+        4: 'executed',
+        5: 'failed',
+        6: 'cancelled',
+        7: 'expired'
+      };
+    }
+  }
+
+  // Transform on-chain proposal data to our expected format
+  // Using simplified ABI structure: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
+  function transformAIPDataFromOnChain(proposal, state, proposalId, urlSource = 'app.aave.com') {
+    // Get the correct state mapping based on URL source
+    const stateMap = getStateMapping(urlSource);
+
+    // Use state from parameter or from proposal object
+    const proposalState = state || (proposal.state !== undefined ? Number(proposal.state) : 0);
+    const status = stateMap[proposalState] || 'unknown';
+
+    // Safely extract values from proposal object
+    // The simplified ABI returns: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
+    return {
+      id: proposalId.toString(),
+      title: `Proposal ${proposalId}`, // On-chain doesn't have title, will be enriched from markdown/subgraph
+      description: `Aave Governance Proposal ${proposalId}`, // On-chain doesn't have description, will be enriched
+      status: status,
+      forVotes: proposal.forVotes ? proposal.forVotes.toString() : '0',
+      againstVotes: proposal.againstVotes ? proposal.againstVotes.toString() : '0',
+      abstainVotes: '0', // Aave V3 doesn't have abstain votes
+      quorum: null, // Would need to calculate from strategy
+      proposer: proposal.creator || null,
+      createdAt: proposal.startTime ? new Date(Number(proposal.startTime) * 1000).toISOString() : null,
+      executedAt: proposal.executed ? (proposal.endTime ? new Date(Number(proposal.endTime) * 1000).toISOString() : null) : null,
+      startTime: proposal.startTime ? Number(proposal.startTime) : null,
+      endTime: proposal.endTime ? Number(proposal.endTime) : null,
+      canceled: proposal.canceled || false,
+      executed: proposal.executed || false,
+    };
+  }
+
+  // Try fetching from official Aave V3 GraphQL API
+  // NOTE: This API currently returns "Unknown field 'proposal' on type 'Query'"
+  // The GraphQL schema may be different or this endpoint may not be available
+  // Disabling this function until the correct API schema is confirmed
+  async function fetchAIPFromOfficialAPI(topicId) {
+    // Skip this API for now since it doesn't support the 'proposal' field
+    // Uncomment and fix the query once the correct GraphQL schema is known
+    /*
+    const query = `
+      query Proposal($id: ID!) {
+        proposal(id: $id) {
+          id
+          title
+          description
+          status
+          startBlock
+          endBlock
+          forVotes
+          againstVotes
+          abstainVotes
+          quorum
+          proposer
+          createdAt
+          executedAt
+          votingDuration
+          votingStartTime
+          votingEndTime
+        }
+      }
+    `;
+
+    try {
+      const response = await fetchWithRetry(AAVE_V3_GRAPHQL_API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query,
+          variables: { id: topicId }
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.errors) {
+          console.error("❌ [AIP] Official API GraphQL errors:", result.errors);
+          return null;
+        }
+
+        const proposal = result.data?.proposal;
+        if (proposal) {
+          return transformAIPData(proposal);
+        }
+      }
+    } catch (error) {
+      console.debug("🔵 [AIP] Official GraphQL API error:", error.message);
+    }
+    */
+    return null;
+  }
+
+  // Try fetching from Aave V3 Data API (JSON endpoint)
+  // Fallback method - has CORS issues, only use if on-chain fails
+  // NOTE: On-chain should be PRIMARY (no CORS, direct blockchain access)
+  async function fetchAIPFromDataAPI(topicId) {
+    // This endpoint has CORS issues - only use as last resort
+    const response = await fetchWithRetry(AAVE_V3_DATA_API, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      // Note: CORS issues expected with this endpoint
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      // Search for proposal in the governance history
+      // The JSON structure may vary, so we need to search for the proposal
+      if (Array.isArray(data)) {
+        const proposal = data.find(p => 
+          p.id === topicId || 
+          p.proposalId === topicId || 
+          String(p.id) === String(topicId) ||
+          String(p.proposalId) === String(topicId)
+        );
+        if (proposal) {
+          // Transform the JSON data to match our expected format
+          return transformAIPDataFromJSON(proposal);
+        }
+      } else if (data.proposals) {
+        // If it's an object with proposals array
+        const proposal = data.proposals.find(p => 
+          p.id === topicId || 
+          p.proposalId === topicId ||
+          String(p.id) === String(topicId) ||
+          String(p.proposalId) === String(topicId)
+        );
+        if (proposal) {
+          return transformAIPDataFromJSON(proposal);
+        }
+      }
+    }
+    return null;
+  }
+
+  // Transform JSON data from Aave V3 Data API to our format
+  function transformAIPDataFromJSON(jsonData) {
+    return {
+      id: jsonData.id || jsonData.proposalId || null,
+      title: jsonData.title || jsonData.name || "Untitled Proposal",
+      description: jsonData.description || jsonData.body || "",
+      status: jsonData.status || jsonData.state || "unknown",
+      forVotes: jsonData.forVotes || jsonData.for || 0,
+      againstVotes: jsonData.againstVotes || jsonData.against || 0,
+      abstainVotes: jsonData.abstainVotes || jsonData.abstain || 0,
+      quorum: jsonData.quorum || null,
+      proposer: jsonData.proposer || null,
+      createdAt: jsonData.createdAt || jsonData.created || null,
+      executedAt: jsonData.executedAt || jsonData.executed || null,
+      startBlock: jsonData.startBlock || null,
+      endBlock: jsonData.endBlock || null,
+    };
+  }
+
+  // Fallback: Fetch from TheGraph subgraphs (DEPRECATED - endpoints removed)
+  // NOTE: TheGraph has removed these endpoints. This function is kept for compatibility
+  // but will always return null. Use Official API or Data API instead.
+  async function fetchAIPFromTheGraph(topicId, cacheKey, chain = 'mainnet') {
+    console.warn("⚠️ [AIP] TheGraph subgraphs are no longer available (endpoints removed)");
+    console.warn("⚠️ [AIP] Using Official Aave V3 API or Aave V3 Data API instead");
+    return null;
+    
+    // Old code below (commented out since endpoints are removed)
+    /*
+    try {
+      console.log("🔵 [AIP] Trying TheGraph subgraph - chain:", chain);
 
       // GraphQL query for Aave Governance V3
       const query = `
@@ -516,7 +1215,7 @@ export default apiInitializer((api) => {
           subgraphUrl = AAVE_SUBGRAPH_MAINNET;
       }
 
-      console.log("🔵 [AIP] Trying subgraph:", subgraphUrl);
+      console.log("🔵 [AIP] Trying TheGraph subgraph:", subgraphUrl);
 
       // Try fetching from the selected subgraph
       let response;
@@ -532,26 +1231,36 @@ export default apiInitializer((api) => {
           }),
         });
       } catch (corsError) {
-        // CORS error - try other chains or return null
-        console.warn("⚠️ [AIP] CORS error on", chain, ":", corsError.message);
+        // CORS error - TheGraph API blocks browser requests
+        // Only log once per proposal to reduce console noise
+        if (chain === 'mainnet') {
+          console.warn("⚠️ [AIP] CORS error: TheGraph API blocks browser requests");
+          console.warn("⚠️ [AIP] Note: AIP data requires a backend proxy server. Snapshot proposals work fine.");
+        } else {
+          // Use debug level for fallback attempts to reduce noise
+          console.debug("🔵 [AIP] CORS error on", chain, "- trying other chains...");
+        }
         
-        // Try other chains if mainnet fails
+        // Try other chains if mainnet fails (though they'll likely also fail due to CORS)
         if (chain === 'mainnet') {
           console.log("🔵 [AIP] Trying Polygon subgraph as fallback...");
-          const polygonResult = await fetchAIPProposal(topicId, cacheKey, 'polygon');
+          const polygonResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'polygon');
           if (polygonResult) {
             return polygonResult;
           }
           
           console.log("🔵 [AIP] Trying Avalanche subgraph as fallback...");
-          const avalancheResult = await fetchAIPProposal(topicId, cacheKey, 'avalanche');
+          const avalancheResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'avalanche');
           if (avalancheResult) {
             return avalancheResult;
           }
         }
         
-        console.warn("⚠️ [AIP] All subgraph attempts failed due to CORS");
-        console.warn("⚠️ [AIP] Note: AIP data fetching from TheGraph requires CORS to be enabled or a proxy server");
+        // Only show final warning once
+        if (chain === 'mainnet') {
+          console.warn("⚠️ [AIP] All subgraph attempts failed due to CORS restrictions");
+          console.warn("⚠️ [AIP] Solution: Use a backend proxy server to fetch AIP data from TheGraph");
+        }
         return null;
       }
 
@@ -563,13 +1272,13 @@ export default apiInitializer((api) => {
           // Try other chains if current one has errors
           if (chain === 'mainnet' && result.errors.some((e) => e.message?.includes('not found'))) {
             console.log("🔵 [AIP] Proposal not found on Mainnet, trying Polygon...");
-            const polygonResult = await fetchAIPProposal(topicId, cacheKey, 'polygon');
+            const polygonResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'polygon');
             if (polygonResult) {
               return polygonResult;
             }
             
             console.log("🔵 [AIP] Trying Avalanche...");
-            const avalancheResult = await fetchAIPProposal(topicId, cacheKey, 'avalanche');
+            const avalancheResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'avalanche');
             if (avalancheResult) {
               return avalancheResult;
             }
@@ -592,13 +1301,13 @@ export default apiInitializer((api) => {
           // Try other chains if current one returns no data
           if (chain === 'mainnet') {
             console.log("🔵 [AIP] Trying Polygon subgraph...");
-            const polygonResult = await fetchAIPProposal(topicId, cacheKey, 'polygon');
+            const polygonResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'polygon');
             if (polygonResult) {
               return polygonResult;
             }
             
             console.log("🔵 [AIP] Trying Avalanche subgraph...");
-            const avalancheResult = await fetchAIPProposal(topicId, cacheKey, 'avalanche');
+            const avalancheResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'avalanche');
             if (avalancheResult) {
               return avalancheResult;
             }
@@ -611,12 +1320,12 @@ export default apiInitializer((api) => {
         // Try other chains on HTTP error
         if (chain === 'mainnet' && response.status === 404) {
           console.log("🔵 [AIP] Not found on Mainnet, trying other chains...");
-          const polygonResult = await fetchAIPProposal(topicId, cacheKey, 'polygon');
+          const polygonResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'polygon');
           if (polygonResult) {
             return polygonResult;
           }
           
-          const avalancheResult = await fetchAIPProposal(topicId, cacheKey, 'avalanche');
+          const avalancheResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'avalanche');
           if (avalancheResult) {
             return avalancheResult;
           }
@@ -632,7 +1341,7 @@ export default apiInitializer((api) => {
       if (chain === 'mainnet') {
         console.log("🔵 [AIP] Error on Mainnet, trying other chains...");
         try {
-          const polygonResult = await fetchAIPProposal(topicId, cacheKey, 'polygon');
+          const polygonResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'polygon');
           if (polygonResult) {
             return polygonResult;
           }
@@ -641,7 +1350,7 @@ export default apiInitializer((api) => {
         }
         
         try {
-          const avalancheResult = await fetchAIPProposal(topicId, cacheKey, 'avalanche');
+          const avalancheResult = await fetchAIPFromTheGraph(topicId, cacheKey, 'avalanche');
           if (avalancheResult) {
             return avalancheResult;
           }
@@ -650,6 +1359,7 @@ export default apiInitializer((api) => {
         }
       }
     }
+    */
     return null;
   }
 
@@ -1248,6 +1958,21 @@ export default apiInitializer((api) => {
     // Ensure container is always visible
     container.style.display = 'flex';
     container.style.visibility = 'visible';
+    
+    // Log position data for debugging
+    const rect = container.getBoundingClientRect();
+    console.log("📍 [POSITION DATA] Container position:", {
+      right: '50px',
+      top: '180px',
+      actualLeft: `${rect.left}px`,
+      actualTop: `${rect.top}px`,
+      actualRight: `${rect.right}px`,
+      actualBottom: `${rect.bottom}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight
+    });
   }
 
   function renderMultiStageWidget(stages, widgetId) {
@@ -1257,6 +1982,46 @@ export default apiInitializer((api) => {
     const hasSnapshotStages = stages.tempCheck || stages.arfc;
     const hasAllStages = hasSnapshotStages && stages.aip;
     const widgetType = hasAllStages ? 'combined' : (stages.aip ? 'aip' : 'snapshot');
+    
+    // Get the URL from stages to check for duplicates by URL (more reliable than ID)
+    const proposalUrl = stages.aipUrl || stages.arfcUrl || stages.tempCheckUrl || null;
+    
+    // SPECIAL HANDLING FOR AIP: Remove all existing AIP widgets to ensure only one is shown
+    if (stages.aip && stages.aipUrl) {
+      const existingAipWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"]');
+      if (existingAipWidgets.length > 0) {
+        console.log(`🔵 [RENDER] Found ${existingAipWidgets.length} existing AIP widget(s), removing to prevent duplicates`);
+        existingAipWidgets.forEach(widget => {
+          const widgetUrl = widget.getAttribute('data-tally-url');
+          if (widgetUrl) {
+            renderingUrls.delete(widgetUrl);
+            fetchingUrls.delete(widgetUrl);
+          }
+          widget.remove();
+        });
+      }
+    }
+    
+    // First, check for existing widgets with the same URL to prevent duplicates (check DOM first)
+    // This is the same logic used for snapshot widgets - check DOM before checking renderingUrls
+    if (proposalUrl) {
+      const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${proposalUrl}"]`);
+      if (existingWidgetsByUrl.length > 0) {
+        console.log(`🔵 [RENDER] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, skipping duplicate render`);
+        return;
+      }
+    }
+    
+    // CRITICAL: Check if this URL is already being rendered (race condition prevention)
+    if (proposalUrl && renderingUrls.has(proposalUrl)) {
+      console.log(`🔵 [RENDER] URL ${proposalUrl} is already being rendered, skipping duplicate render`);
+      return;
+    }
+    
+    // Mark this URL as being rendered
+    if (proposalUrl) {
+      renderingUrls.add(proposalUrl);
+    }
     
     // Remove existing widget with the same ID (to allow re-rendering), but keep others
     // This allows multiple widgets to coexist (one per proposal)
@@ -1302,6 +2067,27 @@ export default apiInitializer((api) => {
     statusWidget.className = "tally-status-widget-container";
     statusWidget.setAttribute("data-widget-id", widgetId);
     statusWidget.setAttribute("data-widget-type", widgetType); // Mark widget type
+    // Add URL attribute for duplicate detection
+    if (proposalUrl) {
+      statusWidget.setAttribute("data-tally-url", proposalUrl);
+    }
+    // Add proposal type for filtering
+    const proposalType = stages.aip ? 'aip' : 'snapshot';
+    statusWidget.setAttribute("data-proposal-type", proposalType);
+    
+    // Determine primary stage for ordering (governance flow: temp-check -> arfc -> aip)
+    // For combined widgets (all stages), order by final stage (AIP)
+    let stageOrder = 3; // Default to AIP (highest order)
+    if (hasAllStages) {
+      stageOrder = 3; // Combined widget shows all stages, order by final stage (AIP)
+    } else if (stages.tempCheck && !stages.arfc && !stages.aip) {
+      stageOrder = 1; // Temp Check only - first stage
+    } else if (stages.arfc && !stages.aip) {
+      stageOrder = 2; // ARFC only (or temp-check + arfc) - second stage
+    } else if (stages.aip) {
+      stageOrder = 3; // AIP (with or without other stages) - final stage
+    }
+    statusWidget.setAttribute("data-stage-order", stageOrder);
     
     // Helper function to format time display
     function formatTimeDisplay(daysLeft, hoursLeft) {
@@ -1377,42 +2163,49 @@ export default apiInitializer((api) => {
       // Determine if ended (daysLeft < 0)
       const isEnded = stageData.daysLeft !== null && stageData.daysLeft < 0;
       
+      // Format "Ended X days ago" text - use weeks if >7 days, years if >365 days
+      let endedText = '';
+      if (isEnded && stageData.daysLeft !== null && stageData.daysLeft !== undefined) {
+        const daysAgo = Math.abs(Math.floor(stageData.daysLeft));
+        if (daysAgo === 0) {
+          endedText = 'Ended today';
+        } else if (daysAgo === 1) {
+          endedText = 'Ended 1 day ago';
+        } else if (daysAgo >= 365) {
+          const yearsAgo = Math.floor(daysAgo / 365);
+          endedText = yearsAgo === 1 ? 'Ended 1 year ago' : `Ended ${yearsAgo} years ago`;
+        } else if (daysAgo >= 7) {
+          const weeksAgo = Math.floor(daysAgo / 7);
+          endedText = weeksAgo === 1 ? 'Ended 1 week ago' : `Ended ${weeksAgo} weeks ago`;
+        } else {
+          endedText = `Ended ${daysAgo} days ago`;
+        }
+      }
+      
       return `
         <div class="governance-stage">
-          <div style="font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827;">${stageName} (Snapshot)</div>
-          <div class="status-badges-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 6px;">
-            <div class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap;">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
+            <span>${stageName} (Snapshot)</span>
+            <div class="status-badge ${statusClass}">
               ${status}
             </div>
-            ${isEnded ? `
-              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; white-space: nowrap;">
-                Ended
-              </div>
-            ` : ''}
           </div>
-          ${isActive ? `
-            <div style="font-size: 0.85em; color: #6b7280; margin-bottom: 4px; line-height: 1.5;">
-              <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-              <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-              <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+          ${endedText || (!isEnded && timeDisplay) ? `
+            <div style="margin-bottom: 12px;">
+              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+                ${endedText || timeDisplay}
+              </div>
             </div>
-            ${progressBarHtml}
-            ${!isEnded ? `<div style="font-size: 0.85em; color: #6b7280; margin-top: 4px;">${timeDisplay}</div>` : ''}
-            <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box;">
-              Vote on Snapshot
-            </a>
-          ` : `
-            <div style="font-size: 0.85em; color: #6b7280; margin-bottom: 4px; line-height: 1.5;">
-              <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-              <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-              <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
-            </div>
-            ${progressBarHtml}
-            ${!isEnded ? `<div style="font-size: 0.85em; color: #6b7280; margin-top: 4px;">${timeDisplay}</div>` : ''}
-            <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box;">
-              View on Snapshot
-            </a>
-          `}
+          ` : ''}
+          ${progressBarHtml}
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
+            <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+          </div>
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; ${isEnded || !isActive ? 'background-color: #e5e7eb !important; color: #6b7280 !important;' : 'background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;'}">
+            ${isEnded || !isActive ? 'View on Snapshot' : 'Vote on Snapshot'}
+          </a>
         </div>
       `;
     }
@@ -1425,41 +2218,59 @@ export default apiInitializer((api) => {
       
       console.log('🔵 [RENDER] Rendering AIP stage with data:', stageData);
       
-      const status = stageData.status === 'active' ? 'Active' : 
-                     stageData.status === 'executed' ? 'Executed' :
-                     stageData.status === 'queued' ? 'Queued' :
-                     stageData.status === 'defeated' ? 'Defeated' : 'Unknown';
+      // Use exact status from API (no mapping)
+      const status = stageData.status || 'unknown';
+      // Map status to CSS class for styling
       const statusClass = stageData.status === 'active' ? 'active' : 
-                         stageData.status === 'executed' ? 'executed' : 'inactive';
+                         stageData.status === 'executed' ? 'executed' :
+                         stageData.status === 'queued' ? 'queued' :
+                         stageData.status === 'failed' ? 'failed' :
+                         stageData.status === 'cancelled' ? 'cancelled' :
+                         stageData.status === 'expired' ? 'expired' : 'inactive';
       
       // Calculate percentages from vote counts - use actual vote counts
-      const forVotes = Number(stageData.voteStats?.for?.count || 0);
-      const againstVotes = Number(stageData.voteStats?.against?.count || 0);
-      const abstainVotes = Number(stageData.voteStats?.abstain?.count || 0);
-      const totalVotes = forVotes + againstVotes + abstainVotes;
+      // The Graph API returns forVotes/againstVotes directly, not in voteStats
+      // NOTE: Aave V3 does NOT support abstain votes - only For/Against
+      // Handle null votes (not available from subgraph) - common for failed/cancelled proposals
+      const forVotesRaw = stageData.forVotes;
+      const againstVotesRaw = stageData.againstVotes;
+      const votesAvailable = forVotesRaw !== null && forVotesRaw !== undefined && 
+                            againstVotesRaw !== null && againstVotesRaw !== undefined;
+      
+      const forVotes = votesAvailable ? Number(forVotesRaw || 0) : null;
+      const againstVotes = votesAvailable ? Number(againstVotesRaw || 0) : null;
+      const totalVotes = votesAvailable ? (forVotes + againstVotes) : null; // No abstain in Aave V3
       
       // Use percent from voteStats if available, otherwise calculate
       let forPercent = stageData.voteStats?.for?.percent;
       let againstPercent = stageData.voteStats?.against?.percent;
       
-      if (forPercent === undefined || forPercent === null) {
-        forPercent = totalVotes > 0 ? ((forVotes / totalVotes) * 100) : 0;
+      // Only calculate percentages if votes are available
+      if (votesAvailable && totalVotes !== null && totalVotes > 0) {
+        if (forPercent === undefined || forPercent === null) {
+          forPercent = (forVotes / totalVotes) * 100;
+        } else {
+          forPercent = Number(forPercent);
+        }
+        
+        if (againstPercent === undefined || againstPercent === null) {
+          againstPercent = (againstVotes / totalVotes) * 100;
+        } else {
+          againstPercent = Number(againstPercent);
+        }
       } else {
-        forPercent = Number(forPercent);
+        forPercent = 0;
+        againstPercent = 0;
       }
       
-      if (againstPercent === undefined || againstPercent === null) {
-        againstPercent = totalVotes > 0 ? ((againstVotes / totalVotes) * 100) : 0;
-      } else {
-        againstPercent = Number(againstPercent);
-      }
-      
-      // Get quorum - use the actual quorum value from data
+      // Get quorum - use the actual quorum value from data (already converted from wei to AAVE)
       const quorum = Number(stageData.quorum || 0);
       // For quorum calculation, use totalVotes (current votes) vs quorum (required votes)
-      const quorumPercent = quorum > 0 ? (totalVotes / quorum) * 100 : 0;
+      // Only calculate if votes are available
+      const quorumPercent = (quorum > 0 && totalVotes !== null && totalVotes > 0) ? (totalVotes / quorum) * 100 : 0;
+      const quorumReached = quorum > 0 && totalVotes !== null && totalVotes >= quorum;
       
-      console.log(`🔵 [RENDER] AIP - For: ${forVotes} (${forPercent}%), Against: ${againstVotes} (${againstPercent}%), Total: ${totalVotes}, Quorum: ${quorum} (${quorumPercent}%)`);
+      console.log(`🔵 [RENDER] AIP - For: ${forVotes !== null ? forVotes : 'N/A'} (${forPercent}%), Against: ${againstVotes !== null ? againstVotes : 'N/A'} (${againstPercent}%), Total: ${totalVotes !== null ? totalVotes : 'N/A'}, Quorum: ${quorum} (${quorumPercent}%) - Reached: ${quorumReached}`);
       
       const timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       const isEndingSoon = stageData.daysLeft !== null && stageData.daysLeft >= 0 && 
@@ -1469,24 +2280,93 @@ export default apiInitializer((api) => {
       const aipMatch = stageData.title.match(/AIP[#\s]*(\d+)/i);
       const aipNumber = aipMatch ? `#${aipMatch[1]}` : '';
       
+      // Format vote amounts (same as Snapshot - with K for thousands)
+      const formatVoteAmount = (num) => {
+        const n = Number(num);
+        if (n >= 1000) {
+          return (n / 1000).toFixed(2).replace(/\.?0+$/, '') + 'K';
+        }
+        return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+      };
+      
+      // Determine if ended (for executed/queued/failed/cancelled/expired)
+      const isEnded = stageData.status === 'executed' || stageData.status === 'queued' || 
+                     stageData.status === 'failed' || stageData.status === 'cancelled' || 
+                     stageData.status === 'expired';
+      
+      // Format end date (if we have daysLeft, calculate when it ended)
+      // Use weeks if >7 days, years if >365 days
+      let endDateText = '';
+      if (isEnded && stageData.daysLeft !== null && stageData.daysLeft !== undefined) {
+        const daysAgo = Math.abs(Math.floor(stageData.daysLeft));
+        if (daysAgo === 0) {
+          endDateText = 'Ended today';
+        } else if (daysAgo === 1) {
+          endDateText = 'Ended 1 day ago';
+        } else if (daysAgo >= 365) {
+          const yearsAgo = Math.floor(daysAgo / 365);
+          endDateText = yearsAgo === 1 ? 'Ended 1 year ago' : `Ended ${yearsAgo} years ago`;
+        } else if (daysAgo >= 7) {
+          const weeksAgo = Math.floor(daysAgo / 7);
+          endDateText = weeksAgo === 1 ? 'Ended 1 week ago' : `Ended ${weeksAgo} weeks ago`;
+        } else {
+          endDateText = `Ended ${daysAgo} days ago`;
+        }
+      } else if (isEnded) {
+        endDateText = 'Ended';
+      }
+      
+      // Use exact status from API - show as-is (capitalize first letter only)
+      const statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      
+      // Progress bar HTML - For AIP: show For/Against votes, no abstain
+      // Only show progress bar if votes are available
+      const progressBarHtml = (votesAvailable && totalVotes !== null && totalVotes > 0) ? `
+        <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
+          <div class="progress-bar">
+            ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
+            ${againstPercent > 0 ? `<div class="progress-segment progress-against" style="width: ${againstPercent}%"></div>` : ''}
+          </div>
+        </div>
+      ` : '';
+      
+      // Quorum display for AIP (instead of abstain)
+      // Only show quorum if votes are available
+      const quorumHtml = (quorum > 0 && votesAvailable && totalVotes !== null) ? `
+        <div style="font-size: 0.85em; color: #6b7280; margin-top: 8px; margin-bottom: 8px; padding: 8px; background: ${quorumReached ? '#f0fdf4' : '#fef2f2'}; border-radius: 4px; border-left: 3px solid ${quorumReached ? '#10b981' : '#ef4444'};">
+          <strong style="color: #111827;">Quorum:</strong> ${formatVoteAmount(totalVotes)} / ${formatVoteAmount(quorum)} AAVE 
+          <span style="color: ${quorumReached ? '#10b981' : '#ef4444'}; font-weight: 600;">
+            (${Math.round(quorumPercent)}% - ${quorumReached ? '✓ Reached' : '✗ Not Reached'})
+          </span>
+        </div>
+      ` : '';
+      
       return `
         <div class="governance-stage">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <div style="font-weight: 600; font-size: 0.9em;">AIP ${aipNumber} (On-chain)</div>
-            <div class="status-badge ${statusClass}" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600;">
-              ${status}
+          <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
+            <span>AIP (On-Chain) ${aipNumber}</span>
+            <div class="status-badge ${statusClass}">
+              ${statusBadgeText}
             </div>
           </div>
-          ${isEndingSoon ? `<div style="color: #dc2626; font-size: 0.85em; font-weight: 600; margin-bottom: 8px;">⚠️ ${timeDisplay}</div>` : `<div style="font-size: 0.85em; color: #6b7280; margin-bottom: 8px;">${timeDisplay}</div>`}
-          ${quorum > 0 ? `
-            <div style="font-size: 0.85em; color: #6b7280; margin-bottom: 4px;">
-              Quorum: <strong style="color: #111827;">${formatVoteAmount(totalVotes)}/${formatVoteAmount(quorum)} (${Math.round(quorumPercent)}%)</strong>
+          ${(endDateText && endDateText !== 'Ended') || (!isEnded && timeDisplay) ? `
+            <div style="margin-bottom: 12px;">
+              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+                ${endDateText && endDateText !== 'Ended' ? endDateText : timeDisplay}
+              </div>
             </div>
           ` : ''}
-          <div style="font-size: 0.85em; color: #6b7280; margin-bottom: 12px;">
-            <strong style="color: #10b981;">For: ${Math.round(forPercent)}%</strong> | <strong style="color: #ef4444;">Against: ${Math.round(againstPercent)}%</strong>
+          ${progressBarHtml}
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            ${votesAvailable ? `
+              <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+              <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong>
+            ` : `
+              <span style="color: #9ca3af; font-style: italic;">Vote data not available from subgraph</span>
+            `}
           </div>
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box;">
+          ${quorumHtml}
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; ${isEnded ? 'background-color: #e5e7eb !important; color: #6b7280 !important;' : 'background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;'}">
             ${stageData.status === 'active' ? 'Vote on Aave' : 'View on Aave'}
           </a>
         </div>
@@ -1503,8 +2383,26 @@ export default apiInitializer((api) => {
       console.error("❌ [RENDER] Temp Check data exists but HTML is empty!");
     }
     
+    // Check if any stage has ended/passed to use dim background
+    const checkStageEnded = (stage) => {
+      if (!stage) return false;
+      const isEnded = stage.daysLeft !== null && stage.daysLeft < 0;
+      const isExecuted = stage.status === 'executed' || stage.status === 'passed';
+      return isEnded || isExecuted;
+    };
+    
+    const hasEndedStage = checkStageEnded(stages.tempCheck) || 
+                          checkStageEnded(stages.arfc) || 
+                          checkStageEnded(stages.aip);
+    
+    // Dim ended proposals with opacity instead of changing background color
+    const widgetOpacity = hasEndedStage ? 'opacity: 0.6;' : '';
+    
     const widgetHTML = `
-      <div class="tally-status-widget" style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box;">
+      <div class="tally-status-widget" style="background: #fff; ${widgetOpacity} border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box; position: relative;">
+        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
+          ×
+        </button>
         ${tempCheckHTML}
         ${arfcHTML}
         ${aipHTML}
@@ -1512,6 +2410,15 @@ export default apiInitializer((api) => {
     `;
     
     statusWidget.innerHTML = widgetHTML;
+    
+    // Add close button handler
+    const closeBtn = statusWidget.querySelector('.widget-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        statusWidget.style.display = 'none';
+        statusWidget.remove();
+      });
+    }
     
     // Set widget styles for column layout
     statusWidget.style.width = '100%';
@@ -1540,33 +2447,91 @@ export default apiInitializer((api) => {
     }
     
     if (isMobile) {
-      // On mobile, insert at the very top of the topic, before the first post
+      // On mobile, insert widgets sequentially so all are visible
+      // Find existing widgets and insert after the last one, or before first post if none exist
       try {
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
         const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
         
+        // Find all existing widgets on mobile (they should be before the first post)
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        let lastWidget = null;
+        
+        // Find the last widget that's actually in the DOM and before posts
         if (firstPost && firstPost.parentNode) {
-          // Insert before first post using its parent
-          firstPost.parentNode.insertBefore(statusWidget, firstPost);
-          console.log("✅ [MOBILE] Widget inserted before first post");
-        } else if (topicBody) {
-          // Insert at the beginning of topic body
-          if (topicBody.firstChild) {
-            topicBody.insertBefore(statusWidget, topicBody.firstChild);
-          } else {
-            topicBody.appendChild(statusWidget);
+          const siblings = Array.from(firstPost.parentNode.children);
+          for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
+            if (siblings[i].classList.contains('tally-status-widget-container')) {
+              lastWidget = siblings[i];
+              break;
+            }
           }
-          console.log("✅ [MOBILE] Widget inserted at top of topic body");
+        }
+        
+        if (firstPost && firstPost.parentNode) {
+          if (lastWidget) {
+            // Insert after the last widget
+            lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
+            console.log("✅ [MOBILE] Widget inserted after last widget");
+          } else {
+            // No existing widgets, insert before first post
+            firstPost.parentNode.insertBefore(statusWidget, firstPost);
+            console.log("✅ [MOBILE] Widget inserted before first post (first widget)");
+          }
+          // Remove URL from rendering set now that widget is in DOM
+          if (proposalUrl) {
+            renderingUrls.delete(proposalUrl);
+          }
+        } else if (topicBody) {
+          // Find last widget in topic body
+          const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+          if (widgetsInBody.length > 0) {
+            // Insert after the last widget
+            const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
+            if (lastWidgetInBody.nextSibling) {
+              topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
+            } else {
+              topicBody.appendChild(statusWidget);
+            }
+            console.log("✅ [MOBILE] Widget inserted after last widget in topic body");
+          } else {
+            // No existing widgets, insert at the beginning
+            if (topicBody.firstChild) {
+              topicBody.insertBefore(statusWidget, topicBody.firstChild);
+            } else {
+              topicBody.appendChild(statusWidget);
+            }
+            console.log("✅ [MOBILE] Widget inserted at top of topic body (first widget)");
+          }
+          // Remove URL from rendering set now that widget is in DOM
+          if (proposalUrl) {
+            renderingUrls.delete(proposalUrl);
+          }
         } else {
           // Try to find the main content area
           const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
           if (mainContent) {
-            if (mainContent.firstChild) {
-              mainContent.insertBefore(statusWidget, mainContent.firstChild);
+            const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
+            if (widgetsInMain.length > 0) {
+              const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
+              if (lastWidgetInMain.nextSibling) {
+                mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
+              } else {
+                mainContent.appendChild(statusWidget);
+              }
+              console.log("✅ [MOBILE] Widget inserted after last widget in main content");
             } else {
-              mainContent.appendChild(statusWidget);
+              if (mainContent.firstChild) {
+                mainContent.insertBefore(statusWidget, mainContent.firstChild);
+              } else {
+                mainContent.appendChild(statusWidget);
+              }
+              console.log("✅ [MOBILE] Widget inserted in main content area (first widget)");
             }
-            console.log("✅ [MOBILE] Widget inserted in main content area");
+            // Remove URL from rendering set now that widget is in DOM
+            if (proposalUrl) {
+              renderingUrls.delete(proposalUrl);
+            }
           } else {
             // Last resort: append to body at top
             const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
@@ -1576,25 +2541,70 @@ export default apiInitializer((api) => {
               document.body.appendChild(statusWidget);
             }
             console.log("✅ [MOBILE] Widget inserted at top of body");
+            // Remove URL from rendering set now that widget is in DOM
+            if (proposalUrl) {
+              renderingUrls.delete(proposalUrl);
+            }
           }
         }
       } catch (error) {
         console.error("❌ [MOBILE] Error inserting widget:", error);
+        // Remove URL from rendering set on error
+        if (proposalUrl) {
+          renderingUrls.delete(proposalUrl);
+        }
         // Fallback: try to append to a safe location
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
         if (topicBody) {
           topicBody.insertBefore(statusWidget, topicBody.firstChild);
+          // Remove URL from rendering set after fallback insert
+          if (proposalUrl) {
+            renderingUrls.delete(proposalUrl);
+          }
         } else {
           document.body.insertBefore(statusWidget, document.body.firstChild);
+          // Remove URL from rendering set after fallback insert
+          if (proposalUrl) {
+            renderingUrls.delete(proposalUrl);
+          }
         }
       }
     } else {
       // Desktop: Append to container for column layout
+      // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
       const widgetsContainer = getOrCreateWidgetsContainer();
       if (widgetsContainer) {
-        widgetsContainer.appendChild(statusWidget);
+        // Get stage order for this widget
+        const thisStageOrder = parseInt(statusWidget.getAttribute("data-stage-order") || "3");
+        
+        // Find the correct position to insert based on stage order
+        const existingWidgets = Array.from(widgetsContainer.children);
+        let insertBefore = null;
+        
+        // Find first widget with higher stage order (or same order, insert after)
+        for (const widget of existingWidgets) {
+          const widgetStageOrder = parseInt(widget.getAttribute("data-stage-order") || "3");
+          if (widgetStageOrder > thisStageOrder) {
+            insertBefore = widget;
+            break;
+          }
+        }
+        
+        if (insertBefore) {
+          widgetsContainer.insertBefore(statusWidget, insertBefore);
+          console.log(`✅ [DESKTOP] Widget inserted in correct order (stage order: ${thisStageOrder})`);
+        } else {
+          // No widget with higher order, append at end
+          widgetsContainer.appendChild(statusWidget);
+          console.log(`✅ [DESKTOP] Widget appended at end (stage order: ${thisStageOrder})`);
+        }
+        
         // Position is already set by updateContainerPosition - no need to update
-        console.log("✅ [DESKTOP] Widget added to column container");
+        
+        // Remove URL from rendering set now that widget is in DOM
+        if (proposalUrl) {
+          renderingUrls.delete(proposalUrl);
+        }
       } else {
         // Fallback: if container creation failed, insert inline (shouldn't happen on desktop)
         console.warn("⚠️ [DESKTOP] Container not available, inserting inline");
@@ -1617,24 +2627,46 @@ export default apiInitializer((api) => {
     const statusWidgetId = `aave-status-widget-${widgetId}`;
     const proposalType = proposalData.type || 'snapshot'; // 'snapshot' or 'aip'
     
-    // Remove only widgets of the same type to prevent duplicates, but allow multiple types
-    const existingWidgets = document.querySelectorAll(`.tally-status-widget-container[data-proposal-type="${proposalType}"]`);
-    existingWidgets.forEach(widget => {
-      widget.remove();
-      // Clean up stored data
-      const existingWidgetId = widget.getAttribute('data-tally-status-id');
-      if (existingWidgetId) {
-        delete window[`tallyWidget_${existingWidgetId}`];
-        // Clear any auto-refresh intervals
-        const refreshKey = `tally_refresh_${existingWidgetId}`;
-        if (window[refreshKey]) {
-          clearInterval(window[refreshKey]);
-          delete window[refreshKey];
+    // Remove widgets with the same URL to prevent duplicates (more specific than type)
+    // This ensures we don't show the same proposal twice
+    const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${originalUrl}"]`);
+    if (existingWidgetsByUrl.length > 0) {
+      console.log(`🔵 [WIDGET] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, removing duplicates`);
+      existingWidgetsByUrl.forEach(widget => {
+        widget.remove();
+        // Clean up stored data
+        const existingWidgetId = widget.getAttribute('data-tally-status-id');
+        if (existingWidgetId) {
+          delete window[`tallyWidget_${existingWidgetId}`];
+          // Clear any auto-refresh intervals
+          const refreshKey = `tally_refresh_${existingWidgetId}`;
+          if (window[refreshKey]) {
+            clearInterval(window[refreshKey]);
+            delete window[refreshKey];
+          }
         }
+      });
+    } else {
+      // Fallback: Remove widgets of the same type if no URL match (for backwards compatibility)
+      const existingWidgetsByType = document.querySelectorAll(`.tally-status-widget-container[data-proposal-type="${proposalType}"]`);
+      if (existingWidgetsByType.length > 0) {
+        console.log(`🔵 [WIDGET] No URL match found, removing ${existingWidgetsByType.length} existing ${proposalType} widget(s) by type`);
+        existingWidgetsByType.forEach(widget => {
+          widget.remove();
+          // Clean up stored data
+          const existingWidgetId = widget.getAttribute('data-tally-status-id');
+          if (existingWidgetId) {
+            delete window[`tallyWidget_${existingWidgetId}`];
+            // Clear any auto-refresh intervals
+            const refreshKey = `tally_refresh_${existingWidgetId}`;
+            if (window[refreshKey]) {
+              clearInterval(window[refreshKey]);
+              delete window[refreshKey];
+            }
+          }
+        });
       }
-    });
-    
-    console.log("🔵 [WIDGET] Removed existing", proposalType, "widget(s) before creating new one");
+    }
     
     // Store proposal info for auto-refresh
     if (proposalInfo) {
@@ -1817,7 +2849,7 @@ export default apiInitializer((api) => {
         buttonText = 'View on Snapshot';
       }
     } else if (proposalData.type === 'aip') {
-      stageLabel = 'AIP';
+      stageLabel = 'AIP (On-Chain)';
       buttonText = proposalData.status === 'active' ? 'Vote on Aave' : 'View on Aave';
     } else {
       // Default fallback (shouldn't happen, but just in case)
@@ -1836,8 +2868,16 @@ export default apiInitializer((api) => {
     const urgencyClass = isEndingSoon ? 'ending-soon' : '';
     const urgencyStyle = isEndingSoon ? 'border: 2px solid #ef4444; background: #fef2f2;' : '';
     
+    // Check if proposal has passed/ended - dim with opacity instead of changing background
+    const isEnded = proposalData.daysLeft !== null && proposalData.daysLeft < 0;
+    const hasPassed = isExecuted || isEnded || (status === 'executed') || (status === 'passed');
+    const endedOpacity = hasPassed && !isEndingSoon ? 'opacity: 0.6;' : '';
+    
     statusWidget.innerHTML = `
-      <div class="tally-status-widget ${urgencyClass}" style="${urgencyStyle}">
+      <div class="tally-status-widget ${urgencyClass}" style="${urgencyStyle} background: #fff; ${endedOpacity} position: relative;">
+        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; z-index: 10;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
+          ×
+        </button>
         ${stageLabel ? `<div class="stage-label" style="font-size: 0.75em; font-weight: 600; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">${stageLabel}</div>` : ''}
         ${isEndingSoon ? `<div class="urgency-alert" style="background: #fee2e2; color: #dc2626; padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 0.85em; font-weight: 600; text-align: center;">⚠️ Ending Soon!</div>` : ''}
         <div class="status-badges-row">
@@ -1909,11 +2949,20 @@ export default apiInitializer((api) => {
             Quorum: ${formatVoteAmount(totalVotes)} / ${formatVoteAmount(proposalData.quorum)}
           </div>
         ` : ''}
-        <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
+        <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button" style="${hasPassed && !isEndingSoon ? 'background-color: #e5e7eb !important; color: #6b7280 !important;' : 'background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;'}">
           ${buttonText}
         </a>
       </div>
     `;
+    
+    // Add close button handler for this widget type
+    const closeBtn = statusWidget.querySelector('.widget-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        statusWidget.style.display = 'none';
+        statusWidget.remove();
+      });
+    }
 
     // Check if mobile (width <= 1024px or mobile user agent)
     const isMobile = window.innerWidth <= 1024 || 
@@ -1922,34 +2971,79 @@ export default apiInitializer((api) => {
     console.log(`🔵 [MOBILE] Status widget detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}`);
     
     if (isMobile) {
-      // Mobile: Insert widget at the top of the topic, before the first post
+      // Mobile: Insert widgets sequentially so all are visible
+      // Find existing widgets and insert after the last one, or before first post if none exist
       try {
         const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
         const firstPost = allPosts.length > 0 ? allPosts[0] : null;
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
         
+        // Find all existing widgets on mobile (they should be before the first post)
+        let lastWidget = null;
+        
+        // Find the last widget that's actually in the DOM and before posts
         if (firstPost && firstPost.parentNode) {
-          // Insert before first post using its parent
-          firstPost.parentNode.insertBefore(statusWidget, firstPost);
-          console.log("✅ [MOBILE] Status widget inserted before first post");
-        } else if (topicBody) {
-          // Insert at the beginning of topic body
-          if (topicBody.firstChild) {
-            topicBody.insertBefore(statusWidget, topicBody.firstChild);
-          } else {
-            topicBody.appendChild(statusWidget);
+          const siblings = Array.from(firstPost.parentNode.children);
+          for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
+            if (siblings[i].classList.contains('tally-status-widget-container')) {
+              lastWidget = siblings[i];
+              break;
+            }
           }
-          console.log("✅ [MOBILE] Status widget inserted at top of topic body");
+        }
+        
+        if (firstPost && firstPost.parentNode) {
+          if (lastWidget) {
+            // Insert after the last widget
+            lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
+            console.log("✅ [MOBILE] Status widget inserted after last widget");
+          } else {
+            // No existing widgets, insert before first post
+            firstPost.parentNode.insertBefore(statusWidget, firstPost);
+            console.log("✅ [MOBILE] Status widget inserted before first post (first widget)");
+          }
+        } else if (topicBody) {
+          // Find last widget in topic body
+          const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+          if (widgetsInBody.length > 0) {
+            // Insert after the last widget
+            const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
+            if (lastWidgetInBody.nextSibling) {
+              topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
+            } else {
+              topicBody.appendChild(statusWidget);
+            }
+            console.log("✅ [MOBILE] Status widget inserted after last widget in topic body");
+          } else {
+            // No existing widgets, insert at the beginning
+            if (topicBody.firstChild) {
+              topicBody.insertBefore(statusWidget, topicBody.firstChild);
+            } else {
+              topicBody.appendChild(statusWidget);
+            }
+            console.log("✅ [MOBILE] Status widget inserted at top of topic body (first widget)");
+          }
         } else {
           // Try to find the main content area
           const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
           if (mainContent) {
-            if (mainContent.firstChild) {
-              mainContent.insertBefore(statusWidget, mainContent.firstChild);
+            const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
+            if (widgetsInMain.length > 0) {
+              const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
+              if (lastWidgetInMain.nextSibling) {
+                mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
+              } else {
+                mainContent.appendChild(statusWidget);
+              }
+              console.log("✅ [MOBILE] Status widget inserted after last widget in main content");
             } else {
-              mainContent.appendChild(statusWidget);
+              if (mainContent.firstChild) {
+                mainContent.insertBefore(statusWidget, mainContent.firstChild);
+              } else {
+                mainContent.appendChild(statusWidget);
+              }
+              console.log("✅ [MOBILE] Status widget inserted in main content area (first widget)");
             }
-            console.log("✅ [MOBILE] Status widget inserted in main content area");
           } else {
             // Last resort: append to body at top
             const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
@@ -2026,6 +3120,17 @@ export default apiInitializer((api) => {
         // Append to body but constrain visually within main content
         document.body.appendChild(statusWidget);
         console.log("✅ [DESKTOP] Status widget positioned below timeline scroll indicator");
+        console.log("📍 [POSITION DATA] Widget position:", {
+          left: `${leftPosition}px`,
+          top: `${topPosition}px`,
+          rightEdge: rightEdge,
+          timelineTop: timelineRect.top,
+          timelineBottom: timelineRect.bottom,
+          numbersBottom: timelineNumbers ? timelineNumbers.getBoundingClientRect().bottom : 'N/A',
+          mainOutletRight: mainOutletRect ? mainOutletRect.right : 'N/A',
+          windowWidth: window.innerWidth,
+          widgetWidth: '320px'
+        });
       } else {
         // Fallback: position on right side, constrained to main content
         let rightPosition = 50;
@@ -2038,6 +3143,13 @@ export default apiInitializer((api) => {
         statusWidget.style.top = '50px';
         document.body.appendChild(statusWidget);
         console.log("✅ [DESKTOP] Status widget rendered on right side (timeline not found)");
+        console.log("📍 [POSITION DATA] Widget position (fallback):", {
+          right: `${rightPosition}px`,
+          top: '50px',
+          mainOutletRight: mainOutletRect ? mainOutletRect.right : 'N/A',
+          windowWidth: window.innerWidth,
+          widgetWidth: '320px'
+        });
       }
     }
   }
@@ -2361,7 +3473,7 @@ export default apiInitializer((api) => {
     let type = null;
     if (url.includes('snapshot.org')) {
       type = 'snapshot';
-    } else if (url.includes('governance.aave.com')) {
+    } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
       type = 'aip';
     }
     
@@ -2400,9 +3512,16 @@ export default apiInitializer((api) => {
         if (!proposalInfo) {
           return null;
         }
-        // Use topicId or aipNumber depending on what we extracted
-        const id = proposalInfo.topicId || proposalInfo.aipNumber;
-        return await fetchAIPProposal(id, cacheKey);
+        // Use proposalId as the primary key (extracted from URL)
+        // This is the canonical identifier for fetching on-chain
+        const proposalId = proposalInfo.proposalId || proposalInfo.topicId || proposalInfo.aipNumber;
+        if (!proposalId) {
+          console.warn("⚠️ [AIP] No proposalId extracted from URL:", url);
+          return null;
+        }
+        // Pass URL source to use correct state enum mapping
+        const urlSource = proposalInfo.urlSource || 'app.aave.com';
+        return await fetchAIPProposal(proposalId, cacheKey, 'mainnet', urlSource);
       }
       
       return null;
@@ -2683,7 +3802,16 @@ export default apiInitializer((api) => {
     const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
     if (existingWidgets.length > 0) {
       console.log(`🔵 [TOPIC] Clearing ${existingWidgets.length} existing widget(s) before creating new ones`);
-      existingWidgets.forEach(widget => widget.remove());
+      existingWidgets.forEach(widget => {
+        // Get URL from widget before removing it
+        const widgetUrl = widget.getAttribute('data-tally-url');
+        if (widgetUrl) {
+          // Remove from tracking sets when clearing widget
+          renderingUrls.delete(widgetUrl);
+          fetchingUrls.delete(widgetUrl);
+        }
+        widget.remove();
+      });
     }
     
     // Also clear the container if it exists (will be recreated if needed)
@@ -2692,6 +3820,10 @@ export default apiInitializer((api) => {
       container.remove();
       console.log("🔵 [TOPIC] Cleared widgets container");
     }
+    
+    // Clear all tracking sets when starting fresh
+    renderingUrls.clear();
+    fetchingUrls.clear();
     
     if (allProposals.snapshot.length === 0 && allProposals.aip.length === 0) {
       console.log("🔵 [TOPIC] No proposals found - removing widgets");
@@ -2715,12 +3847,28 @@ export default apiInitializer((api) => {
     
     // ===== SNAPSHOT WIDGETS - One per URL =====
     if (uniqueSnapshotUrls.length > 0) {
-      Promise.allSettled(uniqueSnapshotUrls.map(url => {
+      // Filter out URLs that are already being fetched or rendered
+      const snapshotUrlsToFetch = uniqueSnapshotUrls.filter(url => {
+        if (fetchingUrls.has(url) || renderingUrls.has(url)) {
+          console.log(`🔵 [TOPIC] Snapshot URL ${url} is already being fetched/rendered, skipping duplicate`);
+          return false;
+        }
+        fetchingUrls.add(url);
+        return true;
+      });
+      
+      Promise.allSettled(snapshotUrlsToFetch.map(url => {
         // Wrap in Promise.resolve to ensure we always return a promise that resolves
         return Promise.resolve()
           .then(() => fetchProposalDataByType(url, 'snapshot'))
-          .then(data => ({ url, data, type: 'snapshot' }))
+          .then(data => {
+            // Remove from fetching set when fetch completes
+            fetchingUrls.delete(url);
+            return { url, data, type: 'snapshot' };
+          })
           .catch(error => {
+            // Remove from fetching set on error
+            fetchingUrls.delete(url);
             // Mark error as handled to prevent unhandled rejection warnings
             handledErrors.add(error);
             if (error.cause) {
@@ -2751,10 +3899,16 @@ export default apiInitializer((api) => {
             console.warn(`⚠️ [TOPIC] ${failedSnapshots.length} out of ${uniqueSnapshotUrls.length} Snapshot proposal(s) failed to load`);
           }
           
-          console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${uniqueSnapshotUrls.length} unique URL(s)`);
+          console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
           
           // Render one widget per Snapshot proposal
           validSnapshots.forEach((snapshot, index) => {
+            // Check again if URL is being rendered (in case another fetch completed first)
+            if (renderingUrls.has(snapshot.url)) {
+              console.log(`🔵 [TOPIC] Snapshot URL ${snapshot.url} is already being rendered, skipping duplicate render`);
+              return;
+            }
+            
             const stage = snapshot.data.stage || 'snapshot';
             const stageName = stage === 'temp-check' ? 'Temp Check' : 
                              stage === 'arfc' ? 'ARFC' : 'Snapshot';
@@ -2787,8 +3941,26 @@ export default apiInitializer((api) => {
     // ===== AIP WIDGETS - One per URL =====
     if (uniqueAipUrls.length > 0) {
       uniqueAipUrls.forEach((aipUrl, aipIndex) => {
+        // Check if this URL is already being fetched or rendered
+        if (fetchingUrls.has(aipUrl) || renderingUrls.has(aipUrl)) {
+          console.log(`🔵 [TOPIC] AIP URL ${aipUrl} is already being fetched/rendered, skipping duplicate`);
+          return;
+        }
+        
+        // Mark URL as being fetched
+        fetchingUrls.add(aipUrl);
+        
         fetchProposalDataByType(aipUrl, 'aip')
           .then(aipData => {
+            // Remove from fetching set when fetch completes
+            fetchingUrls.delete(aipUrl);
+            
+            // Check again if URL is being rendered (in case another fetch completed first)
+            if (renderingUrls.has(aipUrl)) {
+              console.log(`🔵 [TOPIC] AIP URL ${aipUrl} is already being rendered, skipping duplicate render`);
+              return;
+            }
+            
             if (aipData && aipData.title) {
               const aipWidgetId = `aip-widget-${aipIndex}-${Date.now()}`;
               renderMultiStageWidget({
@@ -2805,6 +3977,8 @@ export default apiInitializer((api) => {
             }
           })
           .catch(error => {
+            // Remove from fetching set on error
+            fetchingUrls.delete(aipUrl);
             console.warn(`⚠️ [TOPIC] Error fetching AIP ${aipIndex + 1} from ${aipUrl}:`, error.message || error);
             // Don't throw - just log and continue with other widgets
           });
@@ -2815,6 +3989,11 @@ export default apiInitializer((api) => {
   // Debounce widget setup to prevent duplicate widgets
   let widgetSetupTimeout = null;
   let isWidgetSetupRunning = false;
+  
+  // Track URLs currently being rendered to prevent race conditions
+  const renderingUrls = new Set();
+  // Track URLs currently being fetched to prevent duplicate fetches
+  const fetchingUrls = new Set();
   
   function debouncedSetupTopicWidget() {
     // Clear any pending setup
@@ -3586,6 +4765,12 @@ export default apiInitializer((api) => {
 
       // Wait for textarea to be available, then set up listeners
       const setupListeners = () => {
+        // Check if this.element exists before trying to use it
+        if (!this.element) {
+          console.log("🔵 [COMPOSER] Element not available in setupListeners");
+          return;
+        }
+        
         const textarea = this.element.querySelector('.d-editor-input') ||
                         document.querySelector('.d-editor-input') ||
                         document.querySelector('textarea.d-editor-input');
@@ -3602,21 +4787,34 @@ export default apiInitializer((api) => {
           // Initial check
           setTimeout(checkForUrls, 100);
         } else {
-          // Retry after a short delay
-          setTimeout(setupListeners, 200);
+          // Retry after a short delay (only if element still exists)
+          if (this.element) {
+            setTimeout(setupListeners, 200);
+          }
         }
       };
 
       // Start checking for URLs periodically (more frequent for better detection)
-      const intervalId = setInterval(checkForUrls, 500);
+      // Wrap in a function that checks if element still exists
+      const intervalId = setInterval(() => {
+        if (this.element) {
+          checkForUrls();
+        } else {
+          // Element destroyed, clear interval
+          clearInterval(intervalId);
+        }
+      }, 500);
       
       // Set up event listeners when textarea is ready
       setupListeners();
       
       // Also observe DOM changes for composer
       const composerObserver = new MutationObserver(() => {
-        setupListeners();
-        checkForUrls();
+        // Only run if element still exists
+        if (this.element) {
+          setupListeners();
+          checkForUrls();
+        }
       });
       
       const composerContainer = document.querySelector('.composer-popup, .composer-container, .d-editor-container');
@@ -3625,10 +4823,12 @@ export default apiInitializer((api) => {
       }
       
       // Cleanup on destroy
-      this.element.addEventListener('willDestroyElement', () => {
-        clearInterval(intervalId);
-        composerObserver.disconnect();
-      }, { once: true });
+      if (this.element) {
+        this.element.addEventListener('willDestroyElement', () => {
+          clearInterval(intervalId);
+          composerObserver.disconnect();
+        }, { once: true });
+      }
     }
   }, { pluginId: "arbitrium-tally-widget-composer" });
 
