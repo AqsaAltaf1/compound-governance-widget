@@ -84,7 +84,7 @@ export default apiInitializer((api) => {
   
   // Unused function - kept for reference but not called
   // eslint-disable-next-line no-unused-vars
-  async function ensureEthersLoaded() { // eslint-disable-line no-unused-vars
+  async function ensureEthersLoaded() {
     // Check if already loaded
     if (window.ethers) {
       return window.ethers;
@@ -107,7 +107,6 @@ export default apiInitializer((api) => {
         script.crossOrigin = 'anonymous';
         
         script.onload = () => {
-          ethersLoaded = true;
           if (window.ethers) {
             resolve(window.ethers);
           } else {
@@ -901,6 +900,7 @@ export default apiInitializer((api) => {
 
   // Fetch AIP proposal data directly from Ethereum blockchain (source of truth)
   // This is the most reliable method - no CORS, no backend, will never randomly break
+  // eslint-disable-next-line no-unused-vars
   async function fetchAIPFromOnChain(topicId, urlSource = 'app.aave.com') {
     try {
       // Ensure ethers.js is loaded
@@ -932,6 +932,7 @@ export default apiInitializer((api) => {
       }
 
       // Create provider and contract
+      // Note: These variables are not defined - this function requires configuration
       // eslint-disable-next-line no-undef
       const provider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
       // eslint-disable-next-line no-undef
