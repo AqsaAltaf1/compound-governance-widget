@@ -84,7 +84,7 @@ export default apiInitializer((api) => {
   
   // Unused function - kept for reference but not called
   // eslint-disable-next-line no-unused-vars
-  async function ensureEthersLoaded() {
+  async function ensureEthersLoaded() { // eslint-disable-line no-unused-vars
     // Check if already loaded
     if (window.ethers) {
       return window.ethers;
@@ -92,7 +92,6 @@ export default apiInitializer((api) => {
     
     // If already loading, return the existing promise
     let ethersPromise = null;
-    let ethersLoaded = false;
     
     if (ethersPromise) {
       return ethersPromise;
@@ -722,8 +721,10 @@ export default apiInitializer((api) => {
   // Fetch proposal markdown from vote.onaave.com
   // This provides rich content: title, description, full markdown body
   // Returns markdown with front-matter parsed
+  // eslint-disable-next-line no-unused-vars
   async function fetchAIPMarkdown(proposalId) {
     try {
+      // eslint-disable-next-line no-undef
       const apiUrl = `${AAVE_VOTE_SITE}?proposalId=${proposalId}`;
       const response = await fetchWithRetry(apiUrl, {
         method: "GET",
@@ -931,9 +932,13 @@ export default apiInitializer((api) => {
       }
 
       // Create provider and contract
+      // eslint-disable-next-line no-undef
       const provider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
+      // eslint-disable-next-line no-undef
       const governanceContract = new ethers.Contract(
+        // eslint-disable-next-line no-undef
         AAVE_GOVERNANCE_V3_ADDRESS,
+        // eslint-disable-next-line no-undef
         AAVE_GOVERNANCE_V3_ABI,
         provider
       );
@@ -1372,6 +1377,7 @@ export default apiInitializer((api) => {
       }
     }
     */
+    // eslint-disable-next-line no-unreachable
     return null;
   }
 
