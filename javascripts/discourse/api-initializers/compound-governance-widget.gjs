@@ -83,6 +83,7 @@ export default apiInitializer((api) => {
   // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
   
   // Unused function - kept for reference but not called
+  // eslint-disable-next-line no-unused-vars
   async function ensureEthersLoaded() {
     // Check if already loaded
     if (window.ethers) {
@@ -90,6 +91,9 @@ export default apiInitializer((api) => {
     }
     
     // If already loading, return the existing promise
+    let ethersPromise = null;
+    let ethersLoaded = false;
+    
     if (ethersPromise) {
       return ethersPromise;
     }
@@ -119,10 +123,10 @@ export default apiInitializer((api) => {
         };
         
         document.head.appendChild(script);
-      } catch (error) {
-        console.warn("⚠️ [AIP] Error loading ethers.js:", error);
+      } catch (err) {
+        console.warn("⚠️ [AIP] Error loading ethers.js:", err);
         ethersPromise = null;
-        reject(error);
+        reject(err);
       }
     });
     
@@ -228,7 +232,7 @@ export default apiInitializer((api) => {
             return { proposalId, type: 'aip', urlSource };
           }
         }
-      } catch (e) {
+      } catch {
         // URL parsing failed, try regex fallback
       }
       
@@ -587,6 +591,7 @@ export default apiInitializer((api) => {
   }
 
   // Fetch Aave AIP proposal data using The Graph API (method from ava.mjs)
+  // eslint-disable-next-line no-unused-vars
   async function fetchAIPProposal(proposalId, cacheKey, chain = 'mainnet', urlSource = 'app.aave.com') {
     try {
       console.log("🔵 [AIP] Fetching proposal from The Graph API - proposalId:", proposalId, "URL Source:", urlSource);
@@ -624,6 +629,7 @@ export default apiInitializer((api) => {
   // Priority: markdown > subgraph > on-chain defaults
   // On-chain data is the source of truth for votes/state
   // Subgraph can provide voting data if on-chain is unavailable
+  // eslint-disable-next-line no-unused-vars
   function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
     // Start with on-chain data (source of truth for votes/state)
     const merged = { ...onChainData };
@@ -871,15 +877,15 @@ export default apiInitializer((api) => {
           proposalId: p.proposalId?.toString() || proposalId.toString(),
           title: p.proposalMetadata?.title || `Proposal ${proposalId}`,
           description: null, // Description not available in this query
-          status: status,
+          status,
           state: p.state,
           creator: p.creator,
           proposer: p.creator,
           ipfsHash: p.ipfsHash,
           votingDuration: p.votingDuration,
-          forVotes: forVotes,
-          againstVotes: againstVotes,
-          abstainVotes: abstainVotes,
+          forVotes,
+          againstVotes,
+          abstainVotes,
           quorum: null,
         };
       } else {
@@ -949,7 +955,7 @@ export default apiInitializer((api) => {
         // Get proposal state
         try {
           state = await governanceContract.getProposalState(proposalId);
-        } catch (error) {
+        } catch {
           // Use state from proposal if available, otherwise default to 0
           state = proposal.state || 0;
           console.debug("🔵 [AIP] Using state from proposal data");
@@ -959,9 +965,11 @@ export default apiInitializer((api) => {
         console.error("❌ [AIP] Error fetching proposal from chain:", error.message);
         if (error.message?.includes("ABI decoding")) {
           console.error("❌ [AIP] ABI decoding error - contract address or ABI may be incorrect");
+          // eslint-disable-next-line no-undef
           console.error("❌ [AIP] Contract:", AAVE_GOVERNANCE_V3_ADDRESS);
         }
         if (error.message?.includes("network") || error.message?.includes("timeout")) {
+          // eslint-disable-next-line no-undef
           console.error("❌ [AIP] RPC connection error - check ETH_RPC_URL:", ETH_RPC_URL);
         }
         return null;
@@ -1022,7 +1030,7 @@ export default apiInitializer((api) => {
       id: proposalId.toString(),
       title: `Proposal ${proposalId}`, // On-chain doesn't have title, will be enriched from markdown/subgraph
       description: `Aave Governance Proposal ${proposalId}`, // On-chain doesn't have description, will be enriched
-      status: status,
+      status,
       forVotes: proposal.forVotes ? proposal.forVotes.toString() : '0',
       againstVotes: proposal.againstVotes ? proposal.againstVotes.toString() : '0',
       abstainVotes: '0', // Aave V3 doesn't have abstain votes
@@ -1041,6 +1049,7 @@ export default apiInitializer((api) => {
   // NOTE: This API currently returns "Unknown field 'proposal' on type 'Query'"
   // The GraphQL schema may be different or this endpoint may not be available
   // Disabling this function until the correct API schema is confirmed
+  // eslint-disable-next-line no-unused-vars
   async function fetchAIPFromOfficialAPI(topicId) {
     // Skip this API for now since it doesn't support the 'proposal' field
     // Uncomment and fix the query once the correct GraphQL schema is known
@@ -1102,8 +1111,10 @@ export default apiInitializer((api) => {
   // Try fetching from Aave V3 Data API (JSON endpoint)
   // Fallback method - has CORS issues, only use if on-chain fails
   // NOTE: On-chain should be PRIMARY (no CORS, direct blockchain access)
+  // eslint-disable-next-line no-unused-vars
   async function fetchAIPFromDataAPI(topicId) {
     // This endpoint has CORS issues - only use as last resort
+    // eslint-disable-next-line no-undef
     const response = await fetchWithRetry(AAVE_V3_DATA_API, {
       method: "GET",
       headers: {
@@ -1165,6 +1176,7 @@ export default apiInitializer((api) => {
   // Fallback: Fetch from TheGraph subgraphs (DEPRECATED - endpoints removed)
   // NOTE: TheGraph has removed these endpoints. This function is kept for compatibility
   // but will always return null. Use Official API or Data API instead.
+  // eslint-disable-next-line no-unused-vars
   async function fetchAIPFromTheGraph(topicId, cacheKey, chain = 'mainnet') {
     console.warn("⚠️ [AIP] TheGraph subgraphs are no longer available (endpoints removed)");
     console.warn("⚠️ [AIP] Using Official Aave V3 API or Aave V3 Data API instead");
@@ -1720,6 +1732,7 @@ export default apiInitializer((api) => {
   }
 
   // Transform AIP proposal data to widget format
+  // eslint-disable-next-line no-unused-vars
   function transformAIPData(proposal) {
     // Calculate voting results
     const forVotes = parseInt(proposal.forVotes || "0", 10);
@@ -2273,6 +2286,7 @@ export default apiInitializer((api) => {
       console.log(`🔵 [RENDER] AIP - For: ${forVotes !== null ? forVotes : 'N/A'} (${forPercent}%), Against: ${againstVotes !== null ? againstVotes : 'N/A'} (${againstPercent}%), Total: ${totalVotes !== null ? totalVotes : 'N/A'}, Quorum: ${quorum} (${quorumPercent}%) - Reached: ${quorumReached}`);
       
       const timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+      // eslint-disable-next-line no-unused-vars
       const isEndingSoon = stageData.daysLeft !== null && stageData.daysLeft >= 0 && 
                           (stageData.daysLeft === 0 || (stageData.daysLeft === 1 && stageData.hoursLeft !== null && stageData.hoursLeft < 24));
       
@@ -2281,6 +2295,7 @@ export default apiInitializer((api) => {
       const aipNumber = aipMatch ? `#${aipMatch[1]}` : '';
       
       // Format vote amounts (same as Snapshot - with K for thousands)
+      // eslint-disable-next-line no-shadow
       const formatVoteAmount = (num) => {
         const n = Number(num);
         if (n >= 1000) {
@@ -2385,7 +2400,9 @@ export default apiInitializer((api) => {
     
     // Check if any stage has ended/passed to use dim background
     const checkStageEnded = (stage) => {
-      if (!stage) return false;
+      if (!stage) {
+        return false;
+      }
       const isEnded = stage.daysLeft !== null && stage.daysLeft < 0;
       const isExecuted = stage.status === 'executed' || stage.status === 'passed';
       return isEnded || isExecuted;
@@ -2454,6 +2471,7 @@ export default apiInitializer((api) => {
         const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
         
         // Find all existing widgets on mobile (they should be before the first post)
+        // eslint-disable-next-line no-unused-vars
         const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
         let lastWidget = null;
         
@@ -2575,7 +2593,7 @@ export default apiInitializer((api) => {
       const widgetsContainer = getOrCreateWidgetsContainer();
       if (widgetsContainer) {
         // Get stage order for this widget
-        const thisStageOrder = parseInt(statusWidget.getAttribute("data-stage-order") || "3");
+        const thisStageOrder = parseInt(statusWidget.getAttribute("data-stage-order") || "3", 10);
         
         // Find the correct position to insert based on stage order
         const existingWidgets = Array.from(widgetsContainer.children);
@@ -2583,7 +2601,7 @@ export default apiInitializer((api) => {
         
         // Find first widget with higher stage order (or same order, insert after)
         for (const widget of existingWidgets) {
-          const widgetStageOrder = parseInt(widget.getAttribute("data-stage-order") || "3");
+          const widgetStageOrder = parseInt(widget.getAttribute("data-stage-order") || "3", 10);
           if (widgetStageOrder > thisStageOrder) {
             insertBefore = widget;
             break;
@@ -3123,7 +3141,7 @@ export default apiInitializer((api) => {
         console.log("📍 [POSITION DATA] Widget position:", {
           left: `${leftPosition}px`,
           top: `${topPosition}px`,
-          rightEdge: rightEdge,
+          rightEdge,
           timelineTop: timelineRect.top,
           timelineBottom: timelineRect.bottom,
           numbersBottom: timelineNumbers ? timelineNumbers.getBoundingClientRect().bottom : 'N/A',
