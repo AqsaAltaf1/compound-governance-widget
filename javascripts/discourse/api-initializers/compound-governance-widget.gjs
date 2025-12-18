@@ -2170,7 +2170,7 @@ export default apiInitializer((api) => {
     });
   }
 
-  function renderMultiStageWidget(stages, widgetId) {
+  function renderMultiStageWidget(stages, widgetId, proposalOrder = null) {
     const statusWidgetId = `aave-governance-widget-${widgetId}`;
     
     // Determine widget type - if all stages are present, use 'combined', otherwise use specific type
@@ -2270,19 +2270,15 @@ export default apiInitializer((api) => {
     const proposalType = stages.aip ? 'aip' : 'snapshot';
     statusWidget.setAttribute("data-proposal-type", proposalType);
     
-    // Determine primary stage for ordering (governance flow: temp-check -> arfc -> aip)
-    // For combined widgets (all stages), order by final stage (AIP)
-    let stageOrder = 3; // Default to AIP (highest order)
-    if (hasAllStages) {
-      stageOrder = 3; // Combined widget shows all stages, order by final stage (AIP)
-    } else if (stages.tempCheck && !stages.arfc && !stages.aip) {
-      stageOrder = 1; // Temp Check only - first stage
-    } else if (stages.arfc && !stages.aip) {
-      stageOrder = 2; // ARFC only (or temp-check + arfc) - second stage
-    } else if (stages.aip) {
-      stageOrder = 3; // AIP (with or without other stages) - final stage
-    }
-    statusWidget.setAttribute("data-stage-order", stageOrder);
+    // Use proposal order (order in content) for positioning, fallback to stage order
+    // Proposal order takes precedence - widgets appear in the order proposals appear in content
+    const orderValue = proposalOrder !== null ? proposalOrder : 
+      (hasAllStages ? 3 : (stages.tempCheck && !stages.arfc && !stages.aip ? 1 : 
+      (stages.arfc && !stages.aip ? 2 : 3)));
+    
+    // Set both attributes for compatibility
+    statusWidget.setAttribute("data-proposal-order", orderValue);
+    statusWidget.setAttribute("data-stage-order", orderValue); // Keep for backward compatibility
     
     // Helper function to format time display
     function formatTimeDisplay(daysLeft, hoursLeft) {
@@ -2393,8 +2389,16 @@ export default apiInitializer((api) => {
         </div>
       ` : '';
       
-      // Determine if ended (daysLeft < 0)
-      const isEnded = stageData.daysLeft !== null && stageData.daysLeft < 0;
+      // Determine if ended - includes passed and executed statuses, or daysLeft < 0
+      // Use case-insensitive comparison for status
+      const statusLower = (stageData.status || '').toLowerCase();
+      const isEnded = (stageData.daysLeft !== null && stageData.daysLeft < 0) ||
+                      statusLower === 'executed' || 
+                      statusLower === 'passed' ||
+                      statusLower === 'queued' ||
+                      statusLower === 'failed' ||
+                      statusLower === 'cancelled' ||
+                      statusLower === 'expired';
       
       // Format "Ended X days ago" text - use months if >30 days, years if >365 days
       let endedText = '';
@@ -2428,12 +2432,40 @@ export default apiInitializer((api) => {
         }
       }
       
+      // For ended proposals, wrap in collapsible container
+      const stageId = `stage-${stageName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+      const collapsedContent = isEnded ? `
+        <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
+          ${progressBarHtml}
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
+            <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+          </div>
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
+            View on Snapshot
+          </a>
+        </div>
+      ` : `
+        ${progressBarHtml}
+        <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+          <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+          <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
+          <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+        </div>
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
+          Vote on Snapshot
+        </a>
+      `;
+      
       return `
-        <div class="governance-stage">
+        <div class="governance-stage ${isEnded ? 'stage-ended' : ''}">
           <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
             <span>${stageName} (Snapshot)</span>
-            <div class="status-badge ${statusClass}">
-              ${status}
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="status-badge ${statusClass}">
+                ${status}
+              </div>
             </div>
           </div>
           ${endedText || (!isEnded && timeDisplay) ? `
@@ -2443,15 +2475,15 @@ export default apiInitializer((api) => {
               </div>
             </div>
           ` : ''}
-          ${progressBarHtml}
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-            <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
-          </div>
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; ${isEnded || !isActive ? 'background-color: #e5e7eb !important; color: #6b7280 !important;' : 'background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;'}">
-            ${isEnded || !isActive ? 'View on Snapshot' : 'Vote on Snapshot'}
-          </a>
+          ${isEnded ? `
+            <div id="${stageId}-collapse-container" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 0.8em; color: #9ca3af; font-style: italic; line-height: 1.4;">
+              <button class="stage-toggle-btn" data-stage-id="${stageId}" style="background: transparent; border: none; cursor: pointer; color: #6b7280; font-size: 14px; padding: 0; margin: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; flex-shrink: 0;" title="Click to expand">
+                <span id="${stageId}-icon">▶</span>
+              </button>
+              <span id="${stageId}-collapsed-text" style="flex: 1;">[Collapsed by default]</span>
+            </div>
+          ` : ''}
+          ${collapsedContent}
         </div>
       `;
     }
@@ -2539,11 +2571,18 @@ export default apiInitializer((api) => {
         return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
       };
       
-      // Determine if ended (for executed/queued/failed/cancelled/expired)
-      // "passed" is NOT ended - it means proposal passed voting but is waiting to be executed
-      const isEnded = stageData.status === 'executed' || stageData.status === 'queued' || 
-                     stageData.status === 'failed' || stageData.status === 'cancelled' || 
-                     stageData.status === 'expired';
+      // Determine if ended - includes passed and executed statuses, or daysLeft < 0
+      // "passed" means proposal passed voting but is waiting to be executed - should be collapsed
+      // "executed" means proposal has been executed on-chain - should be collapsed
+      // Use case-insensitive comparison for status
+      const statusLower = (stageData.status || '').toLowerCase();
+      const isEnded = (stageData.daysLeft !== null && stageData.daysLeft < 0) ||
+                     statusLower === 'executed' || 
+                     statusLower === 'passed' ||
+                     statusLower === 'queued' || 
+                     statusLower === 'failed' || 
+                     statusLower === 'cancelled' || 
+                     statusLower === 'expired';
       
       // Format end date (if we have daysLeft, calculate when it ended)
       // Use months if >30 days, years if >365 days
@@ -2609,21 +2648,10 @@ export default apiInitializer((api) => {
         </div>
       ` : '';
       
-      return `
-        <div class="governance-stage">
-          <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
-            <span>AIP (On-Chain) ${aipNumber}</span>
-            <div class="status-badge ${statusClass}">
-              ${statusBadgeText}
-            </div>
-          </div>
-          ${(endDateText && endDateText !== 'Ended') || (!isEnded && timeDisplay) ? `
-            <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
-                ${endDateText && endDateText !== 'Ended' ? endDateText : timeDisplay}
-              </div>
-            </div>
-          ` : ''}
+      // For ended proposals, wrap in collapsible container
+      const stageId = `stage-aip-${Date.now()}`;
+      const collapsedContent = isEnded ? `
+        <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
           ${progressBarHtml}
           ${shouldShowVotes ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
@@ -2640,9 +2668,58 @@ export default apiInitializer((api) => {
             </div>
           `}
           ${quorumHtml}
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; ${isEnded ? 'background-color: #e5e7eb !important; color: #6b7280 !important;' : 'background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;'}">
-            ${stageData.status === 'active' ? 'Vote on Aave' : 'View on Aave'}
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
+            View on Aave
           </a>
+        </div>
+      ` : `
+        ${progressBarHtml}
+        ${shouldShowVotes ? `
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong>
+          </div>
+        ` : isCancelledOrFailed ? `
+          <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
+            ${stageData.status === 'cancelled' ? 'Voting was cancelled before it started' : 'Voting failed - no vote data available'}
+          </div>
+        ` : `
+          <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
+            Vote data not available from subgraph
+          </div>
+        `}
+        ${quorumHtml}
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
+          Vote on Aave
+        </a>
+      `;
+      
+      return `
+        <div class="governance-stage ${isEnded ? 'stage-ended' : ''}">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
+            <span>AIP (On-Chain) ${aipNumber}</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="status-badge ${statusClass}">
+                ${statusBadgeText}
+              </div>
+            </div>
+          </div>
+          ${(endDateText && endDateText !== 'Ended') || (!isEnded && timeDisplay) ? `
+            <div style="margin-bottom: 12px;">
+              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+                ${endDateText && endDateText !== 'Ended' ? endDateText : timeDisplay}
+              </div>
+            </div>
+          ` : ''}
+          ${isEnded ? `
+            <div id="${stageId}-collapse-container" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 0.8em; color: #9ca3af; font-style: italic; line-height: 1.4;">
+              <button class="stage-toggle-btn" data-stage-id="${stageId}" style="background: transparent; border: none; cursor: pointer; color: #6b7280; font-size: 14px; padding: 0; margin: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; flex-shrink: 0;" title="Click to expand">
+                <span id="${stageId}-icon">▶</span>
+              </button>
+              <span id="${stageId}-collapsed-text" style="flex: 1;">[Collapsed by default]</span>
+            </div>
+          ` : ''}
+          ${collapsedContent}
         </div>
       `;
     }
@@ -2662,13 +2739,20 @@ export default apiInitializer((api) => {
       if (!stage) {
         return false;
       }
-      const isEnded = stage.daysLeft !== null && stage.daysLeft < 0;
+      // Check if ended by daysLeft or status
+      const isEndedByTime = stage.daysLeft !== null && stage.daysLeft < 0;
       // "passed" means voting ended and proposal passed, but not executed yet
       // "executed" means proposal has been executed on-chain
-      const isExecuted = stage.status === 'executed';
-      const isPassed = stage.status === 'passed';
-      // Both executed and passed proposals should be dimmed (voting is over)
-      return isEnded || isExecuted || isPassed;
+      // Use case-insensitive comparison for status
+      const statusLower = (stage.status || '').toLowerCase();
+      const isExecuted = statusLower === 'executed';
+      const isPassed = statusLower === 'passed';
+      const isQueued = statusLower === 'queued';
+      const isFailed = statusLower === 'failed';
+      const isCancelled = statusLower === 'cancelled';
+      const isExpired = statusLower === 'expired';
+      // All these statuses should be dimmed and collapsed (voting is over)
+      return isEndedByTime || isExecuted || isPassed || isQueued || isFailed || isCancelled || isExpired;
     };
     
     const hasEndedStage = checkStageEnded(stages.tempCheck) || 
@@ -2680,7 +2764,7 @@ export default apiInitializer((api) => {
     
     const widgetHTML = `
       <div class="tally-status-widget" style="background: #fff; ${widgetOpacity} border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box; position: relative;">
-        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
+        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; z-index: 100;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
           ×
         </button>
         ${tempCheckHTML}
@@ -2727,106 +2811,126 @@ export default apiInitializer((api) => {
     }
     
     if (isMobile) {
-      // On mobile, insert widgets sequentially so all are visible
-      // Find existing widgets and insert after the last one, or before first post if none exist
+      // On mobile, check if widget is already in the correct position to prevent re-insertion
+      if (statusWidget.parentNode) {
+        // Widget is already in DOM - check if it's in a valid location
+        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+        const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
+        
+        // If widget is already in a valid location (before posts or in topic body), don't re-insert
+        if (topicBody && (topicBody.contains(statusWidget) || 
+            (firstPost && firstPost.parentNode && firstPost.parentNode.contains(statusWidget)))) {
+          console.log("✅ [MOBILE] Widget already in correct position, skipping re-insertion");
+          // Remove URL from rendering set now that widget is confirmed in DOM
+          if (proposalUrl) {
+            renderingUrls.delete(proposalUrl);
+          }
+          return; // Exit early - widget is already positioned correctly
+        }
+      }
+      
+      // On mobile, use same ordering logic as desktop - new widgets appear at bottom
+      // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
       try {
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
         const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
         
-        // Find all existing widgets on mobile (they should be before the first post)
-        // eslint-disable-next-line no-unused-vars
-        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
-        let lastWidget = null;
+        // Get proposal order for this widget (order in content, not stage order)
+        const thisProposalOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
         
-        // Find the last widget that's actually in the DOM and before posts
+        // Find all existing widgets in the insertion area
+        let widgetsContainer = null;
+        let existingWidgets = [];
+        
         if (firstPost && firstPost.parentNode) {
+          // Find widgets before the first post
+          widgetsContainer = firstPost.parentNode;
           const siblings = Array.from(firstPost.parentNode.children);
-          for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
-            if (siblings[i].classList.contains('tally-status-widget-container')) {
-              lastWidget = siblings[i];
-              break;
-            }
+          existingWidgets = siblings.filter(sibling => 
+            sibling.classList.contains('tally-status-widget-container') && 
+            siblings.indexOf(sibling) < siblings.indexOf(firstPost)
+          );
+        } else if (topicBody) {
+          widgetsContainer = topicBody;
+          existingWidgets = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+        } else {
+          const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+          if (mainContent) {
+            widgetsContainer = mainContent;
+            existingWidgets = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
           }
         }
         
-        if (firstPost && firstPost.parentNode) {
-          if (lastWidget) {
-            // Insert after the last widget
-            lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
-            console.log("✅ [MOBILE] Widget inserted after last widget");
+        if (widgetsContainer && existingWidgets.length > 0) {
+          // Find the correct position to insert based on proposal order (order in content)
+          let insertBefore = null;
+          
+          // Find first widget with higher proposal order (or same order, insert after)
+          for (const widget of existingWidgets) {
+            const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
+            if (widgetProposalOrder > thisProposalOrder) {
+              insertBefore = widget;
+              break;
+            }
+          }
+          
+          if (insertBefore) {
+            widgetsContainer.insertBefore(statusWidget, insertBefore);
+            console.log(`✅ [MOBILE] Widget inserted in correct order (proposal order: ${thisProposalOrder})`);
           } else {
-            // No existing widgets, insert before first post
+            // No widget with higher order, append at end (new widgets at bottom)
+            if (firstPost && firstPost.parentNode) {
+              // Insert before first post (which is after all widgets)
+              firstPost.parentNode.insertBefore(statusWidget, firstPost);
+            } else if (topicBody) {
+              // Append to topic body
+              topicBody.appendChild(statusWidget);
+            } else {
+              const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+              if (mainContent) {
+                mainContent.appendChild(statusWidget);
+              } else {
+                document.body.appendChild(statusWidget);
+              }
+            }
+            console.log(`✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - new widget at bottom`);
+          }
+        } else {
+          // No existing widgets, insert before first post or at beginning
+          if (firstPost && firstPost.parentNode) {
             firstPost.parentNode.insertBefore(statusWidget, firstPost);
             console.log("✅ [MOBILE] Widget inserted before first post (first widget)");
-          }
-          // Remove URL from rendering set now that widget is in DOM
-          if (proposalUrl) {
-            renderingUrls.delete(proposalUrl);
-          }
-        } else if (topicBody) {
-          // Find last widget in topic body
-          const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
-          if (widgetsInBody.length > 0) {
-            // Insert after the last widget
-            const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
-            if (lastWidgetInBody.nextSibling) {
-              topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
-            } else {
-              topicBody.appendChild(statusWidget);
-            }
-            console.log("✅ [MOBILE] Widget inserted after last widget in topic body");
-          } else {
-            // No existing widgets, insert at the beginning
+          } else if (topicBody) {
             if (topicBody.firstChild) {
               topicBody.insertBefore(statusWidget, topicBody.firstChild);
             } else {
               topicBody.appendChild(statusWidget);
             }
-            console.log("✅ [MOBILE] Widget inserted at top of topic body (first widget)");
-          }
-          // Remove URL from rendering set now that widget is in DOM
-          if (proposalUrl) {
-            renderingUrls.delete(proposalUrl);
-          }
-        } else {
-          // Try to find the main content area
-          const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-          if (mainContent) {
-            const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
-            if (widgetsInMain.length > 0) {
-              const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
-              if (lastWidgetInMain.nextSibling) {
-                mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
-              } else {
-                mainContent.appendChild(statusWidget);
-              }
-              console.log("✅ [MOBILE] Widget inserted after last widget in main content");
-            } else {
+            console.log("✅ [MOBILE] Widget inserted in topic body (first widget)");
+          } else {
+            const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+            if (mainContent) {
               if (mainContent.firstChild) {
                 mainContent.insertBefore(statusWidget, mainContent.firstChild);
               } else {
                 mainContent.appendChild(statusWidget);
               }
-              console.log("✅ [MOBILE] Widget inserted in main content area (first widget)");
-            }
-            // Remove URL from rendering set now that widget is in DOM
-            if (proposalUrl) {
-              renderingUrls.delete(proposalUrl);
-            }
-          } else {
-            // Last resort: append to body at top
-            const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
-            if (bodyFirstChild) {
-              document.body.insertBefore(statusWidget, bodyFirstChild);
+              console.log("✅ [MOBILE] Widget inserted in main content (first widget)");
             } else {
-              document.body.appendChild(statusWidget);
-            }
-            console.log("✅ [MOBILE] Widget inserted at top of body");
-            // Remove URL from rendering set now that widget is in DOM
-            if (proposalUrl) {
-              renderingUrls.delete(proposalUrl);
+              const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
+              if (bodyFirstChild) {
+                document.body.insertBefore(statusWidget, bodyFirstChild);
+              } else {
+                document.body.appendChild(statusWidget);
+              }
+              console.log("✅ [MOBILE] Widget inserted in body (first widget)");
             }
           }
+        }
+        
+        // Remove URL from rendering set now that widget is in DOM
+        if (proposalUrl) {
+          renderingUrls.delete(proposalUrl);
         }
       } catch (error) {
         console.error("❌ [MOBILE] Error inserting widget:", error);
@@ -2834,16 +2938,16 @@ export default apiInitializer((api) => {
         if (proposalUrl) {
           renderingUrls.delete(proposalUrl);
         }
-        // Fallback: try to append to a safe location
+        // Fallback: try to append to a safe location (append at end for new widgets at bottom)
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
         if (topicBody) {
-          topicBody.insertBefore(statusWidget, topicBody.firstChild);
+          topicBody.appendChild(statusWidget);
           // Remove URL from rendering set after fallback insert
           if (proposalUrl) {
             renderingUrls.delete(proposalUrl);
           }
         } else {
-          document.body.insertBefore(statusWidget, document.body.firstChild);
+          document.body.appendChild(statusWidget);
           // Remove URL from rendering set after fallback insert
           if (proposalUrl) {
             renderingUrls.delete(proposalUrl);
@@ -2852,20 +2956,20 @@ export default apiInitializer((api) => {
       }
     } else {
       // Desktop: Append to container for column layout
-      // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
+      // Insert widget in correct order based on proposal order (order in content)
       const widgetsContainer = getOrCreateWidgetsContainer();
       if (widgetsContainer) {
-        // Get stage order for this widget
-        const thisStageOrder = parseInt(statusWidget.getAttribute("data-stage-order") || "3", 10);
+        // Get proposal order for this widget (order in content, not stage order)
+        const thisProposalOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
         
-        // Find the correct position to insert based on stage order
+        // Find the correct position to insert based on proposal order
         const existingWidgets = Array.from(widgetsContainer.children);
         let insertBefore = null;
         
-        // Find first widget with higher stage order (or same order, insert after)
+        // Find first widget with higher proposal order (or same order, insert after)
         for (const widget of existingWidgets) {
-          const widgetStageOrder = parseInt(widget.getAttribute("data-stage-order") || "3", 10);
-          if (widgetStageOrder > thisStageOrder) {
+          const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
+          if (widgetProposalOrder > thisProposalOrder) {
             insertBefore = widget;
             break;
           }
@@ -2873,11 +2977,11 @@ export default apiInitializer((api) => {
         
         if (insertBefore) {
           widgetsContainer.insertBefore(statusWidget, insertBefore);
-          console.log(`✅ [DESKTOP] Widget inserted in correct order (stage order: ${thisStageOrder})`);
+          console.log(`✅ [DESKTOP] Widget inserted in correct order (proposal order: ${thisProposalOrder})`);
         } else {
           // No widget with higher order, append at end
           widgetsContainer.appendChild(statusWidget);
-          console.log(`✅ [DESKTOP] Widget appended at end (stage order: ${thisStageOrder})`);
+          console.log(`✅ [DESKTOP] Widget appended at end (proposal order: ${thisProposalOrder})`);
         }
         
         // Position is already set by updateContainerPosition - no need to update
@@ -2901,6 +3005,62 @@ export default apiInitializer((api) => {
       }
     }
     
+    // Attach event listeners for collapse/expand buttons (CSP-safe, no inline handlers)
+    // Use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      const toggleButtons = statusWidget.querySelectorAll('.stage-toggle-btn[data-stage-id]');
+      toggleButtons.forEach(button => {
+        const stageId = button.getAttribute('data-stage-id');
+        const content = document.getElementById(`${stageId}-content`);
+        const icon = document.getElementById(`${stageId}-icon`);
+        const collapsedText = document.getElementById(`${stageId}-collapsed-text`);
+        
+        if (!content || !icon) {
+          console.warn(`⚠️ [COLLAPSE] Missing elements for stage ${stageId}`);
+          return;
+        }
+        
+        // Remove any existing listeners by cloning the button
+        const newButton = button.cloneNode(true);
+        button.parentNode.replaceChild(newButton, button);
+        
+        // Add hover effects
+        newButton.addEventListener('mouseenter', () => {
+          newButton.style.background = '#f3f4f6';
+          newButton.style.color = '#111827';
+        });
+        newButton.addEventListener('mouseleave', () => {
+          newButton.style.background = 'transparent';
+          newButton.style.color = '#6b7280';
+        });
+        
+        // Add click handler - when expanded, hide the collapse container completely
+        const collapseContainer = document.getElementById(`${stageId}-collapse-container`);
+        newButton.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (content.style.display === 'none' || content.style.display === '') {
+            // Expand: show content, hide collapse button and text
+            content.style.display = 'block';
+            if (collapseContainer) {
+              collapseContainer.style.display = 'none';
+            }
+          } else {
+            // Collapse: hide content, show collapse button and text
+            content.style.display = 'none';
+            if (collapseContainer) {
+              collapseContainer.style.display = 'flex';
+            }
+            icon.textContent = '▶';
+            icon.setAttribute('title', 'Expand');
+            if (collapsedText) {
+              collapsedText.style.display = 'inline';
+            }
+          }
+        });
+      });
+    });
+    
     console.log("✅ [WIDGET]", widgetType === 'aip' ? 'AIP' : 'Snapshot', "widget rendered");
   }
 
@@ -2908,44 +3068,67 @@ export default apiInitializer((api) => {
     const statusWidgetId = `aave-status-widget-${widgetId}`;
     const proposalType = proposalData.type || 'snapshot'; // 'snapshot' or 'aip'
     
-    // Remove widgets with the same URL to prevent duplicates (more specific than type)
-    // This ensures we don't show the same proposal twice
-    const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${originalUrl}"]`);
-    if (existingWidgetsByUrl.length > 0) {
-      console.log(`🔵 [WIDGET] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, removing duplicates`);
-      existingWidgetsByUrl.forEach(widget => {
-      widget.remove();
-      // Clean up stored data
-      const existingWidgetId = widget.getAttribute('data-tally-status-id');
-      if (existingWidgetId) {
-        delete window[`tallyWidget_${existingWidgetId}`];
-        // Clear any auto-refresh intervals
-        const refreshKey = `tally_refresh_${existingWidgetId}`;
-        if (window[refreshKey]) {
-          clearInterval(window[refreshKey]);
-          delete window[refreshKey];
-        }
-      }
-    });
+    // Check if mobile to determine update strategy
+    const isMobile = window.innerWidth <= 1024 || 
+                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    // Check if widget with same ID already exists (for in-place updates during auto-refresh)
+    const existingWidgetById = document.getElementById(statusWidgetId);
+    if (existingWidgetById && existingWidgetById.getAttribute('data-tally-url') === originalUrl) {
+      // Widget exists with same ID and URL - update in place (especially important on mobile to prevent flickering)
+      console.log(`🔵 [WIDGET] Updating existing widget in place (ID: ${statusWidgetId}) to prevent flickering`);
+      
+      // Update the widget content in place
+      // We'll generate the HTML and update innerHTML, but keep the container element
+      // This prevents the widget from disappearing/reappearing on mobile
+      
+      // Continue with the rest of the function to generate the HTML, then update in place
+      // (We'll handle this after generating the HTML)
     } else {
-      // Fallback: Remove widgets of the same type if no URL match (for backwards compatibility)
-      const existingWidgetsByType = document.querySelectorAll(`.tally-status-widget-container[data-proposal-type="${proposalType}"]`);
-      if (existingWidgetsByType.length > 0) {
-        console.log(`🔵 [WIDGET] No URL match found, removing ${existingWidgetsByType.length} existing ${proposalType} widget(s) by type`);
-        existingWidgetsByType.forEach(widget => {
-          widget.remove();
-          // Clean up stored data
-          const existingWidgetId = widget.getAttribute('data-tally-status-id');
-          if (existingWidgetId) {
-            delete window[`tallyWidget_${existingWidgetId}`];
-            // Clear any auto-refresh intervals
-            const refreshKey = `tally_refresh_${existingWidgetId}`;
-            if (window[refreshKey]) {
-              clearInterval(window[refreshKey]);
-              delete window[refreshKey];
+      // Widget doesn't exist or has different ID/URL - remove duplicates and create new
+      const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${originalUrl}"]`);
+      if (existingWidgetsByUrl.length > 0) {
+        console.log(`🔵 [WIDGET] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, removing duplicates`);
+        existingWidgetsByUrl.forEach(widget => {
+          // Don't remove if it's the same widget we're about to update
+          if (widget.id !== statusWidgetId) {
+            widget.remove();
+            // Clean up stored data
+            const existingWidgetId = widget.getAttribute('data-tally-status-id');
+            if (existingWidgetId) {
+              delete window[`tallyWidget_${existingWidgetId}`];
+              // Clear any auto-refresh intervals
+              const refreshKey = `tally_refresh_${existingWidgetId}`;
+              if (window[refreshKey]) {
+                clearInterval(window[refreshKey]);
+                delete window[refreshKey];
+              }
             }
           }
         });
+      } else {
+        // Fallback: Remove widgets of the same type if no URL match (for backwards compatibility)
+        const existingWidgetsByType = document.querySelectorAll(`.tally-status-widget-container[data-proposal-type="${proposalType}"]`);
+        if (existingWidgetsByType.length > 0) {
+          console.log(`🔵 [WIDGET] No URL match found, removing ${existingWidgetsByType.length} existing ${proposalType} widget(s) by type`);
+          existingWidgetsByType.forEach(widget => {
+            // Don't remove if it's the same widget we're about to update
+            if (widget.id !== statusWidgetId) {
+              widget.remove();
+              // Clean up stored data
+              const existingWidgetId = widget.getAttribute('data-tally-status-id');
+              if (existingWidgetId) {
+                delete window[`tallyWidget_${existingWidgetId}`];
+                // Clear any auto-refresh intervals
+                const refreshKey = `tally_refresh_${existingWidgetId}`;
+                if (window[refreshKey]) {
+                  clearInterval(window[refreshKey]);
+                  delete window[refreshKey];
+                }
+              }
+            }
+          });
+        }
       }
     }
     
@@ -2959,12 +3142,25 @@ export default apiInitializer((api) => {
       };
     }
 
-    const statusWidget = document.createElement("div");
-    statusWidget.id = statusWidgetId;
-    statusWidget.className = "tally-status-widget-container";
-    statusWidget.setAttribute("data-tally-status-id", widgetId);
-    statusWidget.setAttribute("data-tally-url", originalUrl);
-    statusWidget.setAttribute("data-proposal-type", proposalType); // Mark widget type
+    // Check if widget already exists for in-place update (prevents flickering on mobile during auto-refresh)
+    let statusWidget = existingWidgetById;
+    const isUpdatingInPlace = statusWidget && statusWidget.getAttribute('data-tally-url') === originalUrl;
+    
+    if (!statusWidget) {
+      // Create new widget element
+      statusWidget = document.createElement("div");
+      statusWidget.id = statusWidgetId;
+      statusWidget.className = "tally-status-widget-container";
+      statusWidget.setAttribute("data-tally-status-id", widgetId);
+      statusWidget.setAttribute("data-tally-url", originalUrl);
+      statusWidget.setAttribute("data-proposal-type", proposalType); // Mark widget type
+    } else {
+      // Update existing widget attributes (in case they changed)
+      statusWidget.setAttribute("data-tally-status-id", widgetId);
+      statusWidget.setAttribute("data-tally-url", originalUrl);
+      statusWidget.setAttribute("data-proposal-type", proposalType);
+      console.log(`🔵 [WIDGET] Updating widget in place (ID: ${statusWidgetId}) to prevent flickering`);
+    }
 
     // Get exact status from API FIRST (before any processing)
     // Preserve the exact status text (e.g., "Quorum not reached", "Defeat", etc.)
@@ -3152,10 +3348,13 @@ export default apiInitializer((api) => {
     // Check if proposal has passed/ended - dim with opacity instead of changing background
     const isEnded = proposalData.daysLeft !== null && proposalData.daysLeft < 0;
     // "passed" means voting ended and proposal passed, but not executed yet (different from "executed")
-    // Both "executed" and "passed" should be dimmed (voting is over)
+    // All these statuses indicate the proposal has ended (voting is over)
     const isPassedStatus = status === 'passed';
     const isExecutedStatus = status === 'executed';
-    const hasPassed = isExecuted || isEnded || isExecutedStatus || isPassedStatus;
+    const isFailedStatus = status === 'failed';
+    const isCancelledStatus = status === 'cancelled';
+    const isExpiredStatus = status === 'expired';
+    const hasPassed = isExecuted || isEnded || isExecutedStatus || isPassedStatus || isFailedStatus || isCancelledStatus || isExpiredStatus;
     const endedOpacity = hasPassed && !isEndingSoon ? 'opacity: 0.6;' : '';
     
     statusWidget.innerHTML = `
@@ -3241,21 +3440,32 @@ export default apiInitializer((api) => {
     `;
 
     // Add close button handler for this widget type
+    // Remove old handlers first to prevent duplicates when updating in place
     const closeBtn = statusWidget.querySelector('.widget-close-btn');
     if (closeBtn) {
-      closeBtn.addEventListener('click', () => {
+      // Clone and replace to remove all event listeners
+      const newCloseBtn = closeBtn.cloneNode(true);
+      closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+      newCloseBtn.addEventListener('click', () => {
         statusWidget.style.display = 'none';
         statusWidget.remove();
       });
     }
 
-    // Check if mobile (width <= 1024px or mobile user agent)
-    const isMobile = window.innerWidth <= 1024 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
+    // Use the isMobile variable already declared at the top of the function
     console.log(`🔵 [MOBILE] Status widget detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}`);
     
     if (isMobile) {
+      // If updating in place, skip insertion (widget is already in DOM)
+      if (isUpdatingInPlace) {
+        console.log(`🔵 [MOBILE] Widget already exists, updated in place - skipping insertion to prevent flickering`);
+        // Ensure widget is visible
+        statusWidget.style.display = 'block';
+        statusWidget.style.visibility = 'visible';
+        statusWidget.style.opacity = '1';
+        return; // Exit early - widget updated in place (close button handler already attached above)
+      }
+      
       // Mobile: Insert widgets sequentially so all are visible
       // Find existing widgets and insert after the last one, or before first post if none exist
       try {
@@ -4083,10 +4293,32 @@ export default apiInitializer((api) => {
   // Render widgets - one per proposal URL
   function setupTopicWidgetWithProposals(allProposals) {
     
-    // Clear all existing widgets first to prevent duplicates
+    // Check if widgets already exist and match current proposals - if so, don't clear them
     const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+    const existingUrls = new Set();
+    existingWidgets.forEach(widget => {
+      const widgetUrl = widget.getAttribute('data-tally-url');
+      if (widgetUrl) {
+        existingUrls.add(widgetUrl);
+      }
+    });
+    
+    // Get all proposal URLs from current proposals
+    const currentUrls = new Set([...allProposals.snapshot, ...allProposals.aip]);
+    
+    // Only clear widgets if the proposals have changed (different URLs)
+    const urlsMatch = existingUrls.size === currentUrls.size && 
+                     [...existingUrls].every(url => currentUrls.has(url)) &&
+                     [...currentUrls].every(url => existingUrls.has(url));
+    
+    if (urlsMatch && existingWidgets.length > 0) {
+      console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s)), skipping re-render`);
+      return; // Don't re-render if widgets already match
+    }
+    
+    // Clear all existing widgets only if proposals have changed
     if (existingWidgets.length > 0) {
-      console.log(`🔵 [TOPIC] Clearing ${existingWidgets.length} existing widget(s) before creating new ones`);
+      console.log(`🔵 [TOPIC] Proposals changed - clearing ${existingWidgets.length} existing widget(s) before creating new ones`);
       existingWidgets.forEach(widget => {
         // Get URL from widget before removing it
         const widgetUrl = widget.getAttribute('data-tally-url');
@@ -4129,6 +4361,16 @@ export default apiInitializer((api) => {
     
     const totalProposals = uniqueSnapshotUrls.length + uniqueAipUrls.length;
     console.log(`🔵 [TOPIC] Rendering ${totalProposals} widget(s) - one per unique proposal URL`);
+    
+    // Create combined ordered list of all proposals (maintain order: snapshot first, then aip)
+    // This preserves the order proposals appear in the content
+    const orderedProposals = [];
+    uniqueSnapshotUrls.forEach((url, index) => {
+      orderedProposals.push({ url, type: 'snapshot', originalIndex: index });
+    });
+    uniqueAipUrls.forEach((url, index) => {
+      orderedProposals.push({ url, type: 'aip', originalIndex: index });
+    });
     
     // ===== SNAPSHOT WIDGETS - One per URL =====
     if (uniqueSnapshotUrls.length > 0) {
@@ -4198,14 +4440,18 @@ export default apiInitializer((api) => {
             const stageName = stage === 'temp-check' ? 'Temp Check' : 
                              stage === 'arfc' ? 'ARFC' : 'Snapshot';
             
-            console.log(`🔵 [RENDER] Creating Snapshot widget ${index + 1}/${validSnapshots.length} for ${stageName}`);
+            // Find proposal order in combined list (order in content)
+            const proposalOrderIndex = orderedProposals.findIndex(p => p.url === snapshot.url && p.type === 'snapshot');
+            const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : index;
+            
+            console.log(`🔵 [RENDER] Creating Snapshot widget ${index + 1}/${validSnapshots.length} for ${stageName} (order: ${proposalOrder})`);
             console.log(`   Title: ${snapshot.data.title?.substring(0, 60)}...`);
             console.log(`   URL: ${snapshot.url}`);
             
             // Create unique widget ID for each proposal
             const widgetId = `snapshot-widget-${index}-${Date.now()}`;
             
-            // Render single proposal widget based on its stage
+            // Render single proposal widget based on its stage, with proposal order
             renderMultiStageWidget({
               tempCheck: stage === 'temp-check' ? snapshot.data : null,
               tempCheckUrl: stage === 'temp-check' ? snapshot.url : null,
@@ -4213,7 +4459,7 @@ export default apiInitializer((api) => {
               arfcUrl: (stage === 'arfc' || stage === 'snapshot') ? snapshot.url : null,
               aip: null,
               aipUrl: null
-            }, widgetId);
+            }, widgetId, proposalOrder);
             
             console.log(`✅ [RENDER] Snapshot widget ${index + 1} rendered`);
           });
@@ -4232,6 +4478,10 @@ export default apiInitializer((api) => {
           return;
         }
         
+        // Find proposal order in combined list (order in content)
+        const proposalOrderIndex = orderedProposals.findIndex(p => p.url === aipUrl && p.type === 'aip');
+        const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + aipIndex);
+        
         // Mark URL as being fetched
         fetchingUrls.add(aipUrl);
         
@@ -4248,6 +4498,7 @@ export default apiInitializer((api) => {
             
             if (aipData && aipData.title) {
               const aipWidgetId = `aip-widget-${aipIndex}-${Date.now()}`;
+              console.log(`🔵 [RENDER] Creating AIP widget ${aipIndex + 1} (order: ${proposalOrder})`);
               renderMultiStageWidget({
                 tempCheck: null,
                 tempCheckUrl: null,
@@ -4255,7 +4506,7 @@ export default apiInitializer((api) => {
                 arfcUrl: null,
                 aip: aipData,
                 aipUrl
-              }, aipWidgetId);
+              }, aipWidgetId, proposalOrder);
               console.log(`✅ [RENDER] AIP widget ${aipIndex + 1} rendered`);
         } else {
               console.warn(`⚠️ [TOPIC] AIP data fetched but missing title:`, aipData);
@@ -4286,7 +4537,7 @@ export default apiInitializer((api) => {
       clearTimeout(widgetSetupTimeout);
     }
     
-    // Debounce: wait 300ms before running
+    // Debounce: wait 500ms before running (increased from 300ms to reduce flickering on mobile)
     widgetSetupTimeout = setTimeout(() => {
       if (!isWidgetSetupRunning) {
         isWidgetSetupRunning = true;
@@ -4294,21 +4545,45 @@ export default apiInitializer((api) => {
           isWidgetSetupRunning = false;
         });
       }
-    }, 300);
+    }, 500);
   }
   
   // Watch for new posts being added to the topic and re-check for proposals
   function setupTopicWatcher() {
     // Watch for new posts being added
-    const postObserver = new MutationObserver(() => {
-      // Use debounced version to prevent multiple rapid calls
-      debouncedSetupTopicWidget();
+    const postObserver = new MutationObserver((mutations) => {
+      // Ignore mutations that are only widget-related to prevent flickering
+      let hasNonWidgetChanges = false;
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          // Check if the added node is a widget or inside a widget
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const isWidget = node.classList?.contains('tally-status-widget-container') ||
+                           node.classList?.contains('governance-widgets-wrapper') ||
+                           node.closest?.('.tally-status-widget-container') ||
+                           node.closest?.('.governance-widgets-wrapper');
+            if (!isWidget) {
+              hasNonWidgetChanges = true;
+              break;
+            }
+          }
+        }
+        if (hasNonWidgetChanges) {
+          break;
+        }
+      }
+      
+      // Only trigger widget setup if there are actual post changes, not widget changes
+      if (hasNonWidgetChanges) {
+        // Use debounced version to prevent multiple rapid calls
+        debouncedSetupTopicWidget();
+      }
     });
 
     const postStream = document.querySelector('.post-stream, .topic-body, .posts-wrapper');
     if (postStream) {
       postObserver.observe(postStream, { childList: true, subtree: true });
-      console.log("✅ [TOPIC] Watching for new posts in topic");
+      console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget changes)");
     }
     
     // Initial setup - use debounced version
