@@ -659,6 +659,7 @@ export default apiInitializer((api) => {
       if (subgraphMetadata.votingDuration && !merged.votingDuration) {
         merged.votingDuration = subgraphMetadata.votingDuration;
       }
+      // votingActivationTimestamp comes from on-chain startTime, not subgraph
       if (subgraphMetadata.ipfsHash && !merged.ipfsHash) {
         merged.ipfsHash = subgraphMetadata.ipfsHash;
       }
@@ -776,6 +777,24 @@ export default apiInitializer((api) => {
               forVotes
               againstVotes
             }
+            transactions {
+              id
+              created {
+                id
+                timestamp
+                blockNumber
+              }
+              active {
+                id
+                timestamp
+                blockNumber
+              }
+            }
+            votingConfig {
+              id
+              cooldownBeforeVotingStart
+              votingDuration
+            }
           }
         }
       `;
@@ -871,6 +890,62 @@ export default apiInitializer((api) => {
         const stateMap = getStateMapping('app.aave.com'); // Subgraph always uses Aave V3 enum
         const status = stateMap[p.state] || 'unknown';
 
+        // Calculate votingActivationTimestamp from transactions.active.timestamp
+        // This is when the proposal moves to 'Active' state (voting starts)
+        let votingActivationTimestamp = null;
+        let daysLeft = null;
+        let hoursLeft = null;
+        
+        // Try to get votingActivationTimestamp from transactions.active
+        if (p.transactions?.active?.timestamp) {
+          votingActivationTimestamp = Number(p.transactions.active.timestamp);
+          console.log("🔵 [AIP] Found votingActivationTimestamp from transactions.active:", votingActivationTimestamp);
+        } else if (p.transactions?.created?.timestamp && p.votingConfig?.cooldownBeforeVotingStart) {
+          // Calculate: created timestamp + cooldown period = activation timestamp
+          const createdTimestamp = Number(p.transactions.created.timestamp);
+          const cooldown = Number(p.votingConfig.cooldownBeforeVotingStart);
+          votingActivationTimestamp = createdTimestamp + cooldown;
+          console.log("🔵 [AIP] Calculated votingActivationTimestamp: created (", createdTimestamp, ") + cooldown (", cooldown, ") =", votingActivationTimestamp);
+        }
+        
+        // Calculate end date: votingActivationTimestamp + votingDuration
+        // Then calculate daysLeft and hoursLeft
+        if (votingActivationTimestamp && p.votingDuration) {
+          const votingDuration = Number(p.votingDuration);
+          const endTimestamp = votingActivationTimestamp + votingDuration;
+          
+          // Convert to milliseconds for Date calculations
+          const endTimestampMs = endTimestamp * 1000;
+          const now = Date.now();
+          const diffTime = endTimestampMs - now;
+          const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+          
+          // Use Math.floor for positive values (remaining full days)
+          // Use Math.ceil for negative values (past dates)
+          let diffDays;
+          if (diffTimeInDays >= 0) {
+            diffDays = Math.floor(diffTimeInDays);
+          } else {
+            diffDays = Math.ceil(diffTimeInDays);
+          }
+          
+          // Validate that diffDays is a valid number
+          if (!isNaN(diffDays) && isFinite(diffDays)) {
+            daysLeft = diffDays;
+            
+            // If it ends today (daysLeft === 0), calculate hours left
+            if (diffDays === 0 && diffTime > 0) {
+              const diffTimeInHours = diffTime / (1000 * 60 * 60);
+              hoursLeft = Math.floor(diffTimeInHours);
+            }
+            
+            console.log("🔵 [AIP] Calculated dates - Activation:", new Date(votingActivationTimestamp * 1000).toISOString(), "End:", new Date(endTimestampMs).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
+          }
+        } else {
+          console.log("⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing");
+          console.log("   votingActivationTimestamp:", votingActivationTimestamp, "votingDuration:", p.votingDuration);
+        }
+
         return {
           id: p.proposalId?.toString() || proposalId.toString(),
           proposalId: p.proposalId?.toString() || proposalId.toString(),
@@ -882,10 +957,13 @@ export default apiInitializer((api) => {
           proposer: p.creator,
           ipfsHash: p.ipfsHash,
           votingDuration: p.votingDuration,
+          votingActivationTimestamp, // Add this for end date calculation
           forVotes,
           againstVotes,
           abstainVotes,
           quorum: null,
+          daysLeft,
+          hoursLeft,
         };
       } else {
         console.error("❌ [AIP] Subgraph response not OK:", response.status, response.statusText);
@@ -1029,6 +1107,45 @@ export default apiInitializer((api) => {
 
     // Safely extract values from proposal object
     // The simplified ABI returns: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
+    const startTime = proposal.startTime ? Number(proposal.startTime) : null;
+    const endTime = proposal.endTime ? Number(proposal.endTime) : null;
+    
+    // Calculate daysLeft and hoursLeft from startTime and endTime
+    // startTime is the votingActivationTimestamp (when voting opens)
+    // endTime is when voting ends (startTime + votingDuration)
+    let daysLeft = null;
+    let hoursLeft = null;
+    
+    if (endTime && endTime > 0) {
+      // endTime is in seconds (Unix timestamp)
+      const endTimestampMs = endTime * 1000;
+      const now = Date.now();
+      const diffTime = endTimestampMs - now;
+      const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+      
+      // Use Math.floor for positive values (remaining full days)
+      // Use Math.ceil for negative values (past dates)
+      let diffDays;
+      if (diffTimeInDays >= 0) {
+        diffDays = Math.floor(diffTimeInDays);
+      } else {
+        diffDays = Math.ceil(diffTimeInDays);
+      }
+      
+      // Validate that diffDays is a valid number
+      if (!isNaN(diffDays) && isFinite(diffDays)) {
+        daysLeft = diffDays;
+        
+        // If it ends today (daysLeft === 0), calculate hours left
+        if (diffDays === 0 && diffTime > 0) {
+          const diffTimeInHours = diffTime / (1000 * 60 * 60);
+          hoursLeft = Math.floor(diffTimeInHours);
+        }
+        
+        console.log("🔵 [AIP] Calculated dates from on-chain - Start:", startTime ? new Date(startTime * 1000).toISOString() : 'N/A', "End:", new Date(endTimestampMs).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
+      }
+    }
+    
     return {
       id: proposalId.toString(),
       title: `Proposal ${proposalId}`, // On-chain doesn't have title, will be enriched from markdown/subgraph
@@ -1039,12 +1156,15 @@ export default apiInitializer((api) => {
       abstainVotes: '0', // Aave V3 doesn't have abstain votes
       quorum: null, // Would need to calculate from strategy
       proposer: proposal.creator || null,
-      createdAt: proposal.startTime ? new Date(Number(proposal.startTime) * 1000).toISOString() : null,
-      executedAt: proposal.executed ? (proposal.endTime ? new Date(Number(proposal.endTime) * 1000).toISOString() : null) : null,
-      startTime: proposal.startTime ? Number(proposal.startTime) : null,
-      endTime: proposal.endTime ? Number(proposal.endTime) : null,
+      createdAt: startTime ? new Date(startTime * 1000).toISOString() : null,
+      executedAt: proposal.executed ? (endTime ? new Date(endTime * 1000).toISOString() : null) : null,
+      startTime,
+      endTime,
+      votingActivationTimestamp: startTime, // startTime is the voting activation timestamp
       canceled: proposal.canceled || false,
       executed: proposal.executed || false,
+      daysLeft,
+      hoursLeft,
     };
   }
 
@@ -1748,11 +1868,69 @@ export default apiInitializer((api) => {
     const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
     const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
     
-    // Calculate time remaining (if endBlock is available)
-    let daysLeft = null;
-    let hoursLeft = null;
-    // Note: Would need to convert block numbers to timestamps using current block time
-    // For now, we'll leave this as null and handle it later if needed
+    // Use daysLeft and hoursLeft if already calculated from subgraph (with votingActivationTimestamp)
+    // Otherwise, calculate from votingActivationTimestamp + votingDuration
+    let daysLeft = proposal.daysLeft !== undefined ? proposal.daysLeft : null;
+    let hoursLeft = proposal.hoursLeft !== undefined ? proposal.hoursLeft : null;
+    
+    // If dates weren't already calculated (from subgraph), try to calculate from available data
+    if (daysLeft === null && proposal.votingActivationTimestamp && proposal.votingDuration) {
+      // votingActivationTimestamp is in seconds (Unix timestamp)
+      const activationTimestamp = Number(proposal.votingActivationTimestamp);
+      const votingDuration = Number(proposal.votingDuration); // in seconds
+      
+      // Calculate end timestamp: activation + duration
+      const endTimestamp = activationTimestamp + votingDuration;
+      
+      // Convert to milliseconds for Date calculations
+      const endTimestampMs = endTimestamp * 1000;
+      const now = Date.now();
+      const diffTime = endTimestampMs - now;
+      const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+      
+      // Use Math.floor for positive values (remaining full days)
+      // Use Math.ceil for negative values (past dates)
+      let diffDays;
+      if (diffTimeInDays >= 0) {
+        diffDays = Math.floor(diffTimeInDays);
+      } else {
+        diffDays = Math.ceil(diffTimeInDays);
+      }
+      
+      // Validate that diffDays is a valid number
+      if (!isNaN(diffDays) && isFinite(diffDays)) {
+        daysLeft = diffDays;
+        
+        // If it ends today (daysLeft === 0), calculate hours left
+        if (diffDays === 0 && diffTime > 0) {
+          const diffTimeInHours = diffTime / (1000 * 60 * 60);
+          hoursLeft = Math.floor(diffTimeInHours);
+        }
+        
+        console.log("🔵 [AIP] Calculated dates in transformAIPData - Activation:", new Date(activationTimestamp * 1000).toISOString(), "End:", new Date(endTimestampMs).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
+      }
+    } else if (daysLeft === null && proposal.endTime) {
+      // Fallback: use endTime directly if available
+      const endTimestampMs = Number(proposal.endTime) * 1000;
+      const now = Date.now();
+      const diffTime = endTimestampMs - now;
+      const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+      
+      let diffDays;
+      if (diffTimeInDays >= 0) {
+        diffDays = Math.floor(diffTimeInDays);
+      } else {
+        diffDays = Math.ceil(diffTimeInDays);
+      }
+      
+      if (!isNaN(diffDays) && isFinite(diffDays)) {
+        daysLeft = diffDays;
+        if (diffDays === 0 && diffTime > 0) {
+          const diffTimeInHours = diffTime / (1000 * 60 * 60);
+          hoursLeft = Math.floor(diffTimeInHours);
+        }
+      }
+    }
     
     // Determine status
     let status = 'unknown';
@@ -2113,6 +2291,25 @@ export default apiInitializer((api) => {
       }
       if (daysLeft < 0) {
         const daysAgo = Math.abs(daysLeft);
+        // Show years if more than 365 days ago
+        if (daysAgo >= 365) {
+          const yearsAgo = Math.floor(daysAgo / 365);
+          const remainingDays = daysAgo % 365;
+          const monthsAgo = Math.floor(remainingDays / 30);
+          if (monthsAgo > 0) {
+            return `Ended ${yearsAgo} ${yearsAgo === 1 ? 'year' : 'years'}, ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'} ago`;
+          }
+          return `Ended ${yearsAgo} ${yearsAgo === 1 ? 'year' : 'years'} ago`;
+        }
+        // Show months if more than 30 days ago
+        if (daysAgo >= 30) {
+          const monthsAgo = Math.floor(daysAgo / 30);
+          const remainingDays = daysAgo % 30;
+          if (remainingDays > 0) {
+            return `Ended ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} ago`;
+          }
+          return `Ended ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'} ago`;
+        }
         return `Ended ${daysAgo} ${daysAgo === 1 ? 'day' : 'days'} ago`;
       }
       if (daysLeft === 0 && hoursLeft !== null) {
@@ -2120,6 +2317,25 @@ export default apiInitializer((api) => {
       }
       if (daysLeft === 0) {
         return 'Ends today';
+      }
+      // Show years if more than 365 days left
+      if (daysLeft >= 365) {
+        const yearsLeft = Math.floor(daysLeft / 365);
+        const remainingDays = daysLeft % 365;
+        const monthsLeft = Math.floor(remainingDays / 30);
+        if (monthsLeft > 0) {
+          return `${yearsLeft} ${yearsLeft === 1 ? 'year' : 'years'}, ${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'} left`;
+        }
+        return `${yearsLeft} ${yearsLeft === 1 ? 'year' : 'years'} left`;
+      }
+      // Show months if more than 30 days left
+      if (daysLeft >= 30) {
+        const monthsLeft = Math.floor(daysLeft / 30);
+        const remainingDays = daysLeft % 30;
+        if (remainingDays > 0) {
+          return `${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} left`;
+        }
+        return `${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'} left`;
       }
       return `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`;
     }
@@ -2180,7 +2396,7 @@ export default apiInitializer((api) => {
       // Determine if ended (daysLeft < 0)
       const isEnded = stageData.daysLeft !== null && stageData.daysLeft < 0;
       
-      // Format "Ended X days ago" text - use weeks if >7 days, years if >365 days
+      // Format "Ended X days ago" text - use months if >30 days, years if >365 days
       let endedText = '';
       if (isEnded && stageData.daysLeft !== null && stageData.daysLeft !== undefined) {
         const daysAgo = Math.abs(Math.floor(stageData.daysLeft));
@@ -2189,11 +2405,24 @@ export default apiInitializer((api) => {
         } else if (daysAgo === 1) {
           endedText = 'Ended 1 day ago';
         } else if (daysAgo >= 365) {
+          // Show years if more than 365 days ago
           const yearsAgo = Math.floor(daysAgo / 365);
-          endedText = yearsAgo === 1 ? 'Ended 1 year ago' : `Ended ${yearsAgo} years ago`;
-        } else if (daysAgo >= 7) {
-          const weeksAgo = Math.floor(daysAgo / 7);
-          endedText = weeksAgo === 1 ? 'Ended 1 week ago' : `Ended ${weeksAgo} weeks ago`;
+          const remainingDays = daysAgo % 365;
+          const monthsAgo = Math.floor(remainingDays / 30);
+          if (monthsAgo > 0) {
+            endedText = `Ended ${yearsAgo} ${yearsAgo === 1 ? 'year' : 'years'}, ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'} ago`;
+          } else {
+            endedText = yearsAgo === 1 ? 'Ended 1 year ago' : `Ended ${yearsAgo} years ago`;
+          }
+        } else if (daysAgo >= 30) {
+          // Show months if more than 30 days ago
+          const monthsAgo = Math.floor(daysAgo / 30);
+          const remainingDays = daysAgo % 30;
+          if (remainingDays > 0) {
+            endedText = `Ended ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} ago`;
+          } else {
+            endedText = monthsAgo === 1 ? 'Ended 1 month ago' : `Ended ${monthsAgo} months ago`;
+          }
         } else {
           endedText = `Ended ${daysAgo} days ago`;
         }
@@ -2238,8 +2467,10 @@ export default apiInitializer((api) => {
       // Use exact status from API (no mapping)
       const status = stageData.status || 'unknown';
       // Map status to CSS class for styling
+      // "passed" means proposal passed voting but hasn't been executed yet (different from "executed")
       const statusClass = stageData.status === 'active' ? 'active' : 
                          stageData.status === 'executed' ? 'executed' :
+                         stageData.status === 'passed' ? 'passed' :
                          stageData.status === 'queued' ? 'queued' :
                          stageData.status === 'failed' ? 'failed' :
                          stageData.status === 'cancelled' ? 'cancelled' :
@@ -2309,12 +2540,13 @@ export default apiInitializer((api) => {
       };
       
       // Determine if ended (for executed/queued/failed/cancelled/expired)
+      // "passed" is NOT ended - it means proposal passed voting but is waiting to be executed
       const isEnded = stageData.status === 'executed' || stageData.status === 'queued' || 
                      stageData.status === 'failed' || stageData.status === 'cancelled' || 
                      stageData.status === 'expired';
       
       // Format end date (if we have daysLeft, calculate when it ended)
-      // Use weeks if >7 days, years if >365 days
+      // Use months if >30 days, years if >365 days
       let endDateText = '';
       if (isEnded && stageData.daysLeft !== null && stageData.daysLeft !== undefined) {
         const daysAgo = Math.abs(Math.floor(stageData.daysLeft));
@@ -2323,11 +2555,24 @@ export default apiInitializer((api) => {
         } else if (daysAgo === 1) {
           endDateText = 'Ended 1 day ago';
         } else if (daysAgo >= 365) {
+          // Show years if more than 365 days ago
           const yearsAgo = Math.floor(daysAgo / 365);
-          endDateText = yearsAgo === 1 ? 'Ended 1 year ago' : `Ended ${yearsAgo} years ago`;
-        } else if (daysAgo >= 7) {
-          const weeksAgo = Math.floor(daysAgo / 7);
-          endDateText = weeksAgo === 1 ? 'Ended 1 week ago' : `Ended ${weeksAgo} weeks ago`;
+          const remainingDays = daysAgo % 365;
+          const monthsAgo = Math.floor(remainingDays / 30);
+          if (monthsAgo > 0) {
+            endDateText = `Ended ${yearsAgo} ${yearsAgo === 1 ? 'year' : 'years'}, ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'} ago`;
+          } else {
+            endDateText = yearsAgo === 1 ? 'Ended 1 year ago' : `Ended ${yearsAgo} years ago`;
+          }
+        } else if (daysAgo >= 30) {
+          // Show months if more than 30 days ago
+          const monthsAgo = Math.floor(daysAgo / 30);
+          const remainingDays = daysAgo % 30;
+          if (remainingDays > 0) {
+            endDateText = `Ended ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} ago`;
+          } else {
+            endDateText = monthsAgo === 1 ? 'Ended 1 month ago' : `Ended ${monthsAgo} months ago`;
+          }
         } else {
           endDateText = `Ended ${daysAgo} days ago`;
         }
@@ -2338,9 +2583,13 @@ export default apiInitializer((api) => {
       // Use exact status from API - show as-is (capitalize first letter only)
       const statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
       
+      // For cancelled and failed proposals, voting never happened - don't show vote data
+      const isCancelledOrFailed = stageData.status === 'cancelled' || stageData.status === 'failed';
+      const shouldShowVotes = !isCancelledOrFailed && votesAvailable && totalVotes !== null && totalVotes > 0;
+      
       // Progress bar HTML - For AIP: show For/Against votes, no abstain
-      // Only show progress bar if votes are available
-      const progressBarHtml = (votesAvailable && totalVotes !== null && totalVotes > 0) ? `
+      // Only show progress bar if votes are available AND proposal is not cancelled/failed
+      const progressBarHtml = shouldShowVotes ? `
         <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
           <div class="progress-bar">
             ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
@@ -2350,8 +2599,8 @@ export default apiInitializer((api) => {
       ` : '';
       
       // Quorum display for AIP (instead of abstain)
-      // Only show quorum if votes are available
-      const quorumHtml = (quorum > 0 && votesAvailable && totalVotes !== null) ? `
+      // Only show quorum if votes are available AND proposal is not cancelled/failed
+      const quorumHtml = (quorum > 0 && shouldShowVotes) ? `
         <div style="font-size: 0.85em; color: #6b7280; margin-top: 8px; margin-bottom: 8px; padding: 8px; background: ${quorumReached ? '#f0fdf4' : '#fef2f2'}; border-radius: 4px; border-left: 3px solid ${quorumReached ? '#10b981' : '#ef4444'};">
           <strong style="color: #111827;">Quorum:</strong> ${formatVoteAmount(totalVotes)} / ${formatVoteAmount(quorum)} AAVE 
           <span style="color: ${quorumReached ? '#10b981' : '#ef4444'}; font-weight: 600;">
@@ -2376,14 +2625,20 @@ export default apiInitializer((api) => {
             </div>
           ` : ''}
           ${progressBarHtml}
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            ${votesAvailable ? `
+          ${shouldShowVotes ? `
+            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
               <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
               <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong>
-            ` : `
-              <span style="color: #9ca3af; font-style: italic;">Vote data not available from subgraph</span>
-            `}
-          </div>
+            </div>
+          ` : isCancelledOrFailed ? `
+            <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
+              ${stageData.status === 'cancelled' ? 'Voting was cancelled before it started' : 'Voting failed - no vote data available'}
+            </div>
+          ` : `
+            <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
+              Vote data not available from subgraph
+            </div>
+          `}
           ${quorumHtml}
           <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; ${isEnded ? 'background-color: #e5e7eb !important; color: #6b7280 !important;' : 'background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;'}">
             ${stageData.status === 'active' ? 'Vote on Aave' : 'View on Aave'}
@@ -2408,8 +2663,12 @@ export default apiInitializer((api) => {
         return false;
       }
       const isEnded = stage.daysLeft !== null && stage.daysLeft < 0;
-      const isExecuted = stage.status === 'executed' || stage.status === 'passed';
-      return isEnded || isExecuted;
+      // "passed" means voting ended and proposal passed, but not executed yet
+      // "executed" means proposal has been executed on-chain
+      const isExecuted = stage.status === 'executed';
+      const isPassed = stage.status === 'passed';
+      // Both executed and passed proposals should be dimmed (voting is over)
+      return isEnded || isExecuted || isPassed;
     };
     
     const hasEndedStage = checkStageEnded(stages.tempCheck) || 
@@ -2892,7 +3151,11 @@ export default apiInitializer((api) => {
     
     // Check if proposal has passed/ended - dim with opacity instead of changing background
     const isEnded = proposalData.daysLeft !== null && proposalData.daysLeft < 0;
-    const hasPassed = isExecuted || isEnded || (status === 'executed') || (status === 'passed');
+    // "passed" means voting ended and proposal passed, but not executed yet (different from "executed")
+    // Both "executed" and "passed" should be dimmed (voting is over)
+    const isPassedStatus = status === 'passed';
+    const isExecutedStatus = status === 'executed';
+    const hasPassed = isExecuted || isEnded || isExecutedStatus || isPassedStatus;
     const endedOpacity = hasPassed && !isEndingSoon ? 'opacity: 0.6;' : '';
     
     statusWidget.innerHTML = `

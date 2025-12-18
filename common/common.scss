@@ -162,6 +162,12 @@
           border: 1px solid #93c5fd;
         }
 
+        &.passed {
+          background: #dcfce7;
+          color: #166534;
+          border: 1px solid #86efac;
+        }
+
         &.inactive {
           background: #f3f4f6;
           color: #6b7280;
@@ -232,6 +238,12 @@
         background: #dbeafe;
         color: #1e40af;
         border: 1px solid #93c5fd;
+      }
+
+      &.passed {
+        background: #ccfbf1;
+        color: #0f766e;
+        border: 1px solid #5eead4;
       }
 
       &.inactive {
@@ -637,6 +649,12 @@
         background: #dbeafe;
         color: #1e40af;
         border: 1px solid #93c5fd;
+      }
+
+      &.passed {
+        background: #ccfbf1;
+        color: #0f766e;
+        border: 1px solid #5eead4;
       }
 
       &.inactive {
