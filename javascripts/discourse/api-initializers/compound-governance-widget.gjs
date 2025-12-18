@@ -82,8 +82,7 @@ export default apiInitializer((api) => {
   // REMOVED: All fallback methods (on-chain, Data API, markdown) - using only The Graph API
   // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
   
-  // Unused function - kept for reference but not called
-  // eslint-disable-next-line no-unused-vars
+  // Function to ensure ethers.js is loaded
   async function ensureEthersLoaded() {
     // Check if already loaded
     if (window.ethers) {
@@ -282,7 +281,7 @@ export default apiInitializer((api) => {
       
       console.warn("❌ Could not extract proposalId from URL:", url);
       return null;
-    } catch (e) {
+      } catch (e) {
       console.warn("❌ Error extracting AIP proposal info:", e);
       return null;
     }
@@ -410,7 +409,7 @@ export default apiInitializer((api) => {
         query Proposal($id: String!) {
           proposal(id: $id) {
             id
-            title
+              title
             body
             choices
             start
@@ -483,7 +482,7 @@ export default apiInitializer((api) => {
 
       console.log("🔵 [SNAPSHOT] Response status:", response.status, response.statusText);
       console.log("🔵 [SNAPSHOT] Response ok:", response.ok);
-      
+
       if (response.ok) {
         const result = await response.json();
         console.log("🔵 [SNAPSHOT] API Response:", JSON.stringify(result, null, 2));
@@ -890,7 +889,7 @@ export default apiInitializer((api) => {
         };
       } else {
         console.error("❌ [AIP] Subgraph response not OK:", response.status, response.statusText);
-        return null;
+    return null;
       }
     } catch (error) {
       console.error("❌ [AIP] Subgraph fetch error:", error.message);
@@ -900,7 +899,6 @@ export default apiInitializer((api) => {
 
   // Fetch AIP proposal data directly from Ethereum blockchain (source of truth)
   // This is the most reliable method - no CORS, no backend, will never randomly break
-  // eslint-disable-next-line no-unused-vars
   async function fetchAIPFromOnChain(topicId, urlSource = 'app.aave.com') {
     try {
       // Ensure ethers.js is loaded
@@ -935,7 +933,6 @@ export default apiInitializer((api) => {
       // Note: These variables are not defined - this function requires configuration
       // eslint-disable-next-line no-undef
       const provider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
-      // eslint-disable-next-line no-undef
       const governanceContract = new ethers.Contract(
         // eslint-disable-next-line no-undef
         AAVE_GOVERNANCE_V3_ADDRESS,
@@ -2658,19 +2655,19 @@ export default apiInitializer((api) => {
     if (existingWidgetsByUrl.length > 0) {
       console.log(`🔵 [WIDGET] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, removing duplicates`);
       existingWidgetsByUrl.forEach(widget => {
-        widget.remove();
-        // Clean up stored data
-        const existingWidgetId = widget.getAttribute('data-tally-status-id');
-        if (existingWidgetId) {
-          delete window[`tallyWidget_${existingWidgetId}`];
-          // Clear any auto-refresh intervals
-          const refreshKey = `tally_refresh_${existingWidgetId}`;
-          if (window[refreshKey]) {
-            clearInterval(window[refreshKey]);
-            delete window[refreshKey];
-          }
+      widget.remove();
+      // Clean up stored data
+      const existingWidgetId = widget.getAttribute('data-tally-status-id');
+      if (existingWidgetId) {
+        delete window[`tallyWidget_${existingWidgetId}`];
+        // Clear any auto-refresh intervals
+        const refreshKey = `tally_refresh_${existingWidgetId}`;
+        if (window[refreshKey]) {
+          clearInterval(window[refreshKey]);
+          delete window[refreshKey];
         }
-      });
+      }
+    });
     } else {
       // Fallback: Remove widgets of the same type if no URL match (for backwards compatibility)
       const existingWidgetsByType = document.querySelectorAll(`.tally-status-widget-container[data-proposal-type="${proposalType}"]`);
@@ -2929,7 +2926,7 @@ export default apiInitializer((api) => {
                 displayText = proposalData.daysLeft + ' ' + (proposalData.daysLeft === 1 ? 'day' : 'days') + ' left';
                 if (isEndingSoon) {
                   badgeStyle = 'background: #fef3c7; color: #92400e; border-color: #fde68a; font-weight: 700;';
-                }
+              }
               }
               return `<div class="days-left-badge" style="${badgeStyle}">${displayText}</div>`;
             } else if (proposalData.daysLeft === null) {
@@ -2979,7 +2976,7 @@ export default apiInitializer((api) => {
         </a>
       </div>
     `;
-    
+
     // Add close button handler for this widget type
     const closeBtn = statusWidget.querySelector('.widget-close-btn');
     if (closeBtn) {
@@ -3012,7 +3009,7 @@ export default apiInitializer((api) => {
           for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
             if (siblings[i].classList.contains('tally-status-widget-container')) {
               lastWidget = siblings[i];
-              break;
+          break;
             }
           }
         }
@@ -3022,7 +3019,7 @@ export default apiInitializer((api) => {
             // Insert after the last widget
             lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
             console.log("✅ [MOBILE] Status widget inserted after last widget");
-          } else {
+        } else {
             // No existing widgets, insert before first post
             firstPost.parentNode.insertBefore(statusWidget, firstPost);
             console.log("✅ [MOBILE] Status widget inserted before first post (first widget)");
@@ -3035,7 +3032,7 @@ export default apiInitializer((api) => {
             const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
             if (lastWidgetInBody.nextSibling) {
               topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
-            } else {
+      } else {
               topicBody.appendChild(statusWidget);
             }
             console.log("✅ [MOBILE] Status widget inserted after last widget in topic body");
@@ -3074,8 +3071,8 @@ export default apiInitializer((api) => {
             const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
             if (bodyFirstChild) {
               document.body.insertBefore(statusWidget, bodyFirstChild);
-            } else {
-              document.body.appendChild(statusWidget);
+        } else {
+          document.body.appendChild(statusWidget);
             }
             console.log("✅ [MOBILE] Status widget inserted at top of body");
           }
@@ -3886,7 +3883,7 @@ export default apiInitializer((api) => {
         // Wrap in Promise.resolve to ensure we always return a promise that resolves
         return Promise.resolve()
           .then(() => fetchProposalDataByType(url, 'snapshot'))
-          .then(data => {
+      .then(data => {
             // Remove from fetching set when fetch completes
             fetchingUrls.delete(url);
             return { url, data, type: 'snapshot' };
@@ -3997,11 +3994,11 @@ export default apiInitializer((api) => {
                 aipUrl
               }, aipWidgetId);
               console.log(`✅ [RENDER] AIP widget ${aipIndex + 1} rendered`);
-            } else {
+        } else {
               console.warn(`⚠️ [TOPIC] AIP data fetched but missing title:`, aipData);
-            }
-          })
-          .catch(error => {
+        }
+      })
+      .catch(error => {
             // Remove from fetching set on error
             fetchingUrls.delete(aipUrl);
             console.warn(`⚠️ [TOPIC] Error fetching AIP ${aipIndex + 1} from ${aipUrl}:`, error.message || error);
@@ -4036,7 +4033,7 @@ export default apiInitializer((api) => {
       }
     }, 300);
   }
-
+  
   // Watch for new posts being added to the topic and re-check for proposals
   function setupTopicWatcher() {
     // Watch for new posts being added
@@ -4814,7 +4811,7 @@ export default apiInitializer((api) => {
         } else {
           // Retry after a short delay (only if element still exists)
           if (this.element) {
-            setTimeout(setupListeners, 200);
+          setTimeout(setupListeners, 200);
           }
         }
       };
@@ -4837,8 +4834,8 @@ export default apiInitializer((api) => {
       const composerObserver = new MutationObserver(() => {
         // Only run if element still exists
         if (this.element) {
-          setupListeners();
-          checkForUrls();
+        setupListeners();
+        checkForUrls();
         }
       });
       
@@ -4849,10 +4846,10 @@ export default apiInitializer((api) => {
       
       // Cleanup on destroy
       if (this.element) {
-        this.element.addEventListener('willDestroyElement', () => {
-          clearInterval(intervalId);
-          composerObserver.disconnect();
-        }, { once: true });
+      this.element.addEventListener('willDestroyElement', () => {
+        clearInterval(intervalId);
+        composerObserver.disconnect();
+      }, { once: true });
       }
     }
   }, { pluginId: "arbitrium-tally-widget-composer" });
