@@ -906,8 +906,8 @@ export default apiInitializer((api) => {
       if (!ethers) {
         console.error("❌ [AIP] ethers.js not available - on-chain fetch disabled");
         console.error("❌ [AIP] This is the PRIMARY method - ethers.js must be loaded!");
-        return null;
-      }
+    return null;
+  }
 
       // Parse proposal ID (should be a number)
       // Handle both string and number inputs, extract numeric part if needed
