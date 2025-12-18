@@ -2480,7 +2480,7 @@ export default apiInitializer((api) => {
               <button class="stage-toggle-btn" data-stage-id="${stageId}" style="background: transparent; border: none; cursor: pointer; color: #6b7280; font-size: 14px; padding: 0; margin: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; flex-shrink: 0;" title="Click to expand">
                 <span id="${stageId}-icon">▶</span>
               </button>
-              <span id="${stageId}-collapsed-text" style="flex: 1;">[Collapsed by default]</span>
+              <span id="${stageId}-collapsed-text" style="flex: 1;">View Result</span>
             </div>
           ` : ''}
           ${collapsedContent}
@@ -2716,7 +2716,7 @@ export default apiInitializer((api) => {
               <button class="stage-toggle-btn" data-stage-id="${stageId}" style="background: transparent; border: none; cursor: pointer; color: #6b7280; font-size: 14px; padding: 0; margin: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; flex-shrink: 0;" title="Click to expand">
                 <span id="${stageId}-icon">▶</span>
               </button>
-              <span id="${stageId}-collapsed-text" style="flex: 1;">[Collapsed by default]</span>
+              <span id="${stageId}-collapsed-text" style="flex: 1;">View Result</span>
             </div>
           ` : ''}
           ${collapsedContent}
