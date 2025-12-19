@@ -399,6 +399,72 @@ export default apiInitializer((api) => {
     throw unknownError;
   }
 
+  // Validate that a Snapshot proposal is a valid Aave governance proposal
+  // Must be of type AIP, Temp Check, or ARFC
+  function isValidAaveGovernanceProposal(proposal, space) {
+    if (!proposal) {
+      return false;
+    }
+    
+    // Verify space is from Aave (aave.eth or aavedao.eth)
+    const cleanSpace = space.startsWith('s:') ? space.substring(2) : space;
+    const isAaveSpace = cleanSpace === 'aave.eth' || 
+                       cleanSpace === 'aavedao.eth' ||
+                       cleanSpace === 's:aave.eth' ||
+                       cleanSpace === 's:aavedao.eth' ||
+                       space === 'aave.eth' ||
+                       space === 'aavedao.eth';
+    
+    if (!isAaveSpace) {
+      console.log("❌ [VALIDATE] Proposal space is not Aave:", cleanSpace);
+      return false;
+    }
+    
+    // Check proposal title and body for AIP, Temp Check, or ARFC indicators
+    const title = proposal.title || '';
+    const body = proposal.body || '';
+    const titleLower = title.toLowerCase();
+    const bodyLower = body.toLowerCase();
+    const combinedText = `${titleLower} ${bodyLower}`;
+    
+    // Check for Temp Check indicators
+    const hasTempCheck = titleLower.includes('temp check') || 
+                        titleLower.includes('tempcheck') ||
+                        bodyLower.includes('temp check') || 
+                        bodyLower.includes('tempcheck') ||
+                        titleLower.includes('[temp check]') ||
+                        titleLower.startsWith('temp check');
+    
+    // Check for ARFC indicators
+    const hasARFC = titleLower.includes('arfc') || 
+                   bodyLower.includes('arfc') ||
+                   titleLower.includes('[arfc]');
+    
+    // Check for AIP indicators (Aave Improvement Proposal)
+    const hasAIP = titleLower.includes('aip') ||
+                  bodyLower.includes('aip') ||
+                  titleLower.includes('aave improvement proposal') ||
+                  bodyLower.includes('aave improvement proposal') ||
+                  titleLower.includes('[aip]') ||
+                  /aip\s*[-:]?\s*\d+/i.test(combinedText);
+    
+    const isValid = hasTempCheck || hasARFC || hasAIP;
+    
+    if (!isValid) {
+      console.log("❌ [VALIDATE] Proposal does not match AIP, Temp Check, or ARFC types");
+      console.log("   Title:", title.substring(0, 100));
+      console.log("   Space:", cleanSpace);
+      return false;
+    }
+    
+    console.log("✅ [VALIDATE] Proposal is valid Aave governance proposal");
+    if (hasTempCheck) { console.log("   Type: Temp Check"); }
+    if (hasARFC) { console.log("   Type: ARFC"); }
+    if (hasAIP) { console.log("   Type: AIP"); }
+    
+    return true;
+  }
+
   // Fetch Snapshot proposal data
   async function fetchSnapshotProposal(space, proposalId, cacheKey) {
     try {
@@ -495,6 +561,13 @@ export default apiInitializer((api) => {
         const proposal = result.data?.proposal;
         if (proposal) {
           console.log("✅ [SNAPSHOT] Proposal fetched successfully with format 1");
+          
+          // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
+          if (!isValidAaveGovernanceProposal(proposal, space)) {
+            console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
+            return null;
+          }
+          
           const transformedProposal = transformSnapshotData(proposal, space);
           transformedProposal._cachedAt = Date.now();
           proposalCache.set(cacheKey, transformedProposal);
@@ -516,6 +589,13 @@ export default apiInitializer((api) => {
             const retryResult2 = await retryResponse2.json();
             if (retryResult2.data?.proposal) {
               console.log("✅ [SNAPSHOT] Proposal fetched with format 2 (hash only)");
+              
+              // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
+              if (!isValidAaveGovernanceProposal(retryResult2.data.proposal, space)) {
+                console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
+                return null;
+              }
+              
               const transformedProposal = transformSnapshotData(retryResult2.data.proposal, space);
               transformedProposal._cachedAt = Date.now();
               proposalCache.set(cacheKey, transformedProposal);
@@ -539,6 +619,13 @@ export default apiInitializer((api) => {
               const retryResult3 = await retryResponse3.json();
               if (retryResult3.data?.proposal) {
                 console.log("✅ [SNAPSHOT] Proposal fetched with format 3 ('s:' prefix)");
+                
+                // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
+                if (!isValidAaveGovernanceProposal(retryResult3.data.proposal, space)) {
+                  console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
+                  return null;
+                }
+                
                 const transformedProposal = transformSnapshotData(retryResult3.data.proposal, space);
                 transformedProposal._cachedAt = Date.now();
                 proposalCache.set(cacheKey, transformedProposal);
@@ -900,19 +987,23 @@ export default apiInitializer((api) => {
         if (p.transactions?.active?.timestamp) {
           votingActivationTimestamp = Number(p.transactions.active.timestamp);
           console.log("🔵 [AIP] Found votingActivationTimestamp from transactions.active:", votingActivationTimestamp);
-        } else if (p.transactions?.created?.timestamp && p.votingConfig?.cooldownBeforeVotingStart) {
-          // Calculate: created timestamp + cooldown period = activation timestamp
+        } else if (p.transactions?.created?.timestamp) {
+          // For "created" status, calculate: created timestamp + cooldown period = activation timestamp
+          // This allows us to calculate the end date even before voting starts
           const createdTimestamp = Number(p.transactions.created.timestamp);
-          const cooldown = Number(p.votingConfig.cooldownBeforeVotingStart);
+          const cooldown = p.votingConfig?.cooldownBeforeVotingStart ? Number(p.votingConfig.cooldownBeforeVotingStart) : 0;
           votingActivationTimestamp = createdTimestamp + cooldown;
-          console.log("🔵 [AIP] Calculated votingActivationTimestamp: created (", createdTimestamp, ") + cooldown (", cooldown, ") =", votingActivationTimestamp);
+          console.log("🔵 [AIP] Calculated votingActivationTimestamp from created: created (", createdTimestamp, ") + cooldown (", cooldown, ") =", votingActivationTimestamp);
         }
         
         // Calculate end date: votingActivationTimestamp + votingDuration
         // Then calculate daysLeft and hoursLeft
-        if (votingActivationTimestamp && p.votingDuration) {
-          const votingDuration = Number(p.votingDuration);
-          const endTimestamp = votingActivationTimestamp + votingDuration;
+        // Use votingDuration from proposal or votingConfig as fallback
+        const votingDuration = p.votingDuration || p.votingConfig?.votingDuration;
+        
+        if (votingActivationTimestamp && votingDuration) {
+          const votingDurationNum = Number(votingDuration);
+          const endTimestamp = votingActivationTimestamp + votingDurationNum;
           
           // Convert to milliseconds for Date calculations
           const endTimestampMs = endTimestamp * 1000;
@@ -943,7 +1034,7 @@ export default apiInitializer((api) => {
           }
         } else {
           console.log("⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing");
-          console.log("   votingActivationTimestamp:", votingActivationTimestamp, "votingDuration:", p.votingDuration);
+          console.log("   votingActivationTimestamp:", votingActivationTimestamp, "votingDuration:", votingDuration, "p.votingDuration:", p.votingDuration, "p.votingConfig?.votingDuration:", p.votingConfig?.votingDuration);
         }
 
         return {
@@ -2181,28 +2272,21 @@ export default apiInitializer((api) => {
     // Get the URL from stages to check for duplicates by URL (more reliable than ID)
     const proposalUrl = stages.aipUrl || stages.arfcUrl || stages.tempCheckUrl || null;
     
-    // SPECIAL HANDLING FOR AIP: Remove all existing AIP widgets to ensure only one is shown
-    if (stages.aip && stages.aipUrl) {
-      const existingAipWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"]');
-      if (existingAipWidgets.length > 0) {
-        console.log(`🔵 [RENDER] Found ${existingAipWidgets.length} existing AIP widget(s), removing to prevent duplicates`);
-        existingAipWidgets.forEach(widget => {
+    // Check for existing widgets with the same URL to prevent duplicates
+    // This allows multiple proposals of the same type (e.g., 2 AIP proposals) to be shown separately
+    // Only widgets with the same URL are considered duplicates, not all widgets of the same type
+    if (proposalUrl) {
+      const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${proposalUrl}"]`);
+      if (existingWidgetsByUrl.length > 0) {
+        console.log(`🔵 [RENDER] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, skipping duplicate render`);
+        // Clean up tracking for these widgets
+        existingWidgetsByUrl.forEach(widget => {
           const widgetUrl = widget.getAttribute('data-tally-url');
           if (widgetUrl) {
             renderingUrls.delete(widgetUrl);
             fetchingUrls.delete(widgetUrl);
           }
-          widget.remove();
         });
-      }
-    }
-    
-    // First, check for existing widgets with the same URL to prevent duplicates (check DOM first)
-    // This is the same logic used for snapshot widgets - check DOM before checking renderingUrls
-    if (proposalUrl) {
-      const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${proposalUrl}"]`);
-      if (existingWidgetsByUrl.length > 0) {
-        console.log(`🔵 [RENDER] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, skipping duplicate render`);
         return;
       }
     }
@@ -2213,9 +2297,11 @@ export default apiInitializer((api) => {
       return;
     }
     
-    // Mark this URL as being rendered
+    // Mark this URL as being rendered (both normalized and original for compatibility)
     if (proposalUrl) {
-      renderingUrls.add(proposalUrl);
+      const normalizedUrl = normalizeAIPUrl(proposalUrl);
+      renderingUrls.add(normalizedUrl);
+      renderingUrls.add(proposalUrl); // Also add original for backward compatibility
     }
     
     // Remove existing widget with the same ID (to allow re-rendering), but keep others
@@ -2501,6 +2587,7 @@ export default apiInitializer((api) => {
       // Map status to CSS class for styling
       // "passed" means proposal passed voting but hasn't been executed yet (different from "executed")
       const statusClass = stageData.status === 'active' ? 'active' : 
+                         stageData.status === 'created' ? 'created' :
                          stageData.status === 'executed' ? 'executed' :
                          stageData.status === 'passed' ? 'passed' :
                          stageData.status === 'queued' ? 'queued' :
@@ -2662,6 +2749,10 @@ export default apiInitializer((api) => {
             <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
               ${stageData.status === 'cancelled' ? 'Voting was cancelled before it started' : 'Voting failed - no vote data available'}
             </div>
+          ` : stageData.status === 'created' ? `
+            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+              Voting Starting Soon
+            </div>
           ` : `
             <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
               Vote data not available from subgraph
@@ -2682,6 +2773,10 @@ export default apiInitializer((api) => {
         ` : isCancelledOrFailed ? `
           <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
             ${stageData.status === 'cancelled' ? 'Voting was cancelled before it started' : 'Voting failed - no vote data available'}
+          </div>
+        ` : stageData.status === 'created' ? `
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            Voting Starting Soon
           </div>
         ` : `
           <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
@@ -3303,11 +3398,12 @@ export default apiInitializer((api) => {
     
     // Recalculate status flags with final quorum/defeat values
     const isActive = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && activeStatuses.includes(status);
+    const isCreated = status === 'created';
     const isExecuted = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && executedStatuses.includes(status);
     const isQueued = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && queuedStatuses.includes(status);
     const isPending = !isPendingExecution && !finalIsDefeat && !finalIsQuorumNotReached && !isQueued && (pendingStatuses.includes(status) || (status.includes("pending") && !isPendingExecution));
     
-    console.log("🔵 [WIDGET] Status flags:", { isPendingExecution, isActive, isExecuted, isQueued, isPending, isDefeat: finalIsDefeat, isQuorumNotReached: finalIsQuorumNotReached });
+    console.log("🔵 [WIDGET] Status flags:", { isPendingExecution, isActive, isCreated, isExecuted, isQueued, isPending, isDefeat: finalIsDefeat, isQuorumNotReached: finalIsQuorumNotReached });
     console.log("🔵 [WIDGET] Display status:", displayStatus, "(Raw from API:", exactStatus, ")");
     
     // Determine stage label and button text based on proposal type
@@ -3365,7 +3461,7 @@ export default apiInitializer((api) => {
         ${stageLabel ? `<div class="stage-label" style="font-size: 0.75em; font-weight: 600; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">${stageLabel}</div>` : ''}
         ${isEndingSoon ? `<div class="urgency-alert" style="background: #fee2e2; color: #dc2626; padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 0.85em; font-weight: 600; text-align: center;">⚠️ Ending Soon!</div>` : ''}
         <div class="status-badges-row">
-          <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : 'inactive'}">
+          <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isCreated ? 'created' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : 'inactive'}">
             ${displayStatus}
           </div>
           ${(() => {
@@ -3750,11 +3846,13 @@ export default apiInitializer((api) => {
       const snapshotMatches = combinedContent.match(SNAPSHOT_URL_REGEX);
       if (snapshotMatches) {
         snapshotMatches.forEach(url => {
+          // Decode HTML entities to normalize URLs
+          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
           // Only include Aave Snapshot space links (aave.eth or s:aavedao.eth)
-          if (url.includes('aave.eth') || url.includes('aavedao.eth')) {
-            if (!extractedLinks.snapshot.includes(url)) {
-              extractedLinks.snapshot.push(url);
-              console.log("✅ [FORUM] Found Snapshot link:", url);
+          if (decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth')) {
+            if (!extractedLinks.snapshot.includes(decodedUrl) && !extractedLinks.snapshot.includes(url)) {
+              extractedLinks.snapshot.push(decodedUrl);
+              console.log("✅ [FORUM] Found Snapshot link:", decodedUrl);
             }
           }
         });
@@ -3764,9 +3862,11 @@ export default apiInitializer((api) => {
       const aipMatches = combinedContent.match(AIP_URL_REGEX);
       if (aipMatches) {
         aipMatches.forEach(url => {
-          if (!extractedLinks.aip.includes(url)) {
-            extractedLinks.aip.push(url);
-            console.log("✅ [FORUM] Found AIP link:", url);
+          // Decode HTML entities to normalize URLs
+          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          if (!extractedLinks.aip.includes(decodedUrl) && !extractedLinks.aip.includes(url)) {
+            extractedLinks.aip.push(decodedUrl);
+            console.log("✅ [FORUM] Found AIP link:", decodedUrl);
           }
         });
       }
@@ -3809,8 +3909,10 @@ export default apiInitializer((api) => {
       const forumMatches = combinedContent.match(AAVE_FORUM_URL_REGEX);
       if (forumMatches) {
         forumMatches.forEach(url => {
+          // Decode HTML entities to normalize URLs
+          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
           // Clean up URL (remove trailing slashes, fragments, etc.)
-          const cleanUrl = url.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
+          const cleanUrl = decodedUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
           if (!proposals.forum.includes(cleanUrl) && !proposals.forum.includes(url)) {
             proposals.forum.push(cleanUrl);
             console.log("✅ [TOPIC] Found Aave Governance Forum link:", cleanUrl);
@@ -3823,7 +3925,9 @@ export default apiInitializer((api) => {
         const flexibleMatch = combinedContent.match(/https?:\/\/[^\s<>"']*governance\.aave\.com\/t\/[^\s<>"']+/gi);
         if (flexibleMatch) {
           flexibleMatch.forEach(url => {
-            const cleanUrl = url.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
+            // Decode HTML entities to normalize URLs
+            const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            const cleanUrl = decodedUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
             if (!proposals.forum.includes(cleanUrl) && !proposals.forum.includes(url)) {
               proposals.forum.push(cleanUrl);
               console.log("✅ [TOPIC] Found Aave Governance Forum link (flexible match):", cleanUrl);
@@ -3836,10 +3940,12 @@ export default apiInitializer((api) => {
       const snapshotMatches = combinedContent.match(SNAPSHOT_URL_REGEX);
       if (snapshotMatches) {
         snapshotMatches.forEach(url => {
+          // Decode HTML entities to normalize URLs
+          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
           // Only include Aave Snapshot space links
-          if (url.includes('aave.eth') || url.includes('aavedao.eth')) {
-            if (!proposals.snapshot.includes(url)) {
-              proposals.snapshot.push(url);
+          if (decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth')) {
+            if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+              proposals.snapshot.push(decodedUrl);
             }
           }
         });
@@ -3849,8 +3955,11 @@ export default apiInitializer((api) => {
       const aipMatches = combinedContent.match(AIP_URL_REGEX);
       if (aipMatches) {
         aipMatches.forEach(url => {
-          if (!proposals.aip.includes(url)) {
-            proposals.aip.push(url);
+          // Decode HTML entities (e.g., &amp; -> &) to normalize URLs
+          // This prevents the same URL from being treated as different due to HTML encoding
+          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
+            proposals.aip.push(decodedUrl);
           }
         });
       }
@@ -4289,9 +4398,381 @@ export default apiInitializer((api) => {
     return Promise.resolve();
   }
   
+  // Normalize AIP URLs to extract proposalId for comparison (ignore query parameters like ipfsHash)
+  function normalizeAIPUrl(url) {
+    if (!url || !url.includes('vote.onaave.com') && !url.includes('app.aave.com') && !url.includes('governance.aave.com')) {
+      return url; // Not an AIP URL, return as-is
+    }
+    
+    const proposalInfo = extractAIPProposalInfo(url);
+    if (proposalInfo && proposalInfo.proposalId) {
+      // Return normalized URL based on proposalId
+      if (url.includes('vote.onaave.com')) {
+        return `https://vote.onaave.com/proposal/?proposalId=${proposalInfo.proposalId}`;
+      } else if (url.includes('app.aave.com')) {
+        return `https://app.aave.com/governance/v3/proposal/?proposalId=${proposalInfo.proposalId}`;
+      }
+    }
+    return url; // Fallback to original URL if extraction fails
+  }
+
+  // ===== FORUM TOPIC VALIDATION =====
+  // These functions ensure proposals are only shown if they're related to the current forum topic
+  
+  /**
+   * Get the current forum topic URL if we're on a forum page
+   * Returns the normalized forum topic URL or null
+   */
+  function getCurrentForumTopicUrl() {
+    try {
+      const currentUrl = window.location.href;
+      // Check if we're on a forum topic page (governance.aave.com/t/...)
+      const forumMatch = currentUrl.match(/https?:\/\/(?:www\.)?governance\.aave\.com\/t\/[^\s<>"']+/i);
+      if (forumMatch) {
+        const forumUrl = forumMatch[0];
+        // Normalize URL (remove trailing slashes, fragments, query params)
+        const normalized = forumUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
+        console.log(`🔵 [VALIDATE] Current forum topic URL: ${normalized}`);
+        return normalized;
+      }
+    } catch (error) {
+      console.warn(`⚠️ [VALIDATE] Error getting current forum URL:`, error);
+    }
+    return null;
+  }
+  
+  /**
+   * Extract forum topic ID from a forum URL
+   * Returns the topic ID (numeric) or null
+   */
+  function extractForumTopicId(forumUrl) {
+    if (!forumUrl) { return null; }
+    try {
+      const match = forumUrl.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  }
+  
+  /**
+   * Validate if a Snapshot proposal is related to the current forum topic
+   * Returns true if the proposal is related, false otherwise
+   * 
+   * A proposal is considered related if:
+   * 1. The proposal's body/description contains a forum link matching the current topic ID
+   * 2. OR we're not on a forum page (show all proposals)
+   */
+  function validateSnapshotProposalForForum(snapshotProposal, currentForumUrl) {
+    if (!currentForumUrl) {
+      // If we're not on a forum page, allow all proposals
+      return true;
+    }
+    
+    if (!snapshotProposal || !snapshotProposal.data) {
+      return false;
+    }
+    
+    const currentTopicId = extractForumTopicId(currentForumUrl);
+    if (!currentTopicId) {
+      // Can't extract topic ID, filter out to be safe
+      console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
+      return false;
+    }
+    
+    // Check if the proposal's body/description contains a forum link matching current topic
+    const body = snapshotProposal.data.body || snapshotProposal.data.description || '';
+    const title = snapshotProposal.data.title || '';
+    const combinedText = `${body} ${title}`.toLowerCase();
+    
+    // Check for forum links in the proposal content
+    const forumLinks = combinedText.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/gi);
+    if (forumLinks) {
+      for (const link of forumLinks) {
+        const topicId = extractForumTopicId(link);
+        if (topicId === currentTopicId) {
+          console.log(`✅ [VALIDATE] Snapshot proposal is related to forum topic ${currentTopicId} (found forum link in proposal)`);
+          return true;
+        }
+      }
+    }
+    
+    // If no matching forum link found, it's not related to this topic
+    console.log(`❌ [VALIDATE] Snapshot proposal is NOT related to forum topic ${currentTopicId} - filtering out`);
+    return false;
+  }
+  
+  /**
+   * Validate if an AIP proposal is related to the current forum topic
+   * Returns true if the proposal is related, false otherwise
+   * 
+   * A proposal is considered related if:
+   * 1. The AIP proposal ID matches the forum topic ID (they're linked)
+   * 2. OR the proposal's description contains a forum link matching the current topic ID
+   * 3. OR we're not on a forum page (show all proposals)
+   */
+  function validateAIPProposalForForum(aipProposal, currentForumUrl) {
+    if (!currentForumUrl) {
+      // If we're not on a forum page, allow all proposals
+      return true;
+    }
+    
+    if (!aipProposal || !aipProposal.data) {
+      return false;
+    }
+    
+    const currentTopicId = extractForumTopicId(currentForumUrl);
+    if (!currentTopicId) {
+      // Can't extract topic ID, filter out to be safe
+      console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
+      return false;
+    }
+    
+    // Check if the AIP proposal ID matches the forum topic ID
+    // Forum topics can have the same ID as AIP proposals (they're linked)
+    const aipId = String(aipProposal.data.id || '');
+    if (aipId === currentTopicId) {
+      console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
+      return true;
+    }
+    
+    // Check if the proposal's description contains a forum link matching current topic
+    const description = aipProposal.data.description || '';
+    const title = aipProposal.data.title || '';
+    const combinedText = `${description} ${title}`.toLowerCase();
+    
+    // Check for forum links in the proposal content
+    const forumLinks = combinedText.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/gi);
+    if (forumLinks) {
+      for (const link of forumLinks) {
+        const topicId = extractForumTopicId(link);
+        if (topicId === currentTopicId) {
+          console.log(`✅ [VALIDATE] AIP proposal is related to forum topic ${currentTopicId} (found forum link in proposal)`);
+          return true;
+        }
+      }
+    }
+    
+    // If no match found, it's not related to this topic
+    console.log(`❌ [VALIDATE] AIP proposal is NOT related to forum topic ${currentTopicId} - filtering out`);
+    return false;
+  }
+
+  // ===== PROPOSAL CATEGORIZATION AND SELECTION HELPERS =====
+  // These functions handle edge cases where multiple proposals of the same type exist
+  
+  /**
+   * Categorize all Snapshot proposals by type (Temp Check, ARFC, or generic Snapshot)
+   * Returns: { tempChecks: [], arfcs: [], snapshots: [] }
+   */
+  function categorizeSnapshotProposals(snapshotProposals) {
+    const categorized = {
+      tempChecks: [],
+      arfcs: [],
+      snapshots: [] // Generic snapshot proposals that aren't Temp Check or ARFC
+    };
+    
+    snapshotProposals.forEach(proposal => {
+      if (!proposal || !proposal.data) { return; }
+      
+      const stage = proposal.data.stage || 'snapshot';
+      
+      // Extract timestamp from raw proposal data (endTime is available, or use _rawProposal.start/end)
+      let timestamp = 0;
+      if (proposal.data.endTime) {
+        timestamp = proposal.data.endTime; // Use endTime as proxy for recency
+      } else if (proposal.data._rawProposal) {
+        timestamp = proposal.data._rawProposal.start || proposal.data._rawProposal.end || 0;
+      }
+      
+      if (stage === 'temp-check') {
+        categorized.tempChecks.push({
+          ...proposal,
+          stage: 'temp-check',
+          timestamp
+        });
+      } else if (stage === 'arfc') {
+        categorized.arfcs.push({
+          ...proposal,
+          stage: 'arfc',
+          timestamp
+        });
+      } else {
+        categorized.snapshots.push({
+          ...proposal,
+          stage: 'snapshot',
+          timestamp
+        });
+      }
+    });
+    
+    console.log(`🔵 [CATEGORIZE] Snapshot proposals: ${categorized.tempChecks.length} Temp Check(s), ${categorized.arfcs.length} ARFC(s), ${categorized.snapshots.length} generic Snapshot(s)`);
+    
+    return categorized;
+  }
+  
+  /**
+   * Categorize all AIP proposals
+   * Returns: { aips: [] }
+   */
+  function categorizeAIPProposals(aipProposals) {
+    const categorized = {
+      aips: []
+    };
+    
+    aipProposals.forEach(proposal => {
+      if (!proposal || !proposal.data) { return; }
+      
+      // Use timestamp if already set, otherwise extract from data
+      let timestamp = proposal.timestamp || 0;
+      if (!timestamp || timestamp === 0) {
+        // Extract timestamp from data - use daysLeft to infer recency
+        if (proposal.data.daysLeft !== null && proposal.data.daysLeft !== undefined) {
+          // Use daysLeft as proxy: more negative = older, more positive = newer
+          // Convert to a timestamp-like value (larger = newer)
+          timestamp = -proposal.data.daysLeft * 86400; // Convert days to seconds
+        } else {
+          // Fallback: use current time for proposals without timestamp
+          timestamp = Date.now() / 1000;
+        }
+      }
+      
+      categorized.aips.push({
+        ...proposal,
+        timestamp,
+        status: proposal.status || proposal.data.status || 'unknown'
+      });
+    });
+    
+    console.log(`🔵 [CATEGORIZE] AIP proposals: ${categorized.aips.length} AIP(s)`);
+    
+    return categorized;
+  }
+  
+  /**
+   * Select the best proposal from an array based on status and recency
+   * Priority: active/created/pending > non-executed > non-failed > latest
+   * This handles edge cases like:
+   * - Failed + resubmitted proposals
+   * - Executed (old) + Created (new) proposals
+   */
+  function selectBestProposal(proposals, type = 'snapshot') {
+    if (!proposals || proposals.length === 0) { return null; }
+    if (proposals.length === 1) { return proposals[0]; }
+    
+    console.log(`🔵 [SELECT] Selecting best proposal from ${proposals.length} ${type} proposal(s)`);
+    
+    // Sort by timestamp (newest first)
+    const sorted = [...proposals].sort((a, b) => {
+      const timeA = a.timestamp || 0;
+      const timeB = b.timestamp || 0;
+      return timeB - timeA; // Descending (newest first)
+    });
+    
+    // Priority 1: Find active/ongoing proposals (active, created, pending)
+    // These are proposals that are still in progress or newly created
+    const activeProposals = sorted.filter(p => {
+      if (type === 'aip') {
+        const status = p.data?.status?.toLowerCase() || p.status?.toLowerCase() || '';
+        // Include: active, created, pending (all ongoing states)
+        return ['active', 'created', 'pending'].includes(status);
+      } else {
+        // Snapshot proposals - check status field (transformed from state)
+        const status = p.data?.status?.toLowerCase() || '';
+        return status === 'active' || status === 'open';
+      }
+    });
+    
+    if (activeProposals.length > 0) {
+      console.log(`✅ [SELECT] Found ${activeProposals.length} active/ongoing ${type} proposal(s), selecting latest`);
+      return activeProposals[0]; // Latest active/ongoing proposal
+    }
+    
+    // Priority 2: Find non-executed/non-completed proposals (prefer ongoing over completed)
+    // This handles:
+    // - AIP: executed (old) vs created (new) - prefer created
+    // - Snapshot: closed/passed (old) vs active (new) - prefer active
+    const nonExecutedProposals = sorted.filter(p => {
+      if (type === 'aip') {
+        const status = p.data?.status?.toLowerCase() || p.status?.toLowerCase() || '';
+        // Exclude executed/completed states, prefer ongoing ones
+        return !['executed', 'completed', 'succeeded'].includes(status);
+      } else {
+        // For Snapshot (Temp Check, ARFC), prefer active/open over closed/passed
+        const status = p.data?.status?.toLowerCase() || '';
+        // Exclude closed/passed states (completed), prefer ongoing ones
+        return !['closed', 'passed'].includes(status);
+      }
+    });
+    
+    if (nonExecutedProposals.length > 0) {
+      console.log(`✅ [SELECT] Found ${nonExecutedProposals.length} non-executed ${type} proposal(s), selecting latest`);
+      return nonExecutedProposals[0]; // Latest non-executed proposal
+    }
+    
+    // Priority 3: Find non-failed proposals (exclude failed, cancelled, expired)
+    const nonFailedProposals = sorted.filter(p => {
+      if (type === 'aip') {
+        const status = p.data?.status?.toLowerCase() || p.status?.toLowerCase() || '';
+        return !['failed', 'cancelled', 'expired', 'defeated'].includes(status);
+      } else {
+        // Snapshot proposals - check status field
+        const status = p.data?.status?.toLowerCase() || '';
+        // Exclude closed/failed statuses, but include passed
+        return !['closed', 'failed'].includes(status) || status === 'passed';
+      }
+    });
+    
+    if (nonFailedProposals.length > 0) {
+      console.log(`✅ [SELECT] Found ${nonFailedProposals.length} non-failed ${type} proposal(s), selecting latest`);
+      return nonFailedProposals[0]; // Latest non-failed proposal
+    }
+    
+    // Priority 4: Just return the latest one (even if failed/executed)
+    console.log(`⚠️ [SELECT] All ${type} proposals appear to be failed/inactive/executed, selecting latest`);
+    return sorted[0];
+  }
+  
+  /**
+   * Get all proposals of a specific type (for timeline/history display)
+   * Returns array sorted by timestamp (newest first)
+   */
+  // eslint-disable-next-line no-unused-vars
+  function getAllProposalsOfType(proposals) {
+    if (!proposals || proposals.length === 0) { return []; }
+    
+    // Sort by timestamp (newest first)
+    return [...proposals].sort((a, b) => {
+      const timeA = a.timestamp || 0;
+      const timeB = b.timestamp || 0;
+      return timeB - timeA; // Descending (newest first)
+    });
+  }
+  
+  /**
+   * Detect ALL proposals of each type from fetched data
+   * This is the main function that replaces findOne() patterns
+   * Returns: { tempChecks: [], arfcs: [], aips: [] }
+   */
+  // eslint-disable-next-line no-unused-vars
+  function detectAllProposalsByType(snapshotProposals, aipProposals) {
+    const snapshotCategorized = categorizeSnapshotProposals(snapshotProposals || []);
+    const aipCategorized = categorizeAIPProposals(aipProposals || []);
+    
+    return {
+      tempChecks: snapshotCategorized.tempChecks,
+      arfcs: snapshotCategorized.arfcs,
+      aips: aipCategorized.aips,
+      // Also include generic snapshots for completeness
+      snapshots: snapshotCategorized.snapshots
+    };
+  }
+
   // Separate function to set up widget with proposals (to allow re-running after extraction)
   // Render widgets - one per proposal URL
   function setupTopicWidgetWithProposals(allProposals) {
+    // Note: Don't check isWidgetSetupRunning here - that flag is for debouncedSetupTopicWidget
+    // This function can be called multiple times if proposals change
     
     // Check if widgets already exist and match current proposals - if so, don't clear them
     const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
@@ -4299,12 +4780,17 @@ export default apiInitializer((api) => {
     existingWidgets.forEach(widget => {
       const widgetUrl = widget.getAttribute('data-tally-url');
       if (widgetUrl) {
-        existingUrls.add(widgetUrl);
+        // Normalize URL for comparison
+        const normalizedUrl = normalizeAIPUrl(widgetUrl);
+        existingUrls.add(normalizedUrl);
       }
     });
     
-    // Get all proposal URLs from current proposals
-    const currentUrls = new Set([...allProposals.snapshot, ...allProposals.aip]);
+    // Normalize all current proposal URLs for comparison
+    // Snapshot URLs: use as-is
+    // AIP URLs: normalize to ignore query parameters
+    const normalizedAipUrlsForComparison = allProposals.aip.map(url => normalizeAIPUrl(url));
+    const currentUrls = new Set([...allProposals.snapshot, ...normalizedAipUrlsForComparison]);
     
     // Only clear widgets if the proposals have changed (different URLs)
     const urlsMatch = existingUrls.size === currentUrls.size && 
@@ -4348,9 +4834,25 @@ export default apiInitializer((api) => {
       return;
     }
     
-    // Deduplicate URLs to prevent creating multiple widgets for the same proposal
+    // Normalize and deduplicate URLs to prevent creating multiple widgets for the same proposal
+    // For AIP URLs, normalize to base URL (ignore query parameters like ipfsHash)
+    // For Snapshot URLs, use as-is (they're already unique by space/proposalId)
+    const normalizedAipUrls = allProposals.aip.map(url => normalizeAIPUrl(url));
+    
+    // Create a map from normalized AIP URL to original URL to preserve the original for display
+    const aipUrlMap = new Map();
+    allProposals.aip.forEach((url, index) => {
+      const normalized = normalizedAipUrls[index];
+      if (!aipUrlMap.has(normalized)) {
+        aipUrlMap.set(normalized, url);
+      }
+    });
+    
+    // Get unique URLs
+    // Snapshot URLs: use as-is (already unique)
     const uniqueSnapshotUrls = [...new Set(allProposals.snapshot)];
-    const uniqueAipUrls = [...new Set(allProposals.aip)];
+    // AIP URLs: deduplicate by normalized URL, then map back to original
+    const uniqueAipUrls = [...new Set(normalizedAipUrls)].map(normalized => aipUrlMap.get(normalized));
     
     if (uniqueSnapshotUrls.length !== allProposals.snapshot.length) {
       console.log(`🔵 [TOPIC] Deduplicated ${allProposals.snapshot.length} Snapshot URLs to ${uniqueSnapshotUrls.length} unique URLs`);
@@ -4375,12 +4877,16 @@ export default apiInitializer((api) => {
     // ===== SNAPSHOT WIDGETS - One per URL =====
     if (uniqueSnapshotUrls.length > 0) {
       // Filter out URLs that are already being fetched or rendered
+      // Normalize URLs for comparison to handle query parameter variations
       const snapshotUrlsToFetch = uniqueSnapshotUrls.filter(url => {
-        if (fetchingUrls.has(url) || renderingUrls.has(url)) {
+        const normalizedUrl = normalizeAIPUrl(url);
+        if (fetchingUrls.has(normalizedUrl) || renderingUrls.has(normalizedUrl) || 
+            fetchingUrls.has(url) || renderingUrls.has(url)) {
           console.log(`🔵 [TOPIC] Snapshot URL ${url} is already being fetched/rendered, skipping duplicate`);
           return false;
         }
-        fetchingUrls.add(url);
+        fetchingUrls.add(normalizedUrl);
+        fetchingUrls.add(url); // Also add original for backward compatibility
         return true;
       });
       
@@ -4428,10 +4934,63 @@ export default apiInitializer((api) => {
           
           console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
           
-          // Render one widget per Snapshot proposal
-          validSnapshots.forEach((snapshot, index) => {
+          // ===== VALIDATE PROPOSALS FOR FORUM TOPIC =====
+          // Filter out proposals that are not related to the current forum topic
+          // This prevents false positives from historical references or unrelated proposals
+          const currentForumUrl = getCurrentForumTopicUrl();
+          const validatedSnapshots = validSnapshots.filter(proposal => {
+            return validateSnapshotProposalForForum(proposal, currentForumUrl);
+          });
+          
+          if (validatedSnapshots.length < validSnapshots.length) {
+            const filteredCount = validSnapshots.length - validatedSnapshots.length;
+            console.log(`🔵 [VALIDATE] Filtered out ${filteredCount} Snapshot proposal(s) not related to forum topic`);
+          }
+          
+          // ===== CATEGORIZE ALL PROPOSALS BY TYPE =====
+          // This handles edge cases: multiple Temp Checks, multiple ARFCs, etc.
+          const categorized = categorizeSnapshotProposals(validatedSnapshots);
+          
+          // ===== SELECT BEST PROPOSAL FROM EACH TYPE =====
+          // For each type, select the best one (active > latest > non-failed)
+          const bestTempCheck = selectBestProposal(categorized.tempChecks, 'snapshot');
+          const bestARFC = selectBestProposal(categorized.arfcs, 'snapshot');
+          const bestSnapshot = selectBestProposal(categorized.snapshots, 'snapshot');
+          
+          // Log what we found
+          if (categorized.tempChecks.length > 1) {
+            console.log(`🔵 [EDGE-CASE] Found ${categorized.tempChecks.length} Temp Check(s) - selected best one`);
+            categorized.tempChecks.forEach((tc, idx) => {
+              console.log(`   [${idx + 1}] ${tc.data?.title?.substring(0, 60)}... (status: ${tc.data?.status || 'unknown'})`);
+            });
+          }
+          if (categorized.arfcs.length > 1) {
+            console.log(`🔵 [EDGE-CASE] Found ${categorized.arfcs.length} ARFC(s) - selected best one`);
+            categorized.arfcs.forEach((arfc, idx) => {
+              console.log(`   [${idx + 1}] ${arfc.data?.title?.substring(0, 60)}... (status: ${arfc.data?.status || 'unknown'})`);
+            });
+          }
+          
+          // ===== RENDER WIDGETS =====
+          // Render widgets for the selected proposals (one per type, if they exist)
+          const proposalsToRender = [];
+          
+          if (bestTempCheck) {
+            proposalsToRender.push({ proposal: bestTempCheck, type: 'temp-check', order: 0 });
+          }
+          if (bestARFC) {
+            proposalsToRender.push({ proposal: bestARFC, type: 'arfc', order: 1 });
+          }
+          if (bestSnapshot) {
+            proposalsToRender.push({ proposal: bestSnapshot, type: 'snapshot', order: 2 });
+          }
+          
+          // Render each selected proposal
+          proposalsToRender.forEach(({ proposal: snapshot, type: stageType, order: typeOrder }, index) => {
             // Check again if URL is being rendered (in case another fetch completed first)
-            if (renderingUrls.has(snapshot.url)) {
+            // Normalize URL for comparison
+            const normalizedUrl = normalizeAIPUrl(snapshot.url);
+            if (renderingUrls.has(normalizedUrl) || renderingUrls.has(snapshot.url)) {
               console.log(`🔵 [TOPIC] Snapshot URL ${snapshot.url} is already being rendered, skipping duplicate render`);
               return;
             }
@@ -4442,11 +5001,17 @@ export default apiInitializer((api) => {
             
             // Find proposal order in combined list (order in content)
             const proposalOrderIndex = orderedProposals.findIndex(p => p.url === snapshot.url && p.type === 'snapshot');
-            const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : index;
+            const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : typeOrder;
             
-            console.log(`🔵 [RENDER] Creating Snapshot widget ${index + 1}/${validSnapshots.length} for ${stageName} (order: ${proposalOrder})`);
+            console.log(`🔵 [RENDER] Creating Snapshot widget ${index + 1}/${proposalsToRender.length} for ${stageName} (order: ${proposalOrder})`);
             console.log(`   Title: ${snapshot.data.title?.substring(0, 60)}...`);
             console.log(`   URL: ${snapshot.url}`);
+            if (stageType === 'temp-check' && categorized.tempChecks.length > 1) {
+              console.log(`   ⚠️ Note: Selected from ${categorized.tempChecks.length} Temp Check(s) found in thread`);
+            }
+            if (stageType === 'arfc' && categorized.arfcs.length > 1) {
+              console.log(`   ⚠️ Note: Selected from ${categorized.arfcs.length} ARFC(s) found in thread`);
+            }
             
             // Create unique widget ID for each proposal
             const widgetId = `snapshot-widget-${index}-${Date.now()}`;
@@ -4469,56 +5034,120 @@ export default apiInitializer((api) => {
         });
     }
     
-    // ===== AIP WIDGETS - One per URL =====
+    // ===== AIP WIDGETS - Fetch all, then categorize and select best =====
     if (uniqueAipUrls.length > 0) {
-      uniqueAipUrls.forEach((aipUrl, aipIndex) => {
+      // Fetch all AIP proposals first
+      const aipPromises = uniqueAipUrls.map((aipUrl, aipIndex) => {
         // Check if this URL is already being fetched or rendered
-        if (fetchingUrls.has(aipUrl) || renderingUrls.has(aipUrl)) {
+        const normalizedUrl = normalizeAIPUrl(aipUrl);
+        if (fetchingUrls.has(normalizedUrl) || renderingUrls.has(normalizedUrl) ||
+            fetchingUrls.has(aipUrl) || renderingUrls.has(aipUrl)) {
           console.log(`🔵 [TOPIC] AIP URL ${aipUrl} is already being fetched/rendered, skipping duplicate`);
-          return;
+          return Promise.resolve({ url: aipUrl, data: null, skipped: true });
         }
         
-        // Find proposal order in combined list (order in content)
-        const proposalOrderIndex = orderedProposals.findIndex(p => p.url === aipUrl && p.type === 'aip');
-        const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + aipIndex);
-        
-        // Mark URL as being fetched
+        // Mark URL as being fetched (both normalized and original)
+        fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(aipUrl);
         
-        fetchProposalDataByType(aipUrl, 'aip')
+        console.log(`🔵 [TOPIC] Fetching AIP proposal ${aipIndex + 1} from: ${aipUrl}`);
+        return fetchProposalDataByType(aipUrl, 'aip')
           .then(aipData => {
+            console.log(`🔵 [TOPIC] AIP fetch completed for ${aipUrl}:`, aipData ? 'Success' : 'No data');
             // Remove from fetching set when fetch completes
+            fetchingUrls.delete(normalizedUrl);
             fetchingUrls.delete(aipUrl);
-            
-            // Check again if URL is being rendered (in case another fetch completed first)
-            if (renderingUrls.has(aipUrl)) {
-              console.log(`🔵 [TOPIC] AIP URL ${aipUrl} is already being rendered, skipping duplicate render`);
+            return { url: aipUrl, data: aipData, skipped: false };
+          })
+          .catch(error => {
+            // Remove from fetching set on error
+            fetchingUrls.delete(normalizedUrl);
+            fetchingUrls.delete(aipUrl);
+            console.error(`❌ [TOPIC] Error fetching AIP ${aipIndex + 1} from ${aipUrl}:`, error);
+            return { url: aipUrl, data: null, skipped: false, error: error.message || String(error) };
+          });
+      });
+      
+      Promise.allSettled(aipPromises)
+        .then(aipResults => {
+          // Filter out skipped and invalid data
+          const validAIPs = aipResults
+            .filter(result => result.status === 'fulfilled' && 
+                             result.value && 
+                             !result.value.skipped && 
+                             result.value.data && 
+                             result.value.data.title)
+            .map(result => ({
+              url: result.value.url,
+              data: result.value.data,
+              timestamp: result.value.data.startTime || result.value.data.createdAt || 0,
+              status: result.value.data.status || 'unknown'
+            }));
+          
+          console.log(`🔵 [TOPIC] Found ${validAIPs.length} valid AIP proposal(s) out of ${uniqueAipUrls.length} unique URL(s)`);
+          
+          // ===== VALIDATE PROPOSALS FOR FORUM TOPIC =====
+          // Filter out proposals that are not related to the current forum topic
+          // This prevents false positives from historical references or unrelated proposals
+          const currentForumUrl = getCurrentForumTopicUrl();
+          const validatedAIPs = validAIPs.filter(proposal => {
+            return validateAIPProposalForForum(proposal, currentForumUrl);
+          });
+          
+          if (validatedAIPs.length < validAIPs.length) {
+            const filteredCount = validAIPs.length - validatedAIPs.length;
+            console.log(`🔵 [VALIDATE] Filtered out ${filteredCount} AIP proposal(s) not related to forum topic`);
+          }
+          
+          // ===== CATEGORIZE ALL AIP PROPOSALS =====
+          const categorized = categorizeAIPProposals(validatedAIPs);
+          
+          // ===== SELECT BEST AIP PROPOSAL =====
+          // Handle edge case: multiple AIPs (e.g., failed + resubmitted, or historical reference)
+          const bestAIP = selectBestProposal(categorized.aips, 'aip');
+          
+          if (categorized.aips.length > 1) {
+            console.log(`🔵 [EDGE-CASE] Found ${categorized.aips.length} AIP(s) - selected best one`);
+            categorized.aips.forEach((aip, idx) => {
+              console.log(`   [${idx + 1}] ${aip.data?.title?.substring(0, 60)}... (status: ${aip.status || 'unknown'})`);
+            });
+          }
+          
+          // ===== RENDER WIDGET FOR SELECTED AIP =====
+          if (bestAIP && bestAIP.data && bestAIP.data.title) {
+            const normalizedUrl = normalizeAIPUrl(bestAIP.url);
+            if (renderingUrls.has(normalizedUrl) || renderingUrls.has(bestAIP.url)) {
+              console.log(`🔵 [TOPIC] AIP URL ${bestAIP.url} is already being rendered, skipping duplicate render`);
               return;
             }
             
-            if (aipData && aipData.title) {
-              const aipWidgetId = `aip-widget-${aipIndex}-${Date.now()}`;
-              console.log(`🔵 [RENDER] Creating AIP widget ${aipIndex + 1} (order: ${proposalOrder})`);
-              renderMultiStageWidget({
-                tempCheck: null,
-                tempCheckUrl: null,
-                arfc: null,
-                arfcUrl: null,
-                aip: aipData,
-                aipUrl
-              }, aipWidgetId, proposalOrder);
-              console.log(`✅ [RENDER] AIP widget ${aipIndex + 1} rendered`);
-        } else {
-              console.warn(`⚠️ [TOPIC] AIP data fetched but missing title:`, aipData);
-        }
-      })
-      .catch(error => {
-            // Remove from fetching set on error
-            fetchingUrls.delete(aipUrl);
-            console.warn(`⚠️ [TOPIC] Error fetching AIP ${aipIndex + 1} from ${aipUrl}:`, error.message || error);
-            // Don't throw - just log and continue with other widgets
-          });
-      });
+            // Find proposal order in combined list (order in content)
+            const proposalOrderIndex = orderedProposals.findIndex(p => p.url === bestAIP.url && p.type === 'aip');
+            const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + 0);
+            
+            const aipWidgetId = `aip-widget-${Date.now()}`;
+            console.log(`🔵 [RENDER] Creating AIP widget (order: ${proposalOrder})`);
+            console.log(`🔵 [RENDER] AIP data:`, { title: bestAIP.data.title, status: bestAIP.status, url: bestAIP.url });
+            if (categorized.aips.length > 1) {
+              console.log(`   ⚠️ Note: Selected from ${categorized.aips.length} AIP(s) found in thread`);
+            }
+            
+            renderMultiStageWidget({
+              tempCheck: null,
+              tempCheckUrl: null,
+              arfc: null,
+              arfcUrl: null,
+              aip: bestAIP.data,
+              aipUrl: bestAIP.url
+            }, aipWidgetId, proposalOrder);
+            console.log(`✅ [RENDER] AIP widget rendered`);
+          } else if (validAIPs.length > 0) {
+            console.warn(`⚠️ [TOPIC] AIP data fetched but missing title or invalid`);
+          }
+        })
+        .catch(error => {
+          console.error("❌ [TOPIC] Error processing AIP proposals:", error);
+        });
     }
   }
   
