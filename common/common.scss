@@ -33,10 +33,21 @@
 
   // Ensure widgets maintain order based on data-proposal-order attribute
   // This ensures consistent ordering across all screen sizes
+  // When inside wrapper, remove fixed positioning
   .tally-status-widget-container {
     // Use CSS custom property to set order from data attribute
     // JavaScript will set the order via inline style, but we ensure it's respected
     order: var(--proposal-order, 999) !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 0 !important;
+    max-height: none !important;
+    overflow-y: visible !important;
   }
 
   // Tablet: Adjust width and positioning
@@ -535,20 +546,6 @@
 
     // Ensure order is maintained on mobile
     order: var(--proposal-order, 999) !important;
-  }
-
-  // When inside wrapper, remove fixed positioning
-  .governance-widgets-wrapper & {
-    position: relative !important;
-    left: auto !important;
-    right: auto !important;
-    top: auto !important;
-    transform: none !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin-bottom: 0 !important;
-    max-height: none !important;
-    overflow-y: visible !important;
   }
 }
 

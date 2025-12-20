@@ -79,8 +79,19 @@ export default apiInitializer((api) => {
   const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
   const AAVE_V3_SUBGRAPH = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
   
-  // REMOVED: All fallback methods (on-chain, Data API, markdown) - using only The Graph API
-  // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
+  // On-chain fallback configuration (used when The Graph API is unavailable)
+  // Aave Governance V3 Contract Address (Ethereum Mainnet)
+  const AAVE_GOVERNANCE_V3_ADDRESS = "0xEC568fffba86c094cf06b22134B23074DFE2252c";
+  
+  // Simplified ABI for getProposal - returns: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
+  const AAVE_GOVERNANCE_V3_ABI = [
+    "function getProposal(uint256 proposalId) view returns (uint256 id, address creator, uint40 startTime, uint40 endTime, uint256 forVotes, uint256 againstVotes, uint8 state, bool executed, bool canceled)",
+    "function getProposalState(uint256 proposalId) view returns (uint8)"
+  ];
+  
+  // Ethereum RPC endpoint for on-chain fallback
+  // Using a public RPC endpoint - can be overridden via environment variable if needed
+  const ETH_RPC_URL = "https://eth.llamarpc.com";
   
   // Function to ensure ethers.js is loaded
   async function ensureEthersLoaded() {
@@ -137,6 +148,8 @@ export default apiInitializer((api) => {
   // const AAVE_SUBGRAPH_AVALANCHE = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-avalanche"; // REMOVED
   
   // Match governance.aave.com, app.aave.com/governance/, and vote.onaave.com URLs
+  // Note: [^\s<>"']+ matches any character except whitespace, <, >, ", or '
+  // This should match URLs even with HTML-encoded entities like &amp;
   const AIP_URL_REGEX = /https?:\/\/(?:www\.)?(?:governance\.aave\.com|app\.aave\.com\/governance|vote\.onaave\.com)\/[^\s<>"']+/gi;
   
   const proposalCache = new Map();
@@ -458,9 +471,15 @@ export default apiInitializer((api) => {
     }
     
     console.log("✅ [VALIDATE] Proposal is valid Aave governance proposal");
-    if (hasTempCheck) { console.log("   Type: Temp Check"); }
-    if (hasARFC) { console.log("   Type: ARFC"); }
-    if (hasAIP) { console.log("   Type: AIP"); }
+    if (hasTempCheck) {
+      console.log("   Type: Temp Check");
+    }
+    if (hasARFC) {
+      console.log("   Type: ARFC");
+    }
+    if (hasAIP) {
+      console.log("   Type: AIP");
+    }
     
     return true;
   }
@@ -484,6 +503,7 @@ export default apiInitializer((api) => {
             state
             author
             created
+            discussion
             space {
               id
               name
@@ -750,6 +770,10 @@ export default apiInitializer((api) => {
       if (subgraphMetadata.ipfsHash && !merged.ipfsHash) {
         merged.ipfsHash = subgraphMetadata.ipfsHash;
       }
+      // Preserve rawContent from subgraph for discussion URL extraction
+      if (subgraphMetadata.rawContent && !merged.rawContent) {
+        merged.rawContent = subgraphMetadata.rawContent;
+      }
     }
 
     // Keep on-chain data for votes/state (source of truth) if available
@@ -859,6 +883,7 @@ export default apiInitializer((api) => {
             votingDuration
             proposalMetadata {
               title
+              rawContent
             }
             votes {
               forVotes
@@ -1047,6 +1072,7 @@ export default apiInitializer((api) => {
           creator: p.creator,
           proposer: p.creator,
           ipfsHash: p.ipfsHash,
+          rawContent: p.proposalMetadata?.rawContent || null,
           votingDuration: p.votingDuration,
           votingActivationTimestamp, // Add this for end date calculation
           forVotes,
@@ -1099,13 +1125,9 @@ export default apiInitializer((api) => {
       }
 
       // Create provider and contract
-      // Note: These variables are not defined - this function requires configuration
-      // eslint-disable-next-line no-undef
       const provider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
       const governanceContract = new ethers.Contract(
-        // eslint-disable-next-line no-undef
         AAVE_GOVERNANCE_V3_ADDRESS,
-        // eslint-disable-next-line no-undef
         AAVE_GOVERNANCE_V3_ABI,
         provider
       );
@@ -1137,11 +1159,9 @@ export default apiInitializer((api) => {
         console.error("❌ [AIP] Error fetching proposal from chain:", error.message);
         if (error.message?.includes("ABI decoding")) {
           console.error("❌ [AIP] ABI decoding error - contract address or ABI may be incorrect");
-          // eslint-disable-next-line no-undef
           console.error("❌ [AIP] Contract:", AAVE_GOVERNANCE_V3_ADDRESS);
         }
         if (error.message?.includes("network") || error.message?.includes("timeout")) {
-          // eslint-disable-next-line no-undef
           console.error("❌ [AIP] RPC connection error - check ETH_RPC_URL:", ETH_RPC_URL);
         }
         return null;
@@ -1927,6 +1947,8 @@ export default apiInitializer((api) => {
       title: proposal.title || 'Untitled Proposal',
       description: proposal.body || '', // Used for display
       body: proposal.body || '', // Preserve raw body for cascading search
+      discussion: proposal.discussion || null, // Discussion/reference link
+      plugins: proposal.plugins || null, // Plugins (may contain discourse link)
       status,
       stage,
       space,
@@ -2263,7 +2285,7 @@ export default apiInitializer((api) => {
     });
   }
 
-  function renderMultiStageWidget(stages, widgetId, proposalOrder = null) {
+  function renderMultiStageWidget(stages, widgetId, proposalOrder = null, discussionLink = null, isRelated = true) {
     const statusWidgetId = `aave-governance-widget-${widgetId}`;
     
     // Determine widget type - if all stages are present, use 'combined', otherwise use specific type
@@ -2306,12 +2328,63 @@ export default apiInitializer((api) => {
       renderingUrls.add(proposalUrl); // Also add original for backward compatibility
     }
     
-    // Remove existing widget with the same ID (to allow re-rendering), but keep others
-    // This allows multiple widgets to coexist (one per proposal)
+    // CRITICAL: Check for existing widget by URL first (more reliable than ID)
+    // This prevents duplicate widgets when the same URL is rendered multiple times
+    if (proposalUrl) {
+      const normalizedUrl = normalizeAIPUrl(proposalUrl);
+      const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${proposalUrl}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
+      if (existingWidgetByUrl) {
+        // Check if it's the same widget by ID or if it's a different widget with same URL
+        if (existingWidgetByUrl.id === statusWidgetId) {
+          // Same widget - check if it needs updating
+          const existingOrder = parseInt(existingWidgetByUrl.getAttribute("data-proposal-order") || existingWidgetByUrl.getAttribute("data-stage-order") || "999", 10);
+          const expectedOrder = proposalOrder !== null ? proposalOrder : (hasAllStages ? 3 : (stages.tempCheck && !stages.arfc && !stages.aip ? 1 : (stages.arfc && !stages.aip ? 2 : 3)));
+          
+          if (existingOrder === expectedOrder && existingWidgetByUrl.parentNode) {
+            console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists in correct position with same URL, skipping re-render to prevent blinking`);
+            // Remove from rendering set since widget is confirmed in DOM
+            renderingUrls.delete(proposalUrl);
+            renderingUrls.delete(normalizedUrl);
+            return;
+          }
+        } else {
+          // Different widget with same URL - this is a duplicate, skip rendering
+          console.log(`🔵 [RENDER] Found existing widget with same URL but different ID, skipping duplicate render`);
+          renderingUrls.delete(proposalUrl);
+          renderingUrls.delete(normalizedUrl);
+          return;
+        }
+      }
+    }
+    
+    // Check if widget already exists by ID (fallback check)
     const existingWidget = document.getElementById(statusWidgetId);
     if (existingWidget) {
+      // Check if widget is already in the DOM and has correct order
+      const existingOrder = parseInt(existingWidget.getAttribute("data-proposal-order") || existingWidget.getAttribute("data-stage-order") || "999", 10);
+      const expectedOrder = proposalOrder !== null ? proposalOrder : (hasAllStages ? 3 : (stages.tempCheck && !stages.arfc && !stages.aip ? 1 : (stages.arfc && !stages.aip ? 2 : 3)));
+      
+      // Also check if URL matches (to prevent re-rendering same widget)
+      const existingUrl = existingWidget.getAttribute('data-tally-url');
+      const normalizedExistingUrl = existingUrl ? normalizeAIPUrl(existingUrl) : null;
+      const normalizedProposalUrl = proposalUrl ? normalizeAIPUrl(proposalUrl) : null;
+      const urlMatches = !proposalUrl || existingUrl === proposalUrl || normalizedExistingUrl === normalizedProposalUrl;
+      
+      // Only remove if order changed, URL changed, or if it's a forced re-render
+      if (existingOrder === expectedOrder && existingWidget.parentNode && urlMatches) {
+        console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists in correct position with same URL, skipping re-render to prevent blinking`);
+        // Remove from rendering set since widget is confirmed in DOM
+        if (proposalUrl) {
+          renderingUrls.delete(proposalUrl);
+          const normalizedUrl = normalizeAIPUrl(proposalUrl);
+          renderingUrls.delete(normalizedUrl);
+        }
+        return;
+      }
+      
+      // Remove only if we need to re-position or update
       existingWidget.remove();
-      console.log(`🔵 [RENDER] Removed existing widget with ID: ${statusWidgetId}`);
+      console.log(`🔵 [RENDER] Removed existing widget with ID: ${statusWidgetId} (order changed or needs update)`);
     }
     
     console.log(`🔵 [RENDER] Rendering ${widgetType} widget with stages:`, {
@@ -2367,6 +2440,12 @@ export default apiInitializer((api) => {
     // Set both attributes for compatibility
     statusWidget.setAttribute("data-proposal-order", orderValue);
     statusWidget.setAttribute("data-stage-order", orderValue); // Keep for backward compatibility
+    
+    // Set CSS order property to ensure consistent ordering across all screen sizes
+    // This ensures widgets appear in the same order (first proposal first, second second, etc.)
+    // regardless of screen size (mobile, tablet, desktop)
+    statusWidget.style.order = orderValue;
+    statusWidget.style.setProperty('--proposal-order', orderValue);
     
     // Helper function to format time display
     function formatTimeDisplay(daysLeft, hoursLeft) {
@@ -2553,15 +2632,9 @@ export default apiInitializer((api) => {
       
       // For "pending" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
-      let exactStartTime = null;
-      let showExactTime = false;
       if (isPending && stageData.startTime) {
         const startTimeInfo = formatVotingStartTime(stageData.startTime);
         timeDisplay = startTimeInfo.relative;
-        // eslint-disable-next-line no-unused-vars
-        exactStartTime = startTimeInfo.exact;
-        // eslint-disable-next-line no-unused-vars
-        showExactTime = startTimeInfo.showExact;
       } else {
         timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       }
@@ -2761,15 +2834,9 @@ export default apiInitializer((api) => {
       
       // For "created" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
-      let exactStartTime = null;
-      let showExactTime = false;
       if (status === 'created' && stageData.votingActivationTimestamp) {
         const startTimeInfo = formatVotingStartTime(stageData.votingActivationTimestamp);
         timeDisplay = startTimeInfo.relative;
-        // eslint-disable-next-line no-unused-vars
-        exactStartTime = startTimeInfo.exact;
-        // eslint-disable-next-line no-unused-vars
-        showExactTime = startTimeInfo.showExact;
       } else {
         timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       }
@@ -2886,6 +2953,10 @@ export default apiInitializer((api) => {
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
               Voting Starting Soon
             </div>
+          ` : (stageData.status === 'active' && !votesAvailable) ? `
+            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+              Data will be available soon
+            </div>
           ` : `
             <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
               Vote data not available from subgraph
@@ -2910,6 +2981,10 @@ export default apiInitializer((api) => {
         ` : stageData.status === 'created' ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
             Voting Starting Soon
+          </div>
+        ` : (stageData.status === 'active' && !votesAvailable) ? `
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            Data will be available soon
           </div>
         ` : `
           <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
@@ -2990,6 +3065,21 @@ export default apiInitializer((api) => {
     // Dim ended proposals with opacity instead of changing background color
     const widgetOpacity = hasEndedStage ? 'opacity: 0.6;' : '';
     
+    // Add discussion link notice whenever a discussion link is available
+    const discussionLinkHTML = discussionLink ? `
+      <div style="margin-top: 12px; padding: 10px; background: #fef3c7; border: 1px solid #fbbf24; border-radius: 6px; font-size: 0.85em; line-height: 1.5;">
+        <div style="color: #92400e; font-weight: 600; margin-bottom: 6px;">📋 Discussion:</div>
+        <a href="${discussionLink}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: underline; word-break: break-all;">
+          ${discussionLink}
+        </a>
+        ${!isRelated ? `
+        <div style="color: #78350f; margin-top: 6px; font-size: 0.9em; font-style: italic;">
+          This proposal's discussion is in a different forum topic.
+        </div>
+        ` : ''}
+      </div>
+    ` : '';
+    
     const widgetHTML = `
       <div class="tally-status-widget" style="background: #fff; ${widgetOpacity} border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box; position: relative;">
         <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; z-index: 100;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
@@ -2998,6 +3088,7 @@ export default apiInitializer((api) => {
         ${tempCheckHTML}
         ${arfcHTML}
         ${aipHTML}
+        ${discussionLinkHTML}
       </div>
     `;
     
@@ -3036,6 +3127,14 @@ export default apiInitializer((api) => {
       statusWidget.style.marginLeft = '0';
       statusWidget.style.marginRight = '0';
       statusWidget.style.zIndex = '1';
+      
+      // Force immediate visibility - ensure widget appears without scroll
+      requestAnimationFrame(() => {
+        statusWidget.style.display = 'block';
+        statusWidget.style.visibility = 'visible';
+        statusWidget.style.opacity = '1';
+        void statusWidget.offsetHeight; // Force reflow
+      });
     }
     
     if (isMobile) {
@@ -3051,18 +3150,22 @@ export default apiInitializer((api) => {
             (firstPost && firstPost.parentNode && firstPost.parentNode.contains(statusWidget)));
         
         if (isInValidLocation) {
-          // Widget is in correct position - but don't return early, allow content update
-          // Only skip if this is a duplicate URL (same widget being re-rendered unnecessarily)
+          // Widget is in correct position - check if URL and order match to prevent unnecessary re-insertion
           const widgetUrl = statusWidget.getAttribute('data-tally-url');
-          if (widgetUrl === proposalUrl) {
-            console.log("✅ [MOBILE] Widget already in correct position with same URL, skipping re-insertion");
+          const widgetOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
+          const expectedOrder = proposalOrder !== null ? proposalOrder : (hasAllStages ? 3 : (stages.tempCheck && !stages.arfc && !stages.aip ? 1 : (stages.arfc && !stages.aip ? 2 : 3)));
+          
+          // Only skip if URL matches AND order matches (prevent unnecessary re-insertion that causes blinking)
+          if (widgetUrl === proposalUrl && widgetOrder === expectedOrder) {
+            console.log("✅ [MOBILE] Widget already in correct position with same URL and order, skipping re-insertion to prevent blinking");
             // Remove URL from rendering set now that widget is confirmed in DOM
             if (proposalUrl) {
               renderingUrls.delete(proposalUrl);
+              renderingUrls.delete(normalizeAIPUrl(proposalUrl));
             }
             return; // Exit early - widget is already positioned correctly with same content
           }
-          // If URL is different, continue to update/replace the widget
+          // If URL or order is different, continue to update/replace the widget
         }
       }
       
@@ -3140,21 +3243,58 @@ export default apiInitializer((api) => {
             console.log(`✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
           }
           
+          // CRITICAL: Force immediate visibility RIGHT AFTER insertion (before requestAnimationFrame)
+          // This ensures widget is visible even if Discourse applies lazy loading CSS
+          if (statusWidget && statusWidget.parentNode) {
+            statusWidget.style.setProperty('display', 'block', 'important');
+            statusWidget.style.setProperty('visibility', 'visible', 'important');
+            statusWidget.style.setProperty('opacity', '1', 'important');
+            statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+            // Force immediate reflow
+            void statusWidget.offsetHeight;
+          }
+          
+          // Also force visibility in next frame to catch any late-applied CSS
+          requestAnimationFrame(() => {
+            if (statusWidget && statusWidget.parentNode) {
+              statusWidget.style.setProperty('display', 'block', 'important');
+              statusWidget.style.setProperty('visibility', 'visible', 'important');
+              statusWidget.style.setProperty('opacity', '1', 'important');
+              statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+              const computedStyle = window.getComputedStyle(statusWidget);
+              console.log(`🔵 [MOBILE] Widget inserted - computed display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+              if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                console.warn(`⚠️ [MOBILE] Widget is hidden after insertion! Forcing visibility again.`);
+                statusWidget.style.setProperty('display', 'block', 'important');
+                statusWidget.style.setProperty('visibility', 'visible', 'important');
+                statusWidget.style.setProperty('opacity', '1', 'important');
+                void statusWidget.offsetHeight; // Force reflow
+              }
+            }
+          });
+          
           // Ensure widgets are in correct order by checking if any need re-positioning
           // Only re-sort if widgets are clearly out of order (to avoid unnecessary DOM manipulation)
+          // Skip re-sorting if widget was just inserted in correct position to prevent blinking
           const allWidgets = Array.from(widgetsContainer.querySelectorAll('.tally-status-widget-container'));
           if (allWidgets.length > 1) {
             let needsResort = false;
+            let outOfOrderCount = 0;
             for (let i = 0; i < allWidgets.length - 1; i++) {
               const orderA = parseInt(allWidgets[i].getAttribute("data-proposal-order") || allWidgets[i].getAttribute("data-stage-order") || "999", 10);
               const orderB = parseInt(allWidgets[i + 1].getAttribute("data-proposal-order") || allWidgets[i + 1].getAttribute("data-stage-order") || "999", 10);
               if (orderA > orderB) {
                 needsResort = true;
-                break;
+                outOfOrderCount++;
+                // Only re-sort if multiple widgets are out of order (not just the one we just added)
+                if (outOfOrderCount > 1) {
+                  break;
+                }
               }
             }
             
-            if (needsResort) {
+            // Only re-sort if there are significant ordering issues to prevent blinking
+            if (needsResort && outOfOrderCount > 1) {
               // Re-sort widgets in correct order
               const sortedAllWidgets = [...allWidgets].sort((a, b) => {
                 const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
@@ -3279,6 +3419,43 @@ export default apiInitializer((api) => {
         
         // Position is already set by updateContainerPosition - no need to update
         
+        // CRITICAL: Force immediate visibility RIGHT AFTER insertion (before requestAnimationFrame)
+        // This ensures widget is visible even if Discourse applies lazy loading CSS
+        if (statusWidget && statusWidget.parentNode) {
+          statusWidget.style.setProperty('display', 'block', 'important');
+          statusWidget.style.setProperty('visibility', 'visible', 'important');
+          statusWidget.style.setProperty('opacity', '1', 'important');
+          statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+          // Force immediate reflow
+          void statusWidget.offsetHeight;
+        }
+        
+        // Also force visibility in next frame to catch any late-applied CSS
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (statusWidget && statusWidget.parentNode) {
+              statusWidget.style.setProperty('display', 'block', 'important');
+              statusWidget.style.setProperty('visibility', 'visible', 'important');
+              statusWidget.style.setProperty('opacity', '1', 'important');
+              statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+              // Force reflow
+              void statusWidget.offsetHeight;
+              
+              // Verify visibility
+              const computedStyle = window.getComputedStyle(statusWidget);
+              if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                console.warn(`⚠️ [DESKTOP] Widget hidden after insertion, forcing visibility again`);
+                statusWidget.style.setProperty('display', 'block', 'important');
+                statusWidget.style.setProperty('visibility', 'visible', 'important');
+                statusWidget.style.setProperty('opacity', '1', 'important');
+                void statusWidget.offsetHeight; // Force reflow again
+              } else {
+                console.log(`✅ [DESKTOP] Widget visible after insertion`);
+              }
+            }
+          });
+        });
+        
         // Remove URL from rendering set now that widget is in DOM
         if (proposalUrl) {
           renderingUrls.delete(proposalUrl);
@@ -3295,6 +3472,16 @@ export default apiInitializer((api) => {
             topicBody.insertBefore(statusWidget, topicBody.firstChild);
           }
         }
+        
+        // Force visibility for fallback insertion too
+        requestAnimationFrame(() => {
+          if (statusWidget && statusWidget.parentNode) {
+            statusWidget.style.setProperty('display', 'block', 'important');
+            statusWidget.style.setProperty('visibility', 'visible', 'important');
+            statusWidget.style.setProperty('opacity', '1', 'important');
+            void statusWidget.offsetHeight;
+          }
+        });
       }
     }
     
@@ -3355,6 +3542,105 @@ export default apiInitializer((api) => {
     });
     
     console.log("✅ [WIDGET]", widgetType === 'aip' ? 'AIP' : 'Snapshot', "widget rendered");
+    
+    // CRITICAL FIX FOR MOBILE: AIP widgets render asynchronously (in Promise callback) 
+    // while Snapshot widgets render synchronously. This causes AIP widgets to be inserted
+    // later, after Discourse may have applied lazy loading CSS. Force immediate visibility.
+    // Note: isMobile is already declared above, so we reuse it here
+    if (isMobile && widgetType === 'aip' && statusWidget && statusWidget.parentNode) {
+      // AIP widget was just inserted - force visibility immediately
+      console.log(`🔵 [MOBILE] AIP widget just rendered, forcing immediate visibility`);
+      statusWidget.style.setProperty('display', 'block', 'important');
+      statusWidget.style.setProperty('visibility', 'visible', 'important');
+      statusWidget.style.setProperty('opacity', '1', 'important');
+      statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+      
+      // Use double requestAnimationFrame to catch it after DOM insertion
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (statusWidget && statusWidget.parentNode) {
+            const computedStyle = window.getComputedStyle(statusWidget);
+            if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+              console.warn(`⚠️ [MOBILE] AIP widget hidden after renderMultiStageWidget, forcing again`);
+              statusWidget.style.setProperty('display', 'block', 'important');
+              statusWidget.style.setProperty('visibility', 'visible', 'important');
+              statusWidget.style.setProperty('opacity', '1', 'important');
+              void statusWidget.offsetHeight; // Force reflow
+            } else {
+              console.log(`✅ [MOBILE] AIP widget visible after renderMultiStageWidget`);
+            }
+          }
+        });
+      });
+    }
+    
+    // Set up auto-refresh for active proposals to fetch new vote data
+    if (proposalUrl) {
+      const isActive = stages.aip?.status === 'active' || 
+                      stages.tempCheck?.status === 'active' || 
+                      stages.arfc?.status === 'active';
+      
+      if (isActive) {
+        // Clear any existing refresh interval for this widget
+        const refreshKey = `multi_stage_refresh_${widgetId}`;
+        if (window[refreshKey]) {
+          clearInterval(window[refreshKey]);
+        }
+        
+        // Store original stages and URLs for refresh
+        const originalStages = { ...stages };
+        const originalUrls = {
+          aipUrl: stages.aipUrl,
+          tempCheckUrl: stages.tempCheckUrl,
+          arfcUrl: stages.arfcUrl
+        };
+        
+        // Refresh every 2 minutes to check for vote updates
+        window[refreshKey] = setInterval(async () => {
+          console.log("🔄 [REFRESH] Checking for updates for multi-stage widget:", widgetId);
+          
+          try {
+            // Determine proposal type and fetch fresh data (bypass cache)
+            let freshData = null;
+            if (originalStages.aip && originalUrls.aipUrl) {
+              freshData = await fetchProposalDataByType(originalUrls.aipUrl, 'aip', true);
+            } else if ((originalStages.tempCheck || originalStages.arfc) && (originalUrls.tempCheckUrl || originalUrls.arfcUrl)) {
+              const snapshotUrl = originalUrls.tempCheckUrl || originalUrls.arfcUrl;
+              freshData = await fetchProposalDataByType(snapshotUrl, 'snapshot', true);
+            }
+            
+            if (freshData && freshData.title) {
+              console.log("🔄 [REFRESH] Updating multi-stage widget with fresh data");
+              
+              // Re-render widget with fresh data
+              const updatedStages = {
+                tempCheck: originalUrls.tempCheckUrl ? (freshData.stage === 'temp-check' ? freshData : originalStages.tempCheck) : null,
+                tempCheckUrl: originalUrls.tempCheckUrl,
+                arfc: originalUrls.arfcUrl ? (freshData.stage === 'arfc' || freshData.stage === 'snapshot' ? freshData : originalStages.arfc) : null,
+                arfcUrl: originalUrls.arfcUrl,
+                aip: originalUrls.aipUrl ? (freshData.type === 'aip' ? freshData : originalStages.aip) : null,
+                aipUrl: originalUrls.aipUrl
+              };
+              
+              // Get validation info again (in case discussion link changed)
+              const currentForumUrl = getCurrentForumTopicUrl();
+              let validation = { isRelated: true, discussionLink: null };
+              if (freshData.type === 'aip') {
+                validation = await validateAIPProposalForForum({ data: freshData, url: originalUrls.aipUrl }, currentForumUrl);
+              } else if (freshData.type === 'snapshot') {
+                validation = validateSnapshotProposalForForum({ data: freshData, url: originalUrls.tempCheckUrl || originalUrls.arfcUrl }, currentForumUrl);
+              }
+              
+              renderMultiStageWidget(updatedStages, widgetId, proposalOrder, validation.discussionLink, validation.isRelated);
+            }
+          } catch (error) {
+            console.error("❌ [REFRESH] Error refreshing multi-stage widget:", error);
+          }
+        }, 2 * 60 * 1000); // Refresh every 2 minutes
+        
+        console.log("✅ [REFRESH] Auto-refresh set up for active multi-stage widget:", widgetId, "(every 2 minutes)");
+      }
+    }
   }
 
   function renderStatusWidget(proposalData, originalUrl, widgetId, proposalInfo = null) {
@@ -3860,10 +4146,60 @@ export default apiInitializer((api) => {
         // Remove any hidden classes that might prevent display
         statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
         
+        // Force immediate visibility on mobile - ensure widget appears without scroll
+        // Use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+          statusWidget.style.display = 'block';
+          statusWidget.style.visibility = 'visible';
+          statusWidget.style.opacity = '1';
+          // Force a reflow to ensure visibility
+          void statusWidget.offsetHeight;
+        });
+        
+        // Also ensure visibility after a short delay to catch any late DOM updates
+        setTimeout(() => {
+          if (statusWidget && statusWidget.parentNode) {
+            statusWidget.style.display = 'block';
+            statusWidget.style.visibility = 'visible';
+            statusWidget.style.opacity = '1';
+            statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+            
+            // Force visibility with !important via setProperty
+            statusWidget.style.setProperty('display', 'block', 'important');
+            statusWidget.style.setProperty('visibility', 'visible', 'important');
+            statusWidget.style.setProperty('opacity', '1', 'important');
+            
+            // Check computed styles to ensure it's actually visible
+            const computedStyle = window.getComputedStyle(statusWidget);
+            if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden') {
+              console.warn(`⚠️ [MOBILE] Widget still hidden after force - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+              // Try to scroll widget into view if it exists
+              if (statusWidget.scrollIntoView) {
+                statusWidget.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+              }
+            }
+          }
+        }, 50);
+        
+        // Additional check after longer delay to catch any Discourse lazy loading
+        setTimeout(() => {
+          if (statusWidget && statusWidget.parentNode) {
+            const computedStyle = window.getComputedStyle(statusWidget);
+            if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+              console.log(`🔵 [MOBILE] Widget was hidden, forcing visibility again after delay`);
+              statusWidget.style.setProperty('display', 'block', 'important');
+              statusWidget.style.setProperty('visibility', 'visible', 'important');
+              statusWidget.style.setProperty('opacity', '1', 'important');
+              statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+            }
+          }
+        }, 300);
+        
         // Mark URL as rendered after successful insertion
-        if (originalUrl) {
-          renderingUrls.add(originalUrl);
-          console.log(`✅ [MOBILE] Widget rendered and marked: ${originalUrl}`);
+        const widgetProposalUrl = statusWidget.getAttribute('data-tally-url') || originalUrl;
+        if (widgetProposalUrl) {
+          renderingUrls.add(widgetProposalUrl);
+          console.log(`✅ [MOBILE] Widget rendered and marked: ${widgetProposalUrl}`);
         }
       } catch (error) {
         console.error("❌ [MOBILE] Error inserting status widget:", error);
@@ -4159,16 +4495,99 @@ export default apiInitializer((api) => {
       }
       
       // Find AIP links (direct links, or will be extracted from forum)
+      // Method 1: Check href attributes in links (more reliable for HTML)
+      const aipLinks = post.querySelectorAll('a[href*="vote.onaave.com"], a[href*="app.aave.com/governance"], a[href*="governance.aave.com/aip/"]');
+      console.log(`🔍 [TOPIC] Post ${i + 1}: Found ${aipLinks.length} AIP link(s) via href selector`);
+      aipLinks.forEach((link, idx) => {
+        const href = link.href || link.getAttribute('href') || '';
+        console.log(`🔍 [TOPIC] Post ${i + 1}, Link ${idx + 1}: href="${href}"`);
+        if (href && (href.includes('vote.onaave.com') || href.includes('app.aave.com/governance') || href.includes('governance.aave.com/aip/'))) {
+          // Decode HTML entities
+          const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(href)) {
+            proposals.aip.push(decodedUrl);
+            console.log("✅ [TOPIC] Found AIP link (via href):", decodedUrl);
+          }
+        }
+      });
+      
+      // Method 2: Use regex on combined content (handles plain text URLs)
+      // Reset regex lastIndex to avoid issues with global regex
+      AIP_URL_REGEX.lastIndex = 0;
       const aipMatches = combinedContent.match(AIP_URL_REGEX);
+      console.log(`🔍 [TOPIC] Post ${i + 1}: AIP regex found ${aipMatches ? aipMatches.length : 0} match(es)`);
       if (aipMatches) {
-        aipMatches.forEach(url => {
+        aipMatches.forEach((url, idx) => {
+          console.log(`🔍 [TOPIC] Post ${i + 1}, Match ${idx + 1}: "${url}"`);
           // Decode HTML entities (e.g., &amp; -> &) to normalize URLs
           // This prevents the same URL from being treated as different due to HTML encoding
           const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
           if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
             proposals.aip.push(decodedUrl);
+            console.log("✅ [TOPIC] Found AIP link (via regex):", decodedUrl);
           }
         });
+      } else {
+        // Debug: Check if AIP URL pattern exists in content
+        if (combinedContent.includes('vote.onaave.com') || combinedContent.includes('app.aave.com/governance') || combinedContent.includes('governance.aave.com/aip/')) {
+          const aipIndex = Math.max(
+            combinedContent.indexOf('vote.onaave.com'),
+            combinedContent.indexOf('app.aave.com/governance'),
+            combinedContent.indexOf('governance.aave.com/aip/')
+          );
+          if (aipIndex >= 0) {
+            const snippet = combinedContent.substring(Math.max(0, aipIndex - 50), Math.min(combinedContent.length, aipIndex + 200));
+            console.log(`⚠️ [TOPIC] Post ${i + 1}: AIP URL pattern found in content but regex didn't match. Snippet: "${snippet}"`);
+          }
+        }
+      }
+      
+      // Method 3: Check oneboxes and embedded content for AIP URLs
+      const oneboxes = post.querySelectorAll('.onebox, .onebox-body, [class*="onebox"]');
+      oneboxes.forEach(onebox => {
+        const oneboxText = onebox.textContent || onebox.innerText || '';
+        const oneboxHtml = onebox.innerHTML || '';
+        const oneboxContent = oneboxText + ' ' + oneboxHtml;
+        
+        // Check for AIP URLs in onebox
+        if (oneboxContent.includes('vote.onaave.com') || oneboxContent.includes('app.aave.com/governance') || oneboxContent.includes('governance.aave.com/aip/')) {
+          AIP_URL_REGEX.lastIndex = 0;
+          const oneboxMatches = oneboxContent.match(AIP_URL_REGEX);
+          if (oneboxMatches) {
+            oneboxMatches.forEach(url => {
+              const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+              if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
+                proposals.aip.push(decodedUrl);
+                console.log("✅ [TOPIC] Found AIP link (via onebox):", decodedUrl);
+              }
+            });
+          }
+        }
+      });
+      
+      // Method 4: Also check for AIP links in a more flexible way (in case regex misses some)
+      // Check for vote.onaave.com, app.aave.com/governance, or governance.aave.com
+      if (combinedContent.includes('vote.onaave.com') || combinedContent.includes('app.aave.com/governance') || combinedContent.includes('governance.aave.com/aip/')) {
+        // More robust regex that handles URLs with query parameters and HTML encoding
+        // Use the same pattern as AIP_URL_REGEX for consistency
+        const flexibleAipRegex = /https?:\/\/(?:www\.)?(?:vote\.onaave\.com|app\.aave\.com\/governance|governance\.aave\.com\/aip\/)[^\s<>"']+/gi;
+        flexibleAipRegex.lastIndex = 0; // Reset regex
+        const flexibleAipMatch = combinedContent.match(flexibleAipRegex);
+        if (flexibleAipMatch) {
+          flexibleAipMatch.forEach(url => {
+            // Decode HTML entities to normalize URLs
+            const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            // Only add if it matches AIP pattern and not already in list
+            if ((decodedUrl.includes('vote.onaave.com') || decodedUrl.includes('app.aave.com/governance') || decodedUrl.includes('governance.aave.com/aip/')) &&
+                !proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
+              proposals.aip.push(decodedUrl);
+              console.log("✅ [TOPIC] Found AIP link (flexible match):", decodedUrl);
+            }
+          });
+        } else {
+          // Debug: log if we expected to find AIP URLs but flexible match also failed
+          console.log(`⚠️ [TOPIC] Post ${i + 1}: AIP URL pattern detected but flexible regex also didn't match`);
+        }
       }
     }
     
@@ -4233,12 +4652,54 @@ export default apiInitializer((api) => {
     console.log(`⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`);
   }
 
-  function hideWidgetIfNoProposal() {
+  // Ensure AIP widgets remain visible after scroll events
+  // eslint-disable-next-line no-unused-vars
+  function ensureAIPWidgetsVisible() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-    const widgetCount = allWidgets.length;
     allWidgets.forEach(widget => {
-      // Remove widget from DOM completely, not just hide it
+      const widgetType = widget.getAttribute('data-proposal-type');
+      const widgetTypeAttr = widget.getAttribute('data-widget-type');
+      const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+      const url = widget.getAttribute('data-tally-url') || '';
+      const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+      
+      // If this is an AIP widget, force it to be visible
+      if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
+        widget.style.setProperty('display', 'block', 'important');
+        widget.style.setProperty('visibility', 'visible', 'important');
+        widget.style.setProperty('opacity', '1', 'important');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        console.log("✅ [AIP] Forced AIP widget visibility after scroll");
+      }
+    });
+  }
+
+  function hideWidgetIfNoProposal() {
+    // Only hide Snapshot widgets, NOT AIP widgets
+    // AIP widgets are topic-level and should remain visible regardless of scroll position
+    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+    let removedCount = 0;
+    
+    allWidgets.forEach(widget => {
+      // Check widget type - only remove Snapshot widgets, keep AIP widgets
+      const widgetType = widget.getAttribute('data-proposal-type');
+      const widgetTypeAttr = widget.getAttribute('data-widget-type');
+      const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+      const url = widget.getAttribute('data-tally-url') || '';
+      const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+      
+      // Skip AIP widgets - they should always be visible
+      // Check multiple ways to identify AIP widgets
+      if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
+        console.log("🔵 [WIDGET] Keeping AIP widget visible (topic-level widget) - type:", widgetType, "widgetType:", widgetTypeAttr, "hasAIP:", hasAIP, "isAIPUrl:", isAIPUrl);
+        return; // Skip this widget
+      }
+      
+      // Remove only Snapshot widgets
+      console.log("🔵 [WIDGET] Removing Snapshot widget - type:", widgetType, "widgetType:", widgetTypeAttr);
       widget.remove();
+      removedCount++;
+      
       // Clean up stored data
       const widgetId = widget.getAttribute('data-tally-status-id');
       if (widgetId) {
@@ -4252,15 +4713,15 @@ export default apiInitializer((api) => {
       }
     });
     
-    // Clean up empty container
+    // Clean up empty container (only if no widgets remain)
     const container = document.getElementById('governance-widgets-wrapper');
     if (container && container.children.length === 0) {
       container.remove();
       console.log("🔵 [CONTAINER] Removed empty widgets container");
     }
     
-    if (widgetCount > 0) {
-      console.log("🔵 [WIDGET] Removed", widgetCount, "widget(s) - no proposal in current post");
+    if (removedCount > 0) {
+      console.log("🔵 [WIDGET] Removed", removedCount, "Snapshot widget(s) - no Snapshot proposal in current post (AIP widgets kept visible)");
     }
     // Reset current visible proposal
     currentVisibleProposal = null;
@@ -4350,13 +4811,15 @@ export default apiInitializer((api) => {
 
   // Extract AIP URL from Snapshot proposal metadata/description (CASCADING SEARCH)
   // This is critical for linking sequential proposals: ARFC → AIP
-  // eslint-disable-next-line no-unused-vars
+   
   function extractAIPUrlFromSnapshot(snapshotData) {
     if (!snapshotData) {
+      console.log("⚠️ [CASCADE] No snapshotData provided");
       return null;
     }
     
     console.log("🔍 [CASCADE] Searching for AIP link in Snapshot proposal description...");
+    console.log("🔍 [CASCADE] Snapshot data keys:", Object.keys(snapshotData));
     
     // Get all text content - prefer raw proposal body if available, otherwise use transformed data
     let combinedText = '';
@@ -4366,10 +4829,11 @@ export default apiInitializer((api) => {
       console.log("🔍 [CASCADE] Using raw proposal body for search");
     } else {
       // Fall back to transformed data fields
-    const description = snapshotData.description || '';
+      const description = snapshotData.description || '';
       const body = snapshotData.body || '';
       combinedText = (description + ' ' + body).trim();
       console.log("🔍 [CASCADE] Using transformed description/body fields for search");
+      console.log("🔍 [CASCADE] Description length:", description.length, "Body length:", body.length);
     }
     
     if (combinedText.length === 0) {
@@ -4379,14 +4843,23 @@ export default apiInitializer((api) => {
     
     console.log(`🔍 [CASCADE] Searching in ${combinedText.length} characters of proposal text`);
     
+    // Check if text contains AIP URL patterns before regex matching
+    const hasVoteOnaave = combinedText.includes('vote.onaave.com');
+    const hasAppAave = combinedText.includes('app.aave.com/governance');
+    const hasGovernanceAave = combinedText.includes('governance.aave.com/aip/');
+    console.log(`🔍 [CASCADE] URL pattern check - vote.onaave.com: ${hasVoteOnaave}, app.aave.com: ${hasAppAave}, governance.aave.com: ${hasGovernanceAave}`);
+    
     // ENHANCED: Search for AIP links with multiple patterns
-    // Pattern 1: Direct URLs (governance.aave.com or app.aave.com/governance)
+    // Pattern 1: Direct URLs (governance.aave.com or app.aave.com/governance or vote.onaave.com)
+    AIP_URL_REGEX.lastIndex = 0; // Reset regex
     const aipUrlMatches = combinedText.match(AIP_URL_REGEX);
     if (aipUrlMatches && aipUrlMatches.length > 0) {
       // Prefer full URLs, extract the first valid one
       const foundUrl = aipUrlMatches[0];
       console.log(`✅ [CASCADE] Found AIP URL in description: ${foundUrl}`);
       return foundUrl;
+    } else {
+      console.log(`⚠️ [CASCADE] AIP_URL_REGEX didn't match, but patterns detected. Text snippet:`, combinedText.substring(0, 500));
     }
     
     // Pattern 2: Search for AIP references with proposal numbers
@@ -4602,6 +5075,28 @@ export default apiInitializer((api) => {
     
     // Render widgets - one per URL
     setupTopicWidgetWithProposals(allProposals);
+    
+    // If no AIP URLs found initially, retry after a delay to catch async-loaded content (oneboxes, etc.)
+    if (allProposals.aip.length === 0) {
+      console.log("🔵 [TOPIC] No AIP URLs found initially - will retry after content loads (oneboxes, etc.)");
+      setTimeout(() => {
+        console.log("🔵 [TOPIC] Retrying AIP URL search after delay...");
+        const retryProposals = findAllProposalsInTopic();
+        if (retryProposals.aip.length > 0) {
+          console.log(`✅ [TOPIC] Found ${retryProposals.aip.length} AIP URL(s) on retry - updating widgets`);
+          // Merge with existing proposals
+          const mergedProposals = {
+            snapshot: [...new Set([...allProposals.snapshot, ...retryProposals.snapshot])],
+            aip: [...new Set([...allProposals.aip, ...retryProposals.aip])],
+            forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
+          };
+          setupTopicWidgetWithProposals(mergedProposals);
+        } else {
+          console.log("🔵 [TOPIC] Still no AIP URLs found on retry");
+        }
+      }, 2000); // Wait 2 seconds for oneboxes to load
+    }
+    
     return Promise.resolve();
   }
   
@@ -4629,17 +5124,35 @@ export default apiInitializer((api) => {
   /**
    * Get the current forum topic URL if we're on a forum page
    * Returns the normalized forum topic URL or null
+   * Works on any Discourse forum, not just governance.aave.com
    */
   function getCurrentForumTopicUrl() {
     try {
       const currentUrl = window.location.href;
-      // Check if we're on a forum topic page (governance.aave.com/t/...)
+      const pathname = window.location.pathname;
+      
+      // Check if we're on a Discourse topic page (pattern: /t/{slug}/{id})
+      // This works on any Discourse forum, not just governance.aave.com
+      const topicMatch = pathname.match(/^\/t\/([^\/]+)\/(\d+)/);
+      if (topicMatch) {
+        // Extract the base URL (protocol + host)
+        const baseUrl = `${window.location.protocol}//${window.location.host}`;
+        const slug = topicMatch[1];
+        const topicId = topicMatch[2];
+        
+        // Construct normalized forum topic URL
+        const forumUrl = `${baseUrl}/t/${slug}/${topicId}`;
+        console.log(`🔵 [VALIDATE] Current forum topic URL: ${forumUrl}`);
+        return forumUrl;
+      }
+      
+      // Fallback: Check for governance.aave.com specifically (for backward compatibility)
       const forumMatch = currentUrl.match(/https?:\/\/(?:www\.)?governance\.aave\.com\/t\/[^\s<>"']+/i);
       if (forumMatch) {
         const forumUrl = forumMatch[0];
         // Normalize URL (remove trailing slashes, fragments, query params)
         const normalized = forumUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
-        console.log(`🔵 [VALIDATE] Current forum topic URL: ${normalized}`);
+        console.log(`🔵 [VALIDATE] Current forum topic URL (legacy): ${normalized}`);
         return normalized;
       }
     } catch (error) {
@@ -4651,118 +5164,523 @@ export default apiInitializer((api) => {
   /**
    * Extract forum topic ID from a forum URL
    * Returns the topic ID (numeric) or null
+   * Works with any Discourse forum URL pattern: /t/{slug}/{id}
    */
   function extractForumTopicId(forumUrl) {
-    if (!forumUrl) { return null; }
+    if (!forumUrl) {
+      return null;
+    }
     try {
-      const match = forumUrl.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
-      return match ? match[1] : null;
+      // Try Discourse pattern first: /t/{slug}/{id} (works on any Discourse forum)
+      const discourseMatch = forumUrl.match(/\/t\/[^\/]+\/(\d+)/);
+      if (discourseMatch) {
+        return discourseMatch[1];
+      }
+      
+      // Fallback: Check for governance.aave.com specifically (for backward compatibility)
+      const legacyMatch = forumUrl.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
+      if (legacyMatch) {
+        return legacyMatch[1];
+      }
+      
+      return null;
     } catch {
       return null;
     }
   }
   
   /**
-   * Validate if a Snapshot proposal is related to the current forum topic
-   * Returns true if the proposal is related, false otherwise
-   * 
-   * A proposal is considered related if:
-   * 1. The proposal's body/description contains a forum link matching the current topic ID
-   * 2. OR we're not on a forum page (show all proposals)
+   * Extract discussion/reference links from a Snapshot proposal
+   * Returns an array of URLs found in discussion fields (can be any URL, not just forum links)
    */
-  function validateSnapshotProposalForForum(snapshotProposal, currentForumUrl) {
-    if (!currentForumUrl) {
-      // If we're not on a forum page, allow all proposals
-      return true;
-    }
+  function extractDiscussionLinksFromSnapshot(snapshotProposal) {
+    const proposalTitle = snapshotProposal?.data?.title || 'Unknown';
+    console.log(`🔍 [DISCUSSION] Extracting discussion links from: "${proposalTitle}"`);
     
     if (!snapshotProposal || !snapshotProposal.data) {
-      return false;
+      console.log('   ❌ [DISCUSSION] No proposal data found');
+      return [];
     }
     
-    const currentTopicId = extractForumTopicId(currentForumUrl);
-    if (!currentTopicId) {
-      // Can't extract topic ID, filter out to be safe
-      console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
-      return false;
+    const discussionLinks = [];
+    
+    // Check 1: proposal.discussion field (direct discussion link)
+    // Only extract Aave forum URLs (governance.aave.com)
+    const discussion = snapshotProposal.data.discussion;
+    console.log(`   📋 [DISCUSSION] snapshotProposal.data.discussion =`, discussion);
+    if (discussion) {
+      // Only extract Aave forum URLs, not other URLs
+      AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+      const forumMatch = discussion.match(AAVE_FORUM_URL_REGEX);
+      if (forumMatch) {
+        console.log(`   ✅ [DISCUSSION] Found Aave forum links in discussion field:`, forumMatch);
+        discussionLinks.push(...forumMatch);
+      } else {
+        console.log(`   ❌ [DISCUSSION] No Aave forum URLs found in discussion field (value: "${discussion}")`);
+      }
+    } else {
+      console.log(`   ⚠️ [DISCUSSION] discussion field is null/undefined`);
     }
     
-    // Check if the proposal's body/description contains a forum link matching current topic
-    const body = snapshotProposal.data.body || snapshotProposal.data.description || '';
-    const title = snapshotProposal.data.title || '';
-    const combinedText = `${body} ${title}`.toLowerCase();
+    // Check 2: proposal.plugins field (Discourse plugin)
+    const plugins = snapshotProposal.data.plugins;
+    console.log(`   📋 [DISCUSSION] snapshotProposal.data.plugins =`, plugins);
+    if (plugins) {
+      try {
+        const pluginsStr = typeof plugins === 'string' ? plugins : JSON.stringify(plugins);
+        const forumMatch = pluginsStr.match(AAVE_FORUM_URL_REGEX);
+        if (forumMatch) {
+          console.log(`   ✅ [DISCUSSION] Found forum links in plugins:`, forumMatch);
+          discussionLinks.push(...forumMatch);
+        } else {
+          console.log(`   ❌ [DISCUSSION] No forum links found in plugins`);
+        }
+      } catch (e) {
+        console.log(`   ❌ [DISCUSSION] Error parsing plugins:`, e.message);
+      }
+    } else {
+      console.log(`   ⚠️ [DISCUSSION] plugins field is null/undefined`);
+    }
     
-    // Check for forum links in the proposal content
-    const forumLinks = combinedText.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/gi);
-    if (forumLinks) {
-      for (const link of forumLinks) {
-        const topicId = extractForumTopicId(link);
-        if (topicId === currentTopicId) {
-          console.log(`✅ [VALIDATE] Snapshot proposal is related to forum topic ${currentTopicId} (found forum link in proposal)`);
-          return true;
+    // Check 3: proposal._rawProposal.discussion or plugins
+    const rawProposal = snapshotProposal.data._rawProposal;
+    console.log(`   📋 [DISCUSSION] snapshotProposal.data._rawProposal exists:`, !!rawProposal);
+    if (rawProposal) {
+      if (rawProposal.discussion) {
+        console.log(`   📋 [DISCUSSION] _rawProposal.discussion =`, rawProposal.discussion);
+        // Only extract Aave forum URLs, not other URLs
+        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+        const forumMatch = rawProposal.discussion.match(AAVE_FORUM_URL_REGEX);
+        if (forumMatch) {
+          console.log(`   ✅ [DISCUSSION] Found Aave forum links in _rawProposal.discussion:`, forumMatch);
+          discussionLinks.push(...forumMatch);
+        } else {
+          console.log(`   ❌ [DISCUSSION] No Aave forum URLs found in _rawProposal.discussion`);
+        }
+      } else {
+        console.log(`   ⚠️ [DISCUSSION] _rawProposal.discussion is null/undefined`);
+      }
+      
+      if (rawProposal.plugins) {
+        try {
+          const pluginsStr = typeof rawProposal.plugins === 'string' 
+            ? rawProposal.plugins 
+            : JSON.stringify(rawProposal.plugins);
+          const forumMatch = pluginsStr.match(AAVE_FORUM_URL_REGEX);
+          if (forumMatch) {
+            console.log(`   ✅ [DISCUSSION] Found forum links in _rawProposal.plugins:`, forumMatch);
+            discussionLinks.push(...forumMatch);
+          } else {
+            console.log(`   ❌ [DISCUSSION] No forum links found in _rawProposal.plugins`);
+          }
+        } catch (e) {
+          console.log(`   ❌ [DISCUSSION] Error parsing _rawProposal.plugins:`, e.message);
+        }
+      } else {
+        console.log(`   ⚠️ [DISCUSSION] _rawProposal.plugins is null/undefined`);
+      }
+    }
+    
+    // Check 4: proposal body/description (as fallback - some proposals embed forum links in the text)
+    if (discussionLinks.length === 0) {
+      const body = snapshotProposal.data.body || snapshotProposal.data.description || '';
+      const title = snapshotProposal.data.title || '';
+      const combinedText = `${title} ${body}`;
+      
+      if (combinedText.length > 0) {
+        console.log(`   📋 [DISCUSSION] Checking proposal body/description for Aave forum links (${combinedText.length} chars)`);
+        // Only extract Aave forum URLs (governance.aave.com)
+        // Reset regex lastIndex before using (regex is global)
+        AAVE_FORUM_URL_REGEX.lastIndex = 0;
+        const forumMatches = combinedText.match(AAVE_FORUM_URL_REGEX);
+        if (forumMatches && forumMatches.length > 0) {
+          console.log(`   ✅ [DISCUSSION] Found Aave forum links in proposal body/description:`, forumMatches);
+          discussionLinks.push(...forumMatches);
+        } else {
+          console.log(`   ❌ [DISCUSSION] No Aave forum URLs found in proposal body/description`);
         }
       }
     }
     
-    // If no matching forum link found, it's not related to this topic
-    console.log(`❌ [VALIDATE] Snapshot proposal is NOT related to forum topic ${currentTopicId} - filtering out`);
-    return false;
+    // Normalize and deduplicate links
+    // Remove query parameters and fragments, but keep the full path
+    const normalizedLinks = discussionLinks
+      .map(link => {
+        // Remove query parameters (?) and fragments (#) but keep the path
+        let normalized = link.split('?')[0].split('#')[0];
+        // Remove trailing slash
+        normalized = normalized.replace(/\/$/, '');
+        return normalized;
+      })
+      .filter((link, index, self) => self.indexOf(link) === index);
+    
+    console.log(`   📊 [DISCUSSION] Final extracted discussion links:`, normalizedLinks.length > 0 ? normalizedLinks : 'NONE');
+    return normalizedLinks;
+  }
+  
+  /**
+   * Fetch metadata from IPFS
+   * Similar to recombee.mjs approach
+   */
+  async function fetchFromIPFS(ipfsHash) {
+    if (!ipfsHash || ipfsHash === '0x0' || ipfsHash.startsWith('0x0000')) {
+      return null;
+    }
+    
+    try {
+      // Convert hex IPFS hash to base58 if needed, or try direct IPFS gateway
+      // IPFS hashes are usually base58, but this might be hex-encoded
+      
+      // If it's a hex string starting with 0x, try to decode it
+      if (ipfsHash.startsWith('0x')) {
+        // Try multiple IPFS gateways
+        const gateways = [
+          `https://ipfs.io/ipfs/${ipfsHash.slice(2)}`,
+          `https://gateway.pinata.cloud/ipfs/${ipfsHash.slice(2)}`,
+          `https://cloudflare-ipfs.com/ipfs/${ipfsHash.slice(2)}`,
+        ];
+        
+        for (const gateway of gateways) {
+          try {
+            console.log(`   🔍 [DISCUSSION] Trying IPFS gateway: ${gateway}`);
+            const response = await fetch(gateway, { 
+              method: 'GET',
+              headers: { 'Accept': 'application/json' },
+              signal: AbortSignal.timeout(2000) // 2 second timeout (reduced for faster rendering)
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              console.log(`   ✅ [DISCUSSION] Found IPFS metadata!`);
+              return data;
+            }
+          } catch {
+            // Try next gateway
+            continue;
+          }
+        }
+      }
+      
+      return null;
+    } catch (err) {
+      console.warn(`   ⚠️  [DISCUSSION] IPFS fetch error: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Extract discussion/reference links from an AIP proposal
+   * Uses the same comprehensive approach as recombee.mjs
+   * Returns an array of forum URLs found in discussion/reference fields
+   */
+  async function extractDiscussionLinksFromAIP(aipProposal) {
+    const proposalTitle = aipProposal?.data?.title || 'Unknown';
+    console.log(`🔍 [DISCUSSION] Extracting discussion links from AIP: "${proposalTitle}"`);
+    
+    if (!aipProposal || !aipProposal.data) {
+      console.log('   ❌ [DISCUSSION] No proposal data found');
+      return [];
+    }
+    
+    // Debug: Log available fields in proposal data
+    console.log(`   📋 [DISCUSSION] Available fields in proposal data:`, Object.keys(aipProposal.data));
+    console.log(`   📋 [DISCUSSION] ipfsHash:`, aipProposal.data.ipfsHash);
+    console.log(`   📋 [DISCUSSION] rawContent:`, aipProposal.data.rawContent ? `${aipProposal.data.rawContent.substring(0, 100)}...` : 'null/undefined');
+    
+    const discussionLinks = [];
+    
+    // Check 1: proposalMetadata.rawContent FIRST (usually available immediately, no network delay)
+    // Try both top-level rawContent and nested locations
+    let rawContent = aipProposal.data.rawContent || aipProposal.data.proposalMetadata?.rawContent;
+    
+    if (rawContent) {
+      console.log(`   📋 [DISCUSSION] Checking proposalMetadata.rawContent for discussion URLs (fast path - no network delay)...`);
+      console.log(`   📋 [DISCUSSION] rawContent type: ${typeof rawContent}, length: ${typeof rawContent === 'string' ? rawContent.length : 'N/A'}`);
+      
+      if (typeof rawContent === 'string') {
+        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+        const matches = rawContent.match(AAVE_FORUM_URL_REGEX);
+        if (matches && matches.length > 0) {
+          console.log(`   ✅ [DISCUSSION] Found forum URLs in rawContent:`, matches);
+          discussionLinks.push(...matches);
+        } else {
+          console.log(`   ❌ [DISCUSSION] No forum URLs found in rawContent string`);
+        }
+      }
+      
+      // Check if rawContent is JSON and parse it
+      try {
+        const parsed = JSON.parse(rawContent);
+        if (parsed && typeof parsed === 'object') {
+          // Check common fields in parsed JSON
+          const parsedFields = [
+            parsed.discussion,
+            parsed.discussionUrl,
+            parsed.discussion_url,
+            parsed.link,
+            parsed.reference,
+            parsed.body,
+            parsed.description
+          ];
+          
+          for (const fieldValue of parsedFields) {
+            if (fieldValue && typeof fieldValue === 'string') {
+              AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+              const matches = fieldValue.match(AAVE_FORUM_URL_REGEX);
+              if (matches && matches.length > 0) {
+                console.log(`   ✅ [DISCUSSION] Found forum URLs in parsed rawContent:`, matches);
+                discussionLinks.push(...matches);
+              }
+            }
+          }
+        }
+      } catch {
+        // rawContent is not JSON, ignore
+      }
+    } else {
+      console.log(`   ⚠️  [DISCUSSION] No rawContent found in proposal data (checked both data.rawContent and data.proposalMetadata.rawContent)`);
+    }
+    
+    // If we already found discussion links in rawContent, skip IPFS (faster rendering)
+    if (discussionLinks.length > 0) {
+      console.log(`   ⚡ [DISCUSSION] Discussion links found in rawContent - skipping IPFS fetch for faster rendering`);
+    } else {
+      // Check 2: IPFS metadata (only if rawContent didn't have links - non-blocking for faster rendering)
+      // Try both top-level ipfsHash and nested locations
+      const ipfsHash = aipProposal.data.ipfsHash || aipProposal.data.proposalMetadata?.ipfsHash;
+      let ipfsData = null;
+      if (ipfsHash) {
+        console.log(`   📋 [DISCUSSION] No links in rawContent - attempting to fetch metadata from IPFS (hash: ${ipfsHash})...`);
+        // Use Promise.race to timeout faster if IPFS is slow
+        try {
+          ipfsData = await Promise.race([
+            fetchFromIPFS(ipfsHash),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('IPFS timeout')), 3000)) // 3 second max wait
+          ]);
+        } catch (err) {
+          console.log(`   ⚠️  [DISCUSSION] IPFS fetch timed out or failed (continuing without it): ${err.message}`);
+          ipfsData = null;
+        }
+        if (!ipfsData) {
+          console.log(`   ⚠️  [DISCUSSION] IPFS fetch returned null (gateway might be down or hash invalid)`);
+        }
+      } else {
+        console.log(`   ⚠️  [DISCUSSION] No ipfsHash found in proposal data (checked both data.ipfsHash and data.proposalMetadata.ipfsHash)`);
+      }
+      
+      if (ipfsData) {
+        console.log(`   📋 [DISCUSSION] Checking IPFS metadata for discussion URLs...`);
+        
+        // Check common fields in IPFS metadata
+        const fieldsToCheck = [
+          ipfsData.discussion,
+          ipfsData.discussionUrl,
+          ipfsData.discussion_url,
+          ipfsData.forumLink,
+          ipfsData.forum_link,
+          ipfsData.link,
+          ipfsData.reference,
+          ipfsData.referenceUrl
+        ];
+        
+        // Also check if the entire metadata is a string
+        if (typeof ipfsData === 'string') {
+          fieldsToCheck.push(ipfsData);
+        } else {
+          // Check entire JSON string representation
+          try {
+            fieldsToCheck.push(JSON.stringify(ipfsData));
+          } catch {
+            // Ignore JSON stringify errors
+          }
+        }
+        
+        for (const fieldValue of fieldsToCheck) {
+          if (fieldValue && typeof fieldValue === 'string') {
+            AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+            const matches = fieldValue.match(AAVE_FORUM_URL_REGEX);
+            if (matches && matches.length > 0) {
+              console.log(`   ✅ [DISCUSSION] Found forum URLs in IPFS metadata:`, matches);
+              discussionLinks.push(...matches);
+            }
+          }
+        }
+      }
+    }
+    
+    // Check 4: description/body for forum links (fallback)
+    const description = aipProposal.data.description || '';
+    const body = aipProposal.data.body || '';
+    if (description || body) {
+      console.log(`   📋 [DISCUSSION] description length: ${description.length}, body length: ${body.length}`);
+      const combinedText = `${description} ${body}`;
+      
+      if (combinedText.length > 0) {
+        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+        const forumMatches = combinedText.match(AAVE_FORUM_URL_REGEX);
+        if (forumMatches && forumMatches.length > 0) {
+          console.log(`   ✅ [DISCUSSION] Found forum links in description/body:`, forumMatches);
+          discussionLinks.push(...forumMatches);
+        }
+      }
+    }
+    
+    // Check 5: metadata field (if available, as fallback)
+    const metadata = aipProposal.data.metadata;
+    if (metadata) {
+      console.log(`   📋 [DISCUSSION] metadata exists:`, !!metadata);
+      try {
+        const metadataStr = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
+        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+        const forumMatch = metadataStr.match(AAVE_FORUM_URL_REGEX);
+        if (forumMatch) {
+          console.log(`   ✅ [DISCUSSION] Found forum links in metadata:`, forumMatch);
+          discussionLinks.push(...forumMatch);
+        }
+      } catch (e) {
+        console.log(`   ❌ [DISCUSSION] Error parsing metadata:`, e.message);
+      }
+    }
+    
+    // Normalize and deduplicate links
+    // Remove query parameters and fragments, but keep the full path
+    const normalizedLinks = discussionLinks
+      .map(link => {
+        // Remove query parameters (?) and fragments (#) but keep the path
+        let normalized = link.split('?')[0].split('#')[0];
+        // Remove trailing slash
+        normalized = normalized.replace(/\/$/, '');
+        // Remove trailing punctuation that might have been captured with the URL
+        // (parentheses, commas, periods, etc. that are part of surrounding text)
+        normalized = normalized.replace(/[.,;:)!?]+$/, '');
+        return normalized;
+      })
+      .filter((link, index, self) => self.indexOf(link) === index);
+    
+    if (normalizedLinks.length > 0) {
+      console.log(`   ✅ [DISCUSSION] Final extracted discussion URLs:`, normalizedLinks);
+    } else {
+      console.log(`   ❌ [DISCUSSION] No discussion URLs found in IPFS metadata or rawContent`);
+    }
+    
+    return normalizedLinks;
+  }
+  
+  /**
+   * Validate if a Snapshot proposal is related to the current forum topic
+   * Returns an object with { isRelated: boolean, discussionLink: string|null }
+   * 
+   * A proposal is considered related ONLY if:
+   * 1. The proposal's discussion/reference link matches the current forum topic
+   * 2. OR we're not on a forum page (show all proposals)
+   * 
+   * We do NOT check the proposal body/description - only the official discussion/reference link.
+   * This ensures we only show proposals that are explicitly linked to this forum topic.
+   */
+  function validateSnapshotProposalForForum(snapshotProposal, currentForumUrl) {
+    console.log(`🔍 [VALIDATE] Validating Snapshot proposal: ${snapshotProposal?.data?.title || 'Unknown'}`);
+    
+    if (!currentForumUrl) {
+      // If we're not on a forum page, allow all proposals
+      console.log(`   ⚠️ Not on forum page - allowing proposal`);
+      return { isRelated: true, discussionLink: null };
+    }
+    
+    if (!snapshotProposal || !snapshotProposal.data) {
+      console.log(`   ❌ No proposal data`);
+      return { isRelated: false, discussionLink: null };
+    }
+    
+    const currentTopicId = extractForumTopicId(currentForumUrl);
+    if (!currentTopicId) {
+      // Can't extract topic ID, but still show proposal with discussion link if available
+      console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
+      const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
+      return { isRelated: false, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+    }
+    
+    console.log(`   Current forum topic ID: ${currentTopicId}`);
+    
+    // ONLY check discussion/reference links - this is the official link from the proposal
+    const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
+    for (const link of discussionLinks) {
+      const topicId = extractForumTopicId(link);
+      if (topicId === currentTopicId) {
+        console.log(`✅ [VALIDATE] Snapshot proposal is related to forum topic ${currentTopicId} (found matching discussion link: ${link})`);
+        return { isRelated: true, discussionLink: link };
+      }
+    }
+    
+    // If no matching discussion link found, it's not related to this topic
+    // But still return the discussion link so it can be displayed
+    console.log(`⚠️ [VALIDATE] Snapshot proposal is NOT related to forum topic ${currentTopicId} - will show with discussion link`);
+    if (discussionLinks.length > 0) {
+      console.log(`   Found discussion links: ${discussionLinks.join(', ')}`);
+      return { isRelated: false, discussionLink: discussionLinks[0] };
+    } else {
+      console.log(`   No discussion links found in proposal`);
+      return { isRelated: false, discussionLink: null };
+    }
   }
   
   /**
    * Validate if an AIP proposal is related to the current forum topic
    * Returns true if the proposal is related, false otherwise
    * 
-   * A proposal is considered related if:
-   * 1. The AIP proposal ID matches the forum topic ID (they're linked)
-   * 2. OR the proposal's description contains a forum link matching the current topic ID
+   * A proposal is considered related ONLY if:
+   * 1. The proposal's discussion/reference link matches the current forum topic
+   * 2. OR the AIP proposal ID matches the forum topic ID (they're directly linked by ID)
    * 3. OR we're not on a forum page (show all proposals)
+   * 
+   * We do NOT check the proposal description/body - only the official discussion/reference link or ID match.
+   * This ensures we only show proposals that are explicitly linked to this forum topic.
    */
-  function validateAIPProposalForForum(aipProposal, currentForumUrl) {
+  async function validateAIPProposalForForum(aipProposal, currentForumUrl) {
     if (!currentForumUrl) {
       // If we're not on a forum page, allow all proposals
-      return true;
+      return { isRelated: true, discussionLink: null };
     }
     
     if (!aipProposal || !aipProposal.data) {
-      return false;
+      return { isRelated: false, discussionLink: null };
     }
     
     const currentTopicId = extractForumTopicId(currentForumUrl);
     if (!currentTopicId) {
-      // Can't extract topic ID, filter out to be safe
+      // Can't extract topic ID, but still show proposal with discussion link if available
       console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
-      return false;
+      const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
+      return { isRelated: false, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
     }
     
-    // Check if the AIP proposal ID matches the forum topic ID
-    // Forum topics can have the same ID as AIP proposals (they're linked)
-    const aipId = String(aipProposal.data.id || '');
-    if (aipId === currentTopicId) {
-      console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
-      return true;
-    }
-    
-    // Check if the proposal's description contains a forum link matching current topic
-    const description = aipProposal.data.description || '';
-    const title = aipProposal.data.title || '';
-    const combinedText = `${description} ${title}`.toLowerCase();
-    
-    // Check for forum links in the proposal content
-    const forumLinks = combinedText.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/gi);
-    if (forumLinks) {
-      for (const link of forumLinks) {
-        const topicId = extractForumTopicId(link);
-        if (topicId === currentTopicId) {
-          console.log(`✅ [VALIDATE] AIP proposal is related to forum topic ${currentTopicId} (found forum link in proposal)`);
-          return true;
-        }
+    // Check 1: Discussion/reference links (primary check)
+    const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
+    for (const link of discussionLinks) {
+      const topicId = extractForumTopicId(link);
+      if (topicId === currentTopicId) {
+        console.log(`✅ [VALIDATE] AIP proposal is related to forum topic ${currentTopicId} (found matching discussion link: ${link})`);
+        return { isRelated: true, discussionLink: link };
       }
     }
     
+    // Check 2: AIP proposal ID matches forum topic ID (they're directly linked by ID)
+    // This is a special case where AIPs and forum topics share the same ID
+    const aipId = String(aipProposal.data.id || '');
+    if (aipId === currentTopicId) {
+      console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
+      return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+    }
+    
     // If no match found, it's not related to this topic
-    console.log(`❌ [VALIDATE] AIP proposal is NOT related to forum topic ${currentTopicId} - filtering out`);
-    return false;
+    // But still return the discussion link so it can be displayed
+    console.log(`⚠️ [VALIDATE] AIP proposal is NOT related to forum topic ${currentTopicId} - will show with discussion link`);
+    if (discussionLinks.length > 0) {
+      console.log(`   Found discussion links: ${discussionLinks.join(', ')}`);
+      return { isRelated: false, discussionLink: discussionLinks[0] };
+    } else {
+      console.log(`   No discussion links found in proposal`);
+      return { isRelated: false, discussionLink: null };
+    }
   }
 
   // ===== PROPOSAL CATEGORIZATION AND SELECTION HELPERS =====
@@ -4780,7 +5698,9 @@ export default apiInitializer((api) => {
     };
     
     snapshotProposals.forEach(proposal => {
-      if (!proposal || !proposal.data) { return; }
+      if (!proposal || !proposal.data) {
+        return;
+      }
       
       const stage = proposal.data.stage || 'snapshot';
       
@@ -4828,7 +5748,9 @@ export default apiInitializer((api) => {
     };
     
     aipProposals.forEach(proposal => {
-      if (!proposal || !proposal.data) { return; }
+      if (!proposal || !proposal.data) {
+        return;
+      }
       
       // Use timestamp if already set, otherwise extract from data
       let timestamp = proposal.timestamp || 0;
@@ -4864,8 +5786,12 @@ export default apiInitializer((api) => {
    * - Executed (old) + Created (new) proposals
    */
   function selectBestProposal(proposals, type = 'snapshot') {
-    if (!proposals || proposals.length === 0) { return null; }
-    if (proposals.length === 1) { return proposals[0]; }
+    if (!proposals || proposals.length === 0) {
+      return null;
+    }
+    if (proposals.length === 1) {
+      return proposals[0];
+    }
     
     console.log(`🔵 [SELECT] Selecting best proposal from ${proposals.length} ${type} proposal(s)`);
     
@@ -4945,8 +5871,10 @@ export default apiInitializer((api) => {
    * Returns array sorted by timestamp (newest first)
    */
   // eslint-disable-next-line no-unused-vars
-  function getAllProposalsOfType(proposals, type = 'snapshot') {
-    if (!proposals || proposals.length === 0) { return []; }
+  function getAllProposalsOfType(proposals) {
+    if (!proposals || proposals.length === 0) {
+      return [];
+    }
     
     // Sort by timestamp (newest first)
     return [...proposals].sort((a, b) => {
@@ -5059,7 +5987,8 @@ export default apiInitializer((api) => {
     // Snapshot URLs: use as-is (already unique)
     const uniqueSnapshotUrls = [...new Set(allProposals.snapshot)];
     // AIP URLs: deduplicate by normalized URL, then map back to original
-    const uniqueAipUrls = [...new Set(normalizedAipUrls)].map(normalized => aipUrlMap.get(normalized));
+    // Use let instead of const so we can update it after cascading search
+    let uniqueAipUrls = [...new Set(normalizedAipUrls)].map(normalized => aipUrlMap.get(normalized));
     
     if (uniqueSnapshotUrls.length !== allProposals.snapshot.length) {
       console.log(`🔵 [TOPIC] Deduplicated ${allProposals.snapshot.length} Snapshot URLs to ${uniqueSnapshotUrls.length} unique URLs`);
@@ -5141,17 +6070,65 @@ export default apiInitializer((api) => {
           
           console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
           
+          // ===== EXTRACT AIP URLs FROM SNAPSHOT PROPOSALS (CASCADING SEARCH) =====
+          // Check if any Snapshot proposals contain AIP URLs in their descriptions
+          console.log(`🔍 [CASCADE] Starting cascading search for AIP URLs in ${validSnapshots.length} Snapshot proposal(s)`);
+          const extractedAipUrls = [];
+          validSnapshots.forEach((snapshot, idx) => {
+            console.log(`🔍 [CASCADE] Checking Snapshot proposal ${idx + 1}/${validSnapshots.length}: "${snapshot.data?.title?.substring(0, 50)}..."`);
+            const aipUrl = extractAIPUrlFromSnapshot(snapshot.data);
+            if (aipUrl) {
+              console.log(`✅ [CASCADE] Found AIP URL in Snapshot proposal "${snapshot.data.title?.substring(0, 50)}...": ${aipUrl}`);
+              if (!extractedAipUrls.includes(aipUrl)) {
+                extractedAipUrls.push(aipUrl);
+              }
+            } else {
+              console.log(`❌ [CASCADE] No AIP URL found in Snapshot proposal ${idx + 1}`);
+            }
+          });
+          console.log(`🔍 [CASCADE] Cascading search complete - found ${extractedAipUrls.length} AIP URL(s)`);
+          
+          // If AIP URLs were found, add them to proposals and trigger widget update
+          if (extractedAipUrls.length > 0) {
+            console.log(`🔵 [CASCADE] Found ${extractedAipUrls.length} AIP URL(s) in Snapshot proposals - adding to proposals list`);
+            console.log(`🔵 [CASCADE] AIP URLs to add:`, extractedAipUrls);
+            
+            // Update allProposals.aip with extracted URLs
+            const previousAipCount = allProposals.aip.length;
+            allProposals.aip = [...new Set([...allProposals.aip, ...extractedAipUrls])];
+            console.log(`🔵 [CASCADE] Updated allProposals.aip - now has ${allProposals.aip.length} AIP URL(s) (was ${previousAipCount})`);
+            
+            // Recalculate uniqueAipUrls since we added new URLs
+            const updatedNormalizedAipUrls = allProposals.aip.map(url => normalizeAIPUrl(url));
+            const updatedAipUrlMap = new Map();
+            allProposals.aip.forEach((url, index) => {
+              const normalized = updatedNormalizedAipUrls[index];
+              if (!updatedAipUrlMap.has(normalized)) {
+                updatedAipUrlMap.set(normalized, url);
+              }
+            });
+            // Update uniqueAipUrls for the AIP widgets section to use
+            uniqueAipUrls = [...new Set(updatedNormalizedAipUrls)].map(normalized => updatedAipUrlMap.get(normalized));
+            console.log(`🔵 [CASCADE] Recalculated uniqueAipUrls - now has ${uniqueAipUrls.length} unique AIP URL(s)`);
+          }
+          
           // ===== VALIDATE PROPOSALS FOR FORUM TOPIC =====
-          // Filter out proposals that are not related to the current forum topic
-          // This prevents false positives from historical references or unrelated proposals
+          // Check if proposals are related to current forum topic, but show all proposals
+          // Proposals not related to current forum will show their discussion link
           const currentForumUrl = getCurrentForumTopicUrl();
-          const validatedSnapshots = validSnapshots.filter(proposal => {
-            return validateSnapshotProposalForForum(proposal, currentForumUrl);
+          console.log(`🔍 [VALIDATE] Current forum URL: ${currentForumUrl || 'NOT ON FORUM PAGE'}`);
+          console.log(`🔍 [VALIDATE] Validating ${validSnapshots.length} Snapshot proposal(s) against forum topic...`);
+          const validatedSnapshots = validSnapshots.map(proposal => {
+            const validation = validateSnapshotProposalForForum(proposal, currentForumUrl);
+            // Add validation info to proposal object
+            proposal._validation = validation;
+            return proposal;
           });
           
-          if (validatedSnapshots.length < validSnapshots.length) {
-            const filteredCount = validSnapshots.length - validatedSnapshots.length;
-            console.log(`🔵 [VALIDATE] Filtered out ${filteredCount} Snapshot proposal(s) not related to forum topic`);
+          const relatedCount = validatedSnapshots.filter(p => p._validation.isRelated).length;
+          const unrelatedCount = validatedSnapshots.length - relatedCount;
+          if (unrelatedCount > 0) {
+            console.log(`🔵 [VALIDATE] ${unrelatedCount} Snapshot proposal(s) not related to forum topic - will show with discussion link`);
           }
           
           // ===== CATEGORIZE ALL PROPOSALS BY TYPE =====
@@ -5228,6 +6205,20 @@ export default apiInitializer((api) => {
             // Create unique widget ID for each proposal
             const widgetId = `snapshot-widget-${index}-${Date.now()}`;
             
+            // Get validation info (discussion link if not related to current forum)
+            const validation = snapshot._validation || { isRelated: true, discussionLink: null };
+            console.log(`🔵 [VALIDATION] ${stageName} validation data:`, {
+              isRelated: validation.isRelated,
+              discussionLink: validation.discussionLink,
+              hasValidation: !!snapshot._validation
+            });
+            
+            // Skip rendering if proposal has a discussion URL that doesn't match current forum
+            if (validation.discussionLink && !validation.isRelated) {
+              console.log(`⚠️ [RENDER] Skipping ${stageName} widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
+              return;
+            }
+            
             // Render single proposal widget based on its stage, with proposal order
             renderMultiStageWidget({
               tempCheck: stage === 'temp-check' ? snapshot.data : null,
@@ -5236,7 +6227,7 @@ export default apiInitializer((api) => {
               arfcUrl: (stage === 'arfc' || stage === 'snapshot') ? snapshot.url : null,
               aip: null,
               aipUrl: null
-            }, widgetId, proposalOrder);
+            }, widgetId, proposalOrder, validation.discussionLink, validation.isRelated);
             
             console.log(`✅ [RENDER] Snapshot widget ${index + 1} rendered`);
           });
@@ -5281,7 +6272,7 @@ export default apiInitializer((api) => {
       });
       
       Promise.allSettled(aipPromises)
-        .then(aipResults => {
+        .then(async aipResults => {
           // Filter out skipped and invalid data
           const validAIPs = aipResults
             .filter(result => result.status === 'fulfilled' && 
@@ -5299,16 +6290,20 @@ export default apiInitializer((api) => {
           console.log(`🔵 [TOPIC] Found ${validAIPs.length} valid AIP proposal(s) out of ${uniqueAipUrls.length} unique URL(s)`);
           
           // ===== VALIDATE PROPOSALS FOR FORUM TOPIC =====
-          // Filter out proposals that are not related to the current forum topic
-          // This prevents false positives from historical references or unrelated proposals
+          // Check if proposals are related to current forum topic, but show all proposals
+          // Proposals not related to current forum will show their discussion link
           const currentForumUrl = getCurrentForumTopicUrl();
-          const validatedAIPs = validAIPs.filter(proposal => {
-            return validateAIPProposalForForum(proposal, currentForumUrl);
-          });
+          const validatedAIPs = await Promise.all(validAIPs.map(async proposal => {
+            const validation = await validateAIPProposalForForum(proposal, currentForumUrl);
+            // Add validation info to proposal object
+            proposal._validation = validation;
+            return proposal;
+          }));
           
-          if (validatedAIPs.length < validAIPs.length) {
-            const filteredCount = validAIPs.length - validatedAIPs.length;
-            console.log(`🔵 [VALIDATE] Filtered out ${filteredCount} AIP proposal(s) not related to forum topic`);
+          const relatedCount = validatedAIPs.filter(p => p._validation.isRelated).length;
+          const unrelatedCount = validatedAIPs.length - relatedCount;
+          if (unrelatedCount > 0) {
+            console.log(`🔵 [VALIDATE] ${unrelatedCount} AIP proposal(s) not related to forum topic - will show with discussion link`);
           }
           
           // ===== CATEGORIZE ALL AIP PROPOSALS =====
@@ -5328,6 +6323,20 @@ export default apiInitializer((api) => {
           // ===== RENDER WIDGET FOR SELECTED AIP =====
           if (bestAIP && bestAIP.data && bestAIP.data.title) {
             const normalizedUrl = normalizeAIPUrl(bestAIP.url);
+            
+            // CRITICAL: Check if widget already exists by URL (same as Snapshot widgets do)
+            // This prevents re-rendering the same widget multiple times
+            const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${bestAIP.url}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
+            if (existingWidgetByUrl) {
+              console.log(`🔵 [TOPIC] AIP widget with URL ${bestAIP.url} already exists, skipping duplicate render`);
+              // Remove from tracking sets since widget already exists
+              renderingUrls.delete(normalizedUrl);
+              renderingUrls.delete(bestAIP.url);
+              fetchingUrls.delete(normalizedUrl);
+              fetchingUrls.delete(bestAIP.url);
+              return;
+            }
+            
             if (renderingUrls.has(normalizedUrl) || renderingUrls.has(bestAIP.url)) {
               console.log(`🔵 [TOPIC] AIP URL ${bestAIP.url} is already being rendered, skipping duplicate render`);
               return;
@@ -5337,13 +6346,33 @@ export default apiInitializer((api) => {
             const proposalOrderIndex = orderedProposals.findIndex(p => p.url === bestAIP.url && p.type === 'aip');
             const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + 0);
             
-            const aipWidgetId = `aip-widget-${Date.now()}`;
-            console.log(`🔵 [RENDER] Creating AIP widget (order: ${proposalOrder})`);
+            // Use stable widget ID based on URL (same approach as Snapshot widgets)
+            // Extract proposal ID from URL for stable ID generation
+            const proposalInfo = extractAIPProposalInfo(bestAIP.url);
+            const proposalId = proposalInfo?.proposalId || bestAIP.url.split('').reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
+            const aipWidgetId = `aip-widget-${proposalId}`;
+            
+            console.log(`🔵 [RENDER] Creating AIP widget (order: ${proposalOrder}, ID: ${aipWidgetId})`);
             console.log(`🔵 [RENDER] AIP data:`, { title: bestAIP.data.title, status: bestAIP.status, url: bestAIP.url });
             if (categorized.aips.length > 1) {
               console.log(`   ⚠️ Note: Selected from ${categorized.aips.length} AIP(s) found in thread`);
             }
             
+            // Get validation info (discussion link if not related to current forum)
+            const validation = bestAIP._validation || { isRelated: true, discussionLink: null };
+            console.log(`🔵 [VALIDATION] AIP validation data:`, {
+              isRelated: validation.isRelated,
+              discussionLink: validation.discussionLink,
+              hasValidation: !!bestAIP._validation
+            });
+            
+            // Skip rendering if proposal has a discussion URL that doesn't match current forum
+            if (validation.discussionLink && !validation.isRelated) {
+              console.log(`⚠️ [RENDER] Skipping AIP widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
+              return;
+            }
+            
+            // Render AIP widget - use same approach as Snapshot widgets
             renderMultiStageWidget({
               tempCheck: null,
               tempCheckUrl: null,
@@ -5351,8 +6380,95 @@ export default apiInitializer((api) => {
               arfcUrl: null,
               aip: bestAIP.data,
               aipUrl: bestAIP.url
-            }, aipWidgetId, proposalOrder);
+            }, aipWidgetId, proposalOrder, validation.discussionLink, validation.isRelated);
             console.log(`✅ [RENDER] AIP widget rendered`);
+            
+            // CRITICAL: AIP widgets render asynchronously (in Promise callback) while Snapshot renders synchronously
+            // This causes AIP widgets to be inserted later, after Discourse may have applied lazy loading CSS
+            // Force immediate visibility RIGHT AFTER rendering for BOTH mobile and desktop
+            // Track if widget is already visible to prevent unnecessary checks
+            let widgetIsVisible = false;
+            
+            // Use requestAnimationFrame to catch widget immediately after insertion (works for both mobile and desktop)
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
+                if (aipWidget && aipWidget.parentNode) {
+                  // Force visibility immediately - same as Snapshot widgets
+                  aipWidget.style.setProperty('display', 'block', 'important');
+                  aipWidget.style.setProperty('visibility', 'visible', 'important');
+                  aipWidget.style.setProperty('opacity', '1', 'important');
+                  aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                  
+                  // Force reflow
+                  void aipWidget.offsetHeight;
+                  
+                  // Verify it's visible
+                  const computedStyle = window.getComputedStyle(aipWidget);
+                  const isMobile = window.innerWidth <= 1024 || 
+                                   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                  const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
+                  console.log(`🔵 [${deviceType}] AIP widget after insertion - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+                  
+                  // Check if widget is actually visible (don't remove/re-insert - that causes blinking)
+                  if (computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden' && computedStyle.opacity !== '0') {
+                    widgetIsVisible = true;
+                    console.log(`✅ [${deviceType}] AIP widget is visible - no further checks needed`);
+                  } else {
+                    // Widget is hidden - just force styles without removing from DOM (prevents blinking)
+                    console.warn(`⚠️ [${deviceType}] AIP widget still hidden after force - applying style fixes only`);
+                    aipWidget.style.setProperty('display', 'block', 'important');
+                    aipWidget.style.setProperty('visibility', 'visible', 'important');
+                    aipWidget.style.setProperty('opacity', '1', 'important');
+                    aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                    // Force another reflow
+                    void aipWidget.offsetHeight;
+                  }
+                  
+                  console.log(`✅ [${deviceType}] AIP widget visibility forced immediately after render`);
+                } else {
+                  const isMobile = window.innerWidth <= 1024 || 
+                                   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                  const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
+                  console.warn(`⚠️ [${deviceType}] AIP widget not found in DOM yet: aave-governance-widget-${aipWidgetId}`);
+                }
+              });
+            });
+            
+            // Reduced delayed checks - only check if widget is not yet visible (prevents blinking from repeated checks)
+            // Works for both mobile and desktop
+            const checkDelays = [100, 300, 600];
+            checkDelays.forEach((delay, index) => {
+              setTimeout(() => {
+                // Skip check if widget is already confirmed visible
+                if (widgetIsVisible) {
+                  return;
+                }
+                
+                const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
+                if (aipWidget && aipWidget.parentNode) {
+                  const computedStyle = window.getComputedStyle(aipWidget);
+                  const isMobile = window.innerWidth <= 1024 || 
+                                   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                  const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
+                  
+                  // Only force visibility if actually hidden (don't repeatedly check visible widgets)
+                  if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                    console.log(`🔵 [${deviceType}] AIP widget hidden at ${delay}ms check ${index + 1}, forcing visibility`);
+                    aipWidget.style.setProperty('display', 'block', 'important');
+                    aipWidget.style.setProperty('visibility', 'visible', 'important');
+                    aipWidget.style.setProperty('opacity', '1', 'important');
+                    aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                    // Force reflow
+                    void aipWidget.offsetHeight;
+                  } else {
+                    // Widget is visible - mark as such and stop checking
+                    widgetIsVisible = true;
+                    console.log(`✅ [${deviceType}] AIP widget confirmed visible at ${delay}ms - stopping checks`);
+                  }
+                }
+              }, delay);
+            });
           } else if (validAIPs.length > 0) {
             console.warn(`⚠️ [TOPIC] AIP data fetched but missing title or invalid`);
           }
@@ -5445,6 +6561,38 @@ export default apiInitializer((api) => {
     if (isMobile) {
       setTimeout(() => debouncedSetupTopicWidget(), 100);
       setTimeout(() => debouncedSetupTopicWidget(), 500);
+      
+      // On mobile, ensure all widgets are visible after initial setup
+      // This fixes the issue where AIP widgets don't appear until scroll
+      setTimeout(() => {
+        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+        allWidgets.forEach(widget => {
+          const computedStyle = window.getComputedStyle(widget);
+          if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+            console.log(`🔵 [MOBILE] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+            widget.style.setProperty('display', 'block', 'important');
+            widget.style.setProperty('visibility', 'visible', 'important');
+            widget.style.setProperty('opacity', '1', 'important');
+            widget.classList.remove('hidden', 'd-none', 'is-hidden');
+            console.log(`✅ [MOBILE] Forced visibility for widget on initial load`);
+          }
+        });
+      }, 600);
+      
+      // Additional check after even longer delay to catch any lazy loading
+      setTimeout(() => {
+        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+        allWidgets.forEach(widget => {
+          const computedStyle = window.getComputedStyle(widget);
+          if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+            console.log(`🔵 [MOBILE] Widget still hidden after delay, forcing visibility again`);
+            widget.style.setProperty('display', 'block', 'important');
+            widget.style.setProperty('visibility', 'visible', 'important');
+            widget.style.setProperty('opacity', '1', 'important');
+            widget.classList.remove('hidden', 'd-none', 'is-hidden');
+          }
+        });
+      }, 1000);
     } else {
       setTimeout(() => debouncedSetupTopicWidget(), 500);
       setTimeout(() => debouncedSetupTopicWidget(), 1500);
@@ -5534,9 +6682,9 @@ export default apiInitializer((api) => {
       // Fallback: Find the link that's most visible in viewport (original logic)
       const allTallyLinks = document.querySelectorAll('a[href*="tally.xyz"], a[href*="tally.so"]');
       
-      // If no Tally links found at all, hide widget
+      // If no Tally links found at all, hide Snapshot widgets (AIP widgets remain visible)
       if (allTallyLinks.length === 0) {
-        console.log("🔵 [SCROLL] No Snapshot links found on page - hiding widget");
+        console.log("🔵 [SCROLL] No Snapshot links found on page - hiding Snapshot widgets (AIP widgets stay visible)");
         hideWidgetIfNoProposal();
         currentVisibleProposal = null;
         return;
@@ -5606,8 +6754,8 @@ export default apiInitializer((api) => {
           hideWidgetIfNoProposal();
         }
       } else if (!mostVisibleLink) {
-        // No visible proposal link found - remove all widgets
-        console.log("🔵 [SCROLL] No visible proposal link found - removing all widgets");
+        // No visible Snapshot proposal link found - hide Snapshot widgets (AIP widgets remain visible)
+        console.log("🔵 [SCROLL] No visible Snapshot proposal link found - hiding Snapshot widgets (AIP widgets stay visible)");
         hideWidgetIfNoProposal();
       }
     }, 150); // Debounce scroll events
@@ -5647,10 +6795,12 @@ export default apiInitializer((api) => {
           proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
           console.log("🔵 [SCROLL] IntersectionObserver - Post", postInfo.current, "/", postInfo.total);
           
-          // If no proposal in this post, remove all widgets
+          // If no Snapshot proposal in this post, hide Snapshot widgets (AIP widgets remain visible)
           if (!proposalUrl) {
-            console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "has no Snapshot proposal - removing all widgets");
+            console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "has no Snapshot proposal - hiding Snapshot widgets (AIP widgets stay visible)");
             hideWidgetIfNoProposal();
+            // Ensure AIP widgets remain visible after hiding Snapshot widgets
+            ensureAIPWidgetsVisible();
             return;
           }
         }
@@ -5662,8 +6812,10 @@ export default apiInitializer((api) => {
           if (tallyLink) {
             proposalUrl = tallyLink.href;
           } else {
-            // No Snapshot link in this post - hide widget
+            // No Snapshot link in this post - hide Snapshot widgets (AIP widgets remain visible)
             hideWidgetIfNoProposal();
+            // Ensure AIP widgets remain visible after hiding Snapshot widgets
+            ensureAIPWidgetsVisible();
             currentVisibleProposal = null;
             return;
           }
@@ -5706,9 +6858,11 @@ export default apiInitializer((api) => {
             hideWidgetIfNoProposal();
           }
         } else {
-          // No proposal URL found - remove all widgets
-          console.log("🔵 [SCROLL] No proposal URL found - removing all widgets");
+          // No Snapshot proposal URL found - hide Snapshot widgets (AIP widgets remain visible)
+          console.log("🔵 [SCROLL] No Snapshot proposal URL found - hiding Snapshot widgets (AIP widgets stay visible)");
           hideWidgetIfNoProposal();
+          // Ensure AIP widgets remain visible after hiding Snapshot widgets
+          ensureAIPWidgetsVisible();
         }
       }
     }, observerOptions);
@@ -6656,6 +7810,59 @@ export default apiInitializer((api) => {
   // Initialize topic widget (shows first proposal found, no scroll tracking)
   setTimeout(() => {
     setupTopicWatcher();
+    
+    // On mobile, watch for widgets being added to DOM and immediately force visibility
+    const isMobile = window.innerWidth <= 1024 || 
+                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobile) {
+      const widgetObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          mutation.addedNodes.forEach((node) => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              // Check if the added node is a widget or contains widgets
+              const widgets = node.classList?.contains('tally-status-widget-container') 
+                ? [node] 
+                : node.querySelectorAll?.('.tally-status-widget-container') || [];
+              
+              widgets.forEach((widget) => {
+                if (widget && widget.parentNode) {
+                  const computedStyle = window.getComputedStyle(widget);
+                  if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                    console.log(`🔵 [MOBILE] Widget detected in DOM but hidden, forcing visibility immediately`);
+                    widget.style.setProperty('display', 'block', 'important');
+                    widget.style.setProperty('visibility', 'visible', 'important');
+                    widget.style.setProperty('opacity', '1', 'important');
+                    widget.classList.remove('hidden', 'd-none', 'is-hidden');
+                    
+                    // Force reflow
+                    void widget.offsetHeight;
+                    
+                    // Check if widget is in viewport - if not, it might be positioned off-screen
+                    const rect = widget.getBoundingClientRect();
+                    const isInViewport = rect.top >= 0 && rect.left >= 0 && 
+                                        rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                                        rect.right <= (window.innerWidth || document.documentElement.clientWidth);
+                    
+                    if (!isInViewport && rect.height > 0) {
+                      console.log(`🔵 [MOBILE] Widget is in DOM but not in viewport - position: top=${rect.top}, left=${rect.left}`);
+                      // Widget exists but might be off-screen - this is OK, it will be visible when user scrolls
+                    }
+                  }
+                }
+              });
+            }
+          });
+        });
+      });
+      
+      // Observe the document body for widget additions
+      widgetObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+      
+      console.log("✅ [MOBILE] Widget visibility observer set up");
+    }
   }, 1000);
 
   // Re-initialize topic widget on page changes
