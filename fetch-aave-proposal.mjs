@@ -1,19 +1,41 @@
 /**
  * Aave Governance V3 Proposal Fetcher
- * 
+ *
  * Fetches proposal data from The Graph subgraph for Aave Governance V3
- * 
+ *
  * Usage:
- *   node fetch-aave-proposal.mjs [proposalId]
- *   node fetch-aave-proposal.mjs [url]
- * 
+ *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs [proposalId]
+ *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs [url]
+ *
  * Examples:
- *   node fetch-aave-proposal.mjs 411
- *   node fetch-aave-proposal.mjs "https://app.aave.com/governance/v3/proposal/?proposalId=411"
+ *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs 411
+ *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs "https://app.aave.com/governance/v3/proposal/?proposalId=411"
+ *
+ * SECURITY: API key should be set via environment variable
+ * Get your API key from: https://thegraph.com/studio/apikeys/
  */
 
-const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
-const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
+// SECURITY: API key must be set via environment variable
+const GRAPH_API_KEY = process.env.GRAPH_API_KEY || "";
+const SUBGRAPH_ID =
+  process.env.SUBGRAPH_ID || "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
+
+if (!GRAPH_API_KEY || GRAPH_API_KEY.trim() === "") {
+  console.error("❌ ERROR: GRAPH_API_KEY environment variable is not set!");
+  console.error("");
+  console.error("Please set it before running:");
+  console.error("  export GRAPH_API_KEY=your_key_here");
+  console.error("  node fetch-aave-proposal.mjs [proposalId]");
+  console.error("");
+  console.error("Or inline:");
+  console.error(
+    "  GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs [proposalId]"
+  );
+  console.error("");
+  console.error("Get your API key from: https://thegraph.com/studio/apikeys/");
+  process.exit(1);
+}
+
 const SUBGRAPH_URL = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
 
 /**
@@ -22,13 +44,15 @@ const SUBGRAPH_URL = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraph
  * @returns {string|null} - Extracted proposal ID or null
  */
 function extractProposalId(input) {
-  if (!input) return null;
-  
+  if (!input) {
+    return null;
+  }
+
   // If it's just a number, return it
   if (/^\d+$/.test(input.trim())) {
     return input.trim();
   }
-  
+
   // Try to extract from URL patterns
   const urlPatterns = [
     /proposalId[=:](\d+)/i,
@@ -38,14 +62,14 @@ function extractProposalId(input) {
     /\/t\/[^\/]+\/(\d+)/i,
     /proposal[\/\-](\d+)/i,
   ];
-  
+
   for (const pattern of urlPatterns) {
     const match = input.match(pattern);
     if (match && match[1]) {
       return match[1];
     }
   }
-  
+
   return null;
 }
 
@@ -63,7 +87,7 @@ function translateState(state) {
     4: "Executed",
     5: "Failed",
     6: "Cancelled",
-    7: "Expired"
+    7: "Expired",
   };
   return states[state] || `Unknown (${state})`;
 }
@@ -85,18 +109,26 @@ function formatAAVE(amount) {
  * @returns {string} - Formatted duration
  */
 function formatDuration(seconds) {
-  if (!seconds || seconds === null) return "N/A";
-  
+  if (!seconds || seconds === null) {
+    return "N/A";
+  }
+
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   const parts = [];
-  if (days > 0) parts.push(`${days} day${days !== 1 ? 's' : ''}`);
-  if (hours > 0) parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
-  if (minutes > 0) parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
-  
-  return parts.length > 0 ? parts.join(', ') : `${seconds} seconds`;
+  if (days > 0) {
+    parts.push(`${days} day${days !== 1 ? "s" : ""}`);
+  }
+  if (hours > 0) {
+    parts.push(`${hours} hour${hours !== 1 ? "s" : ""}`);
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes} minute${minutes !== 1 ? "s" : ""}`);
+  }
+
+  return parts.length > 0 ? parts.join(", ") : `${seconds} seconds`;
 }
 
 /**
@@ -128,7 +160,7 @@ async function fetchProposalById(proposalId) {
     const res = await fetch(SUBGRAPH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: QUERY })
+      body: JSON.stringify({ query: QUERY }),
     });
 
     const json = await res.json();
@@ -161,9 +193,9 @@ function displayProposal(proposal) {
   const againstVotes = formatAAVE(p.votes?.againstVotes || 0);
   const duration = formatDuration(p.votingDuration);
 
-  console.log(`\n${'='.repeat(50)}`);
+  console.log(`\n${"=".repeat(50)}`);
   console.log(`📋 Aave Governance Proposal #${p.proposalId}`);
-  console.log(`${'='.repeat(50)}`);
+  console.log(`${"=".repeat(50)}`);
   console.log(`Title:     ${p.proposalMetadata?.title || "N/A"}`);
   console.log(`State:     ${translateState(p.state)}`);
   console.log(`Creator:   ${p.creator}`);
@@ -172,7 +204,7 @@ function displayProposal(proposal) {
   console.log(`\nVoting Results:`);
   console.log(`  👍 For:      ${forVotes} AAVE`);
   console.log(`  👎 Against:  ${againstVotes} AAVE`);
-  console.log(`${'='.repeat(50)}\n`);
+  console.log(`${"=".repeat(50)}\n`);
 }
 
 /**
@@ -188,8 +220,10 @@ async function main() {
     console.log("  node fetch-aave-proposal.mjs <proposalId>");
     console.log("  node fetch-aave-proposal.mjs <url>");
     console.log("\nExamples:");
-    console.log('  node fetch-aave-proposal.mjs 411');
-    console.log('  node fetch-aave-proposal.mjs "https://app.aave.com/governance/v3/proposal/?proposalId=411"');
+    console.log("  node fetch-aave-proposal.mjs 411");
+    console.log(
+      '  node fetch-aave-proposal.mjs "https://app.aave.com/governance/v3/proposal/?proposalId=411"'
+    );
     process.exit(1);
   }
 
@@ -200,7 +234,9 @@ async function main() {
     console.error(`❌ Error: Could not extract proposal ID from: ${input}`);
     console.log("\nSupported formats:");
     console.log("  - Proposal ID: 411");
-    console.log("  - URL: https://app.aave.com/governance/v3/proposal/?proposalId=411");
+    console.log(
+      "  - URL: https://app.aave.com/governance/v3/proposal/?proposalId=411"
+    );
     console.log("  - URL: https://app.aave.com/governance/411");
     console.log("  - URL: https://governance.aave.com/t/slug/411");
     process.exit(1);
@@ -223,4 +259,3 @@ main().catch((err) => {
   console.error("❌ Script Error:", err.message);
   process.exit(1);
 });
-

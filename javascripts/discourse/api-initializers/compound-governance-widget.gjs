@@ -74,10 +74,43 @@ export default apiInitializer((api) => {
   // Support both governance.aave.com and app.aave.com/governance/
   const AAVE_GOVERNANCE_PORTAL = "https://app.aave.com/governance";
   
-  // Aave Governance V3 - Using The Graph API with API key (method from ava.mjs)
-  const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
-  const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
-  const AAVE_V3_SUBGRAPH = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
+  // Aave Governance V3 - Using The Graph API with API key from theme settings
+  // SECURITY: API key must be configured in theme settings (Admin → Customize → Themes → Components → Settings)
+  // Get your API key from: https://thegraph.com/studio/apikeys/
+  let GRAPH_API_KEY = "";
+  let SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
+  
+  // Try to get settings from Discourse theme settings
+  try {
+    const siteSettings = api.container?.lookup('service:site-settings');
+    const themeSettings = api.container?.lookup('service:theme-settings');
+    
+    // Try theme settings first (for theme components)
+    if (themeSettings) {
+      GRAPH_API_KEY = themeSettings.graph_api_key || "";
+      SUBGRAPH_ID = themeSettings.subgraph_id || SUBGRAPH_ID;
+    }
+    
+    // Fallback: try to get from site settings if theme settings not available
+    if (!GRAPH_API_KEY && siteSettings) {
+      // Note: This is a fallback - theme settings are preferred
+      console.warn("⚠️ [CONFIG] Theme settings not found, using site settings fallback");
+    }
+  } catch (error) {
+    console.warn("⚠️ [CONFIG] Could not access theme settings:", error);
+  }
+  
+  // Validate API key is set
+  if (!GRAPH_API_KEY || GRAPH_API_KEY.trim() === "") {
+    console.error("❌ [CONFIG] GRAPH_API_KEY is not configured!");
+    console.error("   Please configure it in: Admin → Customize → Themes → Components → Settings");
+    console.error("   Get your API key from: https://thegraph.com/studio/apikeys/");
+    // Don't throw error - allow widget to continue (it will fail gracefully on API calls)
+  }
+  
+  const AAVE_V3_SUBGRAPH = GRAPH_API_KEY 
+    ? `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`
+    : null;
   
   // REMOVED: All fallback methods (on-chain, Data API, markdown) - using only The Graph API
   // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
@@ -887,6 +920,14 @@ export default apiInitializer((api) => {
       `;
       
       console.log("🔵 [AIP] GraphQL Query:", query);
+
+      // Check if API key is configured
+      if (!AAVE_V3_SUBGRAPH) {
+        console.error("❌ [AIP] Cannot fetch proposal: GRAPH_API_KEY is not configured!");
+        console.error("   Please configure it in: Admin → Customize → Themes → Components → Settings");
+        console.error("   Get your API key from: https://thegraph.com/studio/apikeys/");
+        return null;
+      }
 
       const response = await fetchWithRetry(AAVE_V3_SUBGRAPH, {
         method: "POST",
@@ -1933,6 +1974,7 @@ export default apiInitializer((api) => {
       daysLeft,
       hoursLeft,
       endTime,
+      startTime: proposal.start || null, // Add start time for "pending" status (when voting hasn't started yet)
       supportPercent, // Add support percentage for easy access
       voteStats: {
         for: { count: forVotes, voters: 0, percent: forPercent },
@@ -2049,6 +2091,7 @@ export default apiInitializer((api) => {
       quorum: proposal.quorum || null,
       daysLeft,
       hoursLeft,
+      votingActivationTimestamp: proposal.votingActivationTimestamp || null, // Add for "created" status time calculation
       voteStats: {
         for: { count: forVotes, voters: 0, percent: forPercent },
         against: { count: againstVotes, voters: 0, percent: againstPercent },
@@ -2422,6 +2465,96 @@ export default apiInitializer((api) => {
       return `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`;
     }
     
+    // Helper function to format "Voting starts in X" for created proposals
+    // Returns object with relative time and exact date/time
+    // Only shows exact time when minutes are included in the relative text
+    function formatVotingStartTime(votingActivationTimestamp) {
+      if (!votingActivationTimestamp) {
+        return { relative: 'Voting starts soon', exact: null, showExact: false };
+      }
+      
+      const now = Date.now() / 1000; // Current time in seconds
+      const activationTime = Number(votingActivationTimestamp); // Activation time in seconds
+      const diffTime = activationTime - now; // Time until activation in seconds
+      
+      // Format exact date/time
+      const activationDate = new Date(activationTime * 1000);
+      const exactDate = activationDate.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      
+      if (diffTime <= 0) {
+        return { relative: 'Voting starting soon', exact: exactDate, showExact: true };
+      }
+      
+      const diffTimeMs = diffTime * 1000; // Convert to milliseconds
+      const diffTimeInDays = diffTimeMs / (1000 * 60 * 60 * 24);
+      const diffTimeInHours = diffTimeMs / (1000 * 60 * 60);
+      const diffTimeInMinutes = diffTimeMs / (1000 * 60);
+      
+      let relativeText;
+      let showExact = false; // Only show exact time when minutes are shown
+      
+      // If less than 1 hour, show minutes - show exact time
+      if (diffTimeInHours < 1) {
+        const minutes = Math.floor(diffTimeInMinutes);
+        relativeText = `Voting starts in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+        showExact = true; // Show exact time when showing minutes
+      }
+      // If less than 24 hours, show hours AND minutes - show exact time
+      else if (diffTimeInDays < 1) {
+        const hours = Math.floor(diffTimeInHours);
+        const remainingMinutes = Math.floor((diffTimeInHours - hours) * 60);
+        if (remainingMinutes > 0) {
+          relativeText = `Voting starts in ${hours} ${hours === 1 ? 'hour' : 'hours'} ${remainingMinutes} ${remainingMinutes === 1 ? 'minute' : 'minutes'}`;
+        } else {
+          relativeText = `Voting starts in ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+        }
+        showExact = true; // Always show exact time when showing hours (with or without minutes)
+      }
+      // If less than 30 days, show days (and hours if applicable, and minutes if less than a day)
+      else if (diffTimeInDays < 30) {
+        const days = Math.floor(diffTimeInDays);
+        const remainingHours = Math.floor((diffTimeInDays - days) * 24);
+        const remainingMinutes = Math.floor(((diffTimeInDays - days) * 24 - remainingHours) * 60);
+        
+        if (remainingHours > 0 && days === 0) {
+          // Less than 1 day, show hours and minutes
+          if (remainingMinutes > 0) {
+            relativeText = `Voting starts in ${remainingHours} ${remainingHours === 1 ? 'hour' : 'hours'} ${remainingMinutes} ${remainingMinutes === 1 ? 'minute' : 'minutes'}`;
+          } else {
+            relativeText = `Voting starts in ${remainingHours} ${remainingHours === 1 ? 'hour' : 'hours'}`;
+          }
+          showExact = true; // Show exact time when showing hours/minutes
+        } else if (remainingHours > 0) {
+          // Multiple days with hours
+          relativeText = `Voting starts in ${days} ${days === 1 ? 'day' : 'days'}, ${remainingHours} ${remainingHours === 1 ? 'hour' : 'hours'}`;
+          showExact = false; // Don't show exact time for days + hours
+        } else {
+          relativeText = `Voting starts in ${days} ${days === 1 ? 'day' : 'days'}`;
+          showExact = false; // Don't show exact time for days only
+        }
+      }
+      // If 30+ days, show months
+      else {
+        const months = Math.floor(diffTimeInDays / 30);
+        const remainingDays = Math.floor(diffTimeInDays % 30);
+        if (remainingDays > 0) {
+          relativeText = `Voting starts in ${months} ${months === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'}`;
+        } else {
+          relativeText = `Voting starts in ${months} ${months === 1 ? 'month' : 'months'}`;
+        }
+        showExact = false; // Don't show exact time for months/days
+      }
+      
+      return { relative: relativeText, exact: exactDate, showExact };
+    }
+    
     // Helper to render Snapshot stage section
     function renderSnapshotStage(stageData, stageUrl, stageName) {
       if (!stageData) {
@@ -2451,13 +2584,28 @@ export default apiInitializer((api) => {
       console.log(`🔵 [RENDER] ${stageName} - For: ${forVotes}, Against: ${againstVotes}, Total: ${totalVotes}, Support: ${supportPercent}%`);
       
       const isActive = stageData.status === 'active' || stageData.status === 'open';
+      const isPending = stageData.status === 'pending';
       const isPassed = stageData.status === 'passed' || 
                        stageData.status === 'closed' || 
                        (stageData.status === 'executed' && supportPercent > 50) ||
-                       (stageData.status !== 'active' && stageData.status !== 'open' && supportPercent > 50);
-      const status = isPassed ? 'Passed' : (isActive ? 'Active' : 'Closed');
-      const statusClass = isPassed ? 'executed' : (isActive ? 'active' : 'inactive');
-      const timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+                       (stageData.status !== 'active' && stageData.status !== 'open' && stageData.status !== 'pending' && supportPercent > 50);
+      const status = isPassed ? 'Passed' : (isActive ? 'Active' : (isPending ? 'Pending' : 'Closed'));
+      const statusClass = isPassed ? 'executed' : (isActive ? 'active' : (isPending ? 'pending' : 'inactive'));
+      
+      // For "pending" status, show time until voting starts instead of time until voting ends
+      let timeDisplay;
+      let exactStartTime = null;
+      let showExactTime = false;
+      if (isPending && stageData.startTime) {
+        const startTimeInfo = formatVotingStartTime(stageData.startTime);
+        timeDisplay = startTimeInfo.relative;
+        // eslint-disable-next-line no-unused-vars
+        exactStartTime = startTimeInfo.exact;
+        // eslint-disable-next-line no-unused-vars
+        showExactTime = startTimeInfo.showExact;
+      } else {
+        timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+      }
       
       // Calculate percentages for progress bar
       const forPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
@@ -2520,25 +2668,38 @@ export default apiInitializer((api) => {
       
       // For ended proposals, wrap in collapsible container
       const stageId = `stage-${stageName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+      const shouldShowVotes = totalVotes > 0;
       const collapsedContent = isEnded ? `
         <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
           ${progressBarHtml}
+          ${shouldShowVotes ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
             <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
             <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
             <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
           </div>
+          ` : isPending ? `
+            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+              Voting Starting Soon
+            </div>
+          ` : ''}
           <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
             View on Snapshot
           </a>
         </div>
       ` : `
         ${progressBarHtml}
+        ${shouldShowVotes ? `
         <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
           <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
           <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
           <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
         </div>
+        ` : isPending ? `
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            Voting Starting Soon
+          </div>
+        ` : ''}
         <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
           Vote on Snapshot
         </a>
@@ -2639,7 +2800,20 @@ export default apiInitializer((api) => {
       
       console.log(`🔵 [RENDER] AIP - For: ${forVotes !== null ? forVotes : 'N/A'} (${forPercent}%), Against: ${againstVotes !== null ? againstVotes : 'N/A'} (${againstPercent}%), Total: ${totalVotes !== null ? totalVotes : 'N/A'}, Quorum: ${quorum} (${quorumPercent}%) - Reached: ${quorumReached}`);
       
-      const timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+      // For "created" status, show time until voting starts instead of time until voting ends
+      let timeDisplay;
+      let exactStartTime = null;
+      let showExactTime = false;
+      if (status === 'created' && stageData.votingActivationTimestamp) {
+        const startTimeInfo = formatVotingStartTime(stageData.votingActivationTimestamp);
+        timeDisplay = startTimeInfo.relative;
+        // eslint-disable-next-line no-unused-vars
+        exactStartTime = startTimeInfo.exact;
+        // eslint-disable-next-line no-unused-vars
+        showExactTime = startTimeInfo.showExact;
+      } else {
+        timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+      }
       // eslint-disable-next-line no-unused-vars
       const isEndingSoon = stageData.daysLeft !== null && stageData.daysLeft >= 0 && 
                           (stageData.daysLeft === 0 || (stageData.daysLeft === 1 && stageData.hoursLeft !== null && stageData.hoursLeft < 24));
@@ -2785,7 +2959,7 @@ export default apiInitializer((api) => {
         `}
         ${quorumHtml}
         <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
-          Vote on Aave
+          ${status === 'active' ? 'Vote on Aave' : 'View on Aave'}
         </a>
       `;
       
@@ -2907,20 +3081,29 @@ export default apiInitializer((api) => {
     
     if (isMobile) {
       // On mobile, check if widget is already in the correct position to prevent re-insertion
+      // But allow re-rendering if content needs to be updated
       if (statusWidget.parentNode) {
         // Widget is already in DOM - check if it's in a valid location
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
         const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
         
-        // If widget is already in a valid location (before posts or in topic body), don't re-insert
-        if (topicBody && (topicBody.contains(statusWidget) || 
-            (firstPost && firstPost.parentNode && firstPost.parentNode.contains(statusWidget)))) {
-          console.log("✅ [MOBILE] Widget already in correct position, skipping re-insertion");
+        // Check if widget is already in a valid location
+        const isInValidLocation = topicBody && (topicBody.contains(statusWidget) || 
+            (firstPost && firstPost.parentNode && firstPost.parentNode.contains(statusWidget)));
+        
+        if (isInValidLocation) {
+          // Widget is in correct position - but don't return early, allow content update
+          // Only skip if this is a duplicate URL (same widget being re-rendered unnecessarily)
+          const widgetUrl = statusWidget.getAttribute('data-tally-url');
+          if (widgetUrl === proposalUrl) {
+            console.log("✅ [MOBILE] Widget already in correct position with same URL, skipping re-insertion");
           // Remove URL from rendering set now that widget is confirmed in DOM
           if (proposalUrl) {
             renderingUrls.delete(proposalUrl);
           }
-          return; // Exit early - widget is already positioned correctly
+            return; // Exit early - widget is already positioned correctly with same content
+          }
+          // If URL is different, continue to update/replace the widget
         }
       }
       
@@ -2957,11 +3140,18 @@ export default apiInitializer((api) => {
         }
         
         if (widgetsContainer && existingWidgets.length > 0) {
+          // Sort existing widgets by proposal order to ensure correct positioning
+          const sortedWidgets = [...existingWidgets].sort((a, b) => {
+            const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
+            const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
+            return orderA - orderB; // Ascending order (0, 1, 2, ...)
+          });
+          
           // Find the correct position to insert based on proposal order (order in content)
           let insertBefore = null;
           
-          // Find first widget with higher proposal order (or same order, insert after)
-          for (const widget of existingWidgets) {
+          // Find first widget with higher proposal order
+          for (const widget of sortedWidgets) {
             const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
             if (widgetProposalOrder > thisProposalOrder) {
               insertBefore = widget;
@@ -2971,9 +3161,9 @@ export default apiInitializer((api) => {
           
           if (insertBefore) {
             widgetsContainer.insertBefore(statusWidget, insertBefore);
-            console.log(`✅ [MOBILE] Widget inserted in correct order (proposal order: ${thisProposalOrder})`);
+            console.log(`✅ [MOBILE] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
           } else {
-            // No widget with higher order, append at end (new widgets at bottom)
+            // No widget with higher order, insert at end (after all existing widgets, before first post)
             if (firstPost && firstPost.parentNode) {
               // Insert before first post (which is after all widgets)
               firstPost.parentNode.insertBefore(statusWidget, firstPost);
@@ -2988,7 +3178,56 @@ export default apiInitializer((api) => {
                 document.body.appendChild(statusWidget);
               }
             }
-            console.log(`✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - new widget at bottom`);
+            console.log(`✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
+          }
+          
+          // Ensure widgets are in correct order by checking if any need re-positioning
+          // Only re-sort if widgets are clearly out of order (to avoid unnecessary DOM manipulation)
+          const allWidgets = Array.from(widgetsContainer.querySelectorAll('.tally-status-widget-container'));
+          if (allWidgets.length > 1) {
+            let needsResort = false;
+            for (let i = 0; i < allWidgets.length - 1; i++) {
+              const orderA = parseInt(allWidgets[i].getAttribute("data-proposal-order") || allWidgets[i].getAttribute("data-stage-order") || "999", 10);
+              const orderB = parseInt(allWidgets[i + 1].getAttribute("data-proposal-order") || allWidgets[i + 1].getAttribute("data-stage-order") || "999", 10);
+              if (orderA > orderB) {
+                needsResort = true;
+                break;
+              }
+            }
+            
+            if (needsResort) {
+              // Re-sort widgets in correct order
+              const sortedAllWidgets = [...allWidgets].sort((a, b) => {
+                const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
+                const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
+                return orderA - orderB; // Ascending order (0, 1, 2, ...)
+              });
+              
+              // Re-insert widgets in correct order
+              sortedAllWidgets.forEach((widget, idx) => {
+                if (idx === 0) {
+                  // First widget - insert before first post or at beginning
+                  if (firstPost && firstPost.parentNode) {
+                    firstPost.parentNode.insertBefore(widget, firstPost);
+                  } else if (topicBody) {
+                    if (topicBody.firstChild) {
+                      topicBody.insertBefore(widget, topicBody.firstChild);
+                    } else {
+                      topicBody.appendChild(widget);
+                    }
+                  }
+                } else {
+                  // Insert after previous widget
+                  const prevWidget = sortedAllWidgets[idx - 1];
+                  if (prevWidget.nextSibling) {
+                    widgetsContainer.insertBefore(widget, prevWidget.nextSibling);
+                  } else {
+                    widgetsContainer.appendChild(widget);
+                  }
+                }
+              });
+              console.log(`✅ [MOBILE] Re-sorted ${allWidgets.length} widget(s) in correct order (1, 2, 3...)`);
+            }
           }
         } else {
           // No existing widgets, insert before first post or at beginning
@@ -3647,7 +3886,7 @@ export default apiInitializer((api) => {
           }
         }
         
-        // Ensure widget is visible on mobile
+        // Ensure widget is visible on mobile - force visibility
         statusWidget.style.display = 'block';
         statusWidget.style.visibility = 'visible';
         statusWidget.style.opacity = '1';
@@ -3658,6 +3897,15 @@ export default apiInitializer((api) => {
         statusWidget.style.marginLeft = '0';
         statusWidget.style.marginRight = '0';
         statusWidget.style.zIndex = '1';
+        
+        // Remove any hidden classes that might prevent display
+        statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+        
+        // Mark URL as rendered after successful insertion
+        if (originalUrl) {
+          renderingUrls.add(originalUrl);
+          console.log(`✅ [MOBILE] Widget rendered and marked: ${originalUrl}`);
+        }
       } catch (error) {
         console.error("❌ [MOBILE] Error inserting status widget:", error);
         // Fallback: try to append to a safe location
@@ -4738,7 +4986,7 @@ export default apiInitializer((api) => {
    * Returns array sorted by timestamp (newest first)
    */
   // eslint-disable-next-line no-unused-vars
-  function getAllProposalsOfType(proposals) {
+  function getAllProposalsOfType(proposals, type = 'snapshot') {
     if (!proposals || proposals.length === 0) { return []; }
     
     // Sort by timestamp (newest first)
@@ -4977,13 +5225,18 @@ export default apiInitializer((api) => {
           
           if (bestTempCheck) {
             proposalsToRender.push({ proposal: bestTempCheck, type: 'temp-check', order: 0 });
+            console.log(`🔵 [RENDER] Will render Temp Check widget`);
           }
           if (bestARFC) {
             proposalsToRender.push({ proposal: bestARFC, type: 'arfc', order: 1 });
+            console.log(`🔵 [RENDER] Will render ARFC widget`);
           }
           if (bestSnapshot) {
             proposalsToRender.push({ proposal: bestSnapshot, type: 'snapshot', order: 2 });
+            console.log(`🔵 [RENDER] Will render Snapshot widget`);
           }
+          
+          console.log(`🔵 [RENDER] Total widgets to render: ${proposalsToRender.length} (Temp Check: ${bestTempCheck ? 1 : 0}, ARFC: ${bestARFC ? 1 : 0}, Snapshot: ${bestSnapshot ? 1 : 0})`);
           
           // Render each selected proposal
           proposalsToRender.forEach(({ proposal: snapshot, type: stageType, order: typeOrder }, index) => {
@@ -5166,7 +5419,13 @@ export default apiInitializer((api) => {
       clearTimeout(widgetSetupTimeout);
     }
     
-    // Debounce: wait 500ms before running (increased from 300ms to reduce flickering on mobile)
+    // Detect mobile for faster rendering
+    const isMobile = window.innerWidth <= 1024 || 
+                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    // Use shorter debounce on mobile for faster initial load, longer on desktop to prevent flickering
+    const debounceDelay = isMobile ? 100 : 500;
+    
     widgetSetupTimeout = setTimeout(() => {
       if (!isWidgetSetupRunning) {
         isWidgetSetupRunning = true;
@@ -5174,7 +5433,7 @@ export default apiInitializer((api) => {
           isWidgetSetupRunning = false;
         });
       }
-    }, 500);
+    }, debounceDelay);
   }
   
   // Watch for new posts being added to the topic and re-check for proposals
@@ -5215,12 +5474,22 @@ export default apiInitializer((api) => {
       console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget changes)");
     }
     
+    // Detect mobile for faster initial load
+    const isMobile = window.innerWidth <= 1024 || 
+                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
     // Initial setup - use debounced version
     debouncedSetupTopicWidget();
     
-    // Also check after delays to catch late-loading content (but only once)
+    // On mobile, use shorter delays for faster widget display
+    // On desktop, use longer delays to catch late-loading content
+    if (isMobile) {
+      setTimeout(() => debouncedSetupTopicWidget(), 100);
+      setTimeout(() => debouncedSetupTopicWidget(), 500);
+    } else {
     setTimeout(() => debouncedSetupTopicWidget(), 500);
     setTimeout(() => debouncedSetupTopicWidget(), 1500);
+    }
     
     console.log("✅ [TOPIC] Topic widget setup complete");
   }

@@ -3,6 +3,7 @@
 ## Why Use a Sandbox?
 
 **✅ YES, you should use a sandbox account!** Testing on a live production site is risky and not recommended. A sandbox gives you:
+
 - Safe testing environment
 - No risk to production data
 - Ability to experiment freely
@@ -51,15 +52,18 @@ cd discourse
 ```
 
 **Follow the prompts:**
+
 - It will ask for hostname (use `localhost` or `127.0.0.1`)
 - It will ask for email (for admin account)
 - It will set up everything automatically
 
 **Access your local Discourse:**
+
 - URL: `http://localhost` (or the port it assigns)
 - First account created = admin automatically!
 
 **Note:** Local setup requires:
+
 - Docker installed
 - 4GB+ RAM
 - Some disk space (~2-3GB)
@@ -71,17 +75,20 @@ cd discourse
 Discourse provides **free sandbox instances** for theme developers:
 
 ### Step 1: Request a Sandbox
+
 1. Go to: https://meta.discourse.org/t/request-a-free-discourse-sandbox-for-theme-development/50872
 2. Create a Meta Discourse account if you don't have one
 3. Reply to the topic requesting a sandbox
 4. You'll receive credentials via private message (usually within 24-48 hours)
 
 ### Step 2: Access Your Sandbox
+
 - You'll get a URL like: `https://yoursandbox.discourse.group`
 - Login credentials will be provided
 - **The first account created is automatically an admin account**
 
 ### Step 3: Create Additional Admin Accounts (Optional)
+
 If you need more admin accounts:
 
 #### Method 1: Via Admin Panel (Easiest)
@@ -147,13 +154,14 @@ If you need more admin accounts:
    - Or go directly to: `https://yoursandbox.discourse.group/admin/logs/rails_console`
 
 2. **Run Command:**
+
    ```ruby
    # Find the user by email
    user = User.find_by_email("user@example.com")
-   
+
    # Grant admin privileges
    user.grant_admin!
-   
+
    # Verify it worked
    user.admin?
    # Should return: true
@@ -175,6 +183,7 @@ If you want to run Discourse locally on your machine:
 ### Prerequisites Check:
 
 **Check if Docker is installed:**
+
 ```bash
 docker --version
 docker-compose --version
@@ -183,6 +192,7 @@ docker-compose --version
 **If not installed, install Docker:**
 
 **On Ubuntu/Debian:**
+
 ```bash
 # Update package index
 sudo apt-get update
@@ -197,24 +207,29 @@ sudo usermod -aG docker $USER
 ```
 
 **On other Linux distros:**
+
 - Visit: https://docs.docker.com/engine/install/
 - Follow instructions for your distribution
 
 **On macOS:**
+
 - Install Docker Desktop: https://www.docker.com/products/docker-desktop
 
 **On Windows:**
+
 - Install Docker Desktop: https://www.docker.com/products/docker-desktop
 
 ### Setup Steps:
 
 1. **Clone Discourse:**
+
    ```bash
    git clone https://github.com/discourse/discourse.git
    cd discourse
    ```
 
 2. **Run the setup script:**
+
    ```bash
    ./discourse-setup
    ```
@@ -237,22 +252,26 @@ sudo usermod -aG docker $USER
 ### Using Your Local Instance:
 
 **Start Discourse:**
+
 ```bash
 cd discourse
 ./launcher start app
 ```
 
 **Stop Discourse:**
+
 ```bash
 ./launcher stop app
 ```
 
 **View logs:**
+
 ```bash
 ./launcher logs app
 ```
 
 **Reset everything (if something breaks):**
+
 ```bash
 ./launcher destroy app
 ./discourse-setup  # Run setup again
@@ -261,22 +280,26 @@ cd discourse
 ### Connecting Theme CLI to Local Instance:
 
 When using `discourse_theme watch .`, use:
+
 - **URL:** `http://localhost` (or your local URL)
 - **API Key:** Get from Admin → API → New API Key
 
 **Note:** Local setup requires:
+
 - Docker installed and running
 - 4GB+ RAM minimum (8GB recommended)
 - 5-10GB free disk space
 - Good internet connection (for initial download)
 
 **Pros of Local Setup:**
+
 - ✅ Instant access (no waiting)
 - ✅ Full control
 - ✅ No internet needed after setup
 - ✅ Can test offline
 
 **Cons:**
+
 - ❌ More complex setup
 - ❌ Requires more resources
 - ❌ Takes longer to set up initially
@@ -286,17 +309,21 @@ When using `discourse_theme watch .`, use:
 You can use the `discourse_theme` CLI to sync your theme to any Discourse instance:
 
 ### Setup:
+
 1. Install the CLI (if not already):
+
    ```bash
    gem install discourse_theme
    ```
 
 2. Navigate to your theme directory:
+
    ```bash
    cd compound-governance-widget
    ```
 
 3. Run watch mode:
+
    ```bash
    discourse_theme watch .
    ```
@@ -313,6 +340,7 @@ You can use the `discourse_theme` CLI to sync your theme to any Discourse instan
 Once you have admin access to a sandbox:
 
 ### Method 1: Via Admin UI (Easiest)
+
 1. Go to: **Admin → Customize → Themes**
 2. Click **"Components"** tab
 3. Click **"Install"** button
@@ -321,17 +349,20 @@ Once you have admin access to a sandbox:
 6. Click **"Install"**
 
 ### Method 2: Via CLI (Recommended for Development)
+
 ```bash
 cd compound-governance-widget
 discourse_theme watch .
 ```
 
 This will:
+
 - Upload your theme component
 - Watch for changes and auto-sync
 - Much faster for development!
 
 ### Enable the Component:
+
 1. Go to: **Admin → Customize → Themes**
 2. Click **"Themes"** tab
 3. Click on **"Foundation"** (or your active theme)
@@ -363,16 +394,19 @@ To use the CLI, you need an API key:
 ## Troubleshooting
 
 ### "I don't have admin access"
+
 - Check if you're the first user created (auto-admin)
 - Contact the sandbox provider
 - Request admin access via Meta Discourse topic
 
 ### "Theme won't install"
+
 - Make sure you have admin permissions
 - Check that `about.json` is valid
 - Verify GitHub URL is correct and public
 
 ### "Changes not appearing"
+
 - Clear browser cache (Ctrl+Shift+R or Cmd+Shift+R)
 - Check browser console for errors
 - Verify component is enabled in theme settings
@@ -392,4 +426,3 @@ To use the CLI, you need an API key:
 - Discourse Meta: https://meta.discourse.org/c/dev
 - Theme Development: https://meta.discourse.org/c/theme
 - Sandbox Requests: https://meta.discourse.org/t/request-a-free-discourse-sandbox-for-theme-development/50872
-

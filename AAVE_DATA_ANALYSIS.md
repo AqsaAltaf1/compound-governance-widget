@@ -3,6 +3,7 @@
 ## 🔍 Your Current Data Issues
 
 Looking at your output:
+
 ```javascript
 {
   id: '32',
@@ -19,21 +20,25 @@ Looking at your output:
 ## ❌ Problems Identified
 
 ### 1. **State Value is Wrong**
+
 - **Your value**: `32n` (BigInt)
 - **Expected**: `0-7` (uint8)
 - **Issue**: ABI parsing error or wrong contract method
 
 ### 2. **startBlock is Wrong**
+
 - **Your value**: `'1360677416112862721206464558277695108377000585429'` (way too large)
 - **Expected**: `startTime` (uint40 timestamp, e.g., `1704067200`)
 - **Issue**: Getting wrong field or data misalignment
 
 ### 3. **endBlock vs endTime**
+
 - **Your value**: `'544'` (looks like block number)
 - **Expected**: `endTime` (uint40 timestamp)
 - **Issue**: Field name mismatch
 
 ### 4. **Missing Critical Fields**
+
 - ❌ `executed` (bool) - Is proposal executed?
 - ❌ `canceled` (bool) - Was proposal canceled?
 - ❌ `title` - Proposal title (from IPFS)
@@ -41,6 +46,7 @@ Looking at your output:
 - ❌ `ipfsHash` - IPFS hash for metadata
 
 ### 5. **Unexpected Field**
+
 - ⚠️ `abstainVotes` - Not in Aave Governance V3 ABI return
 
 ---
@@ -48,14 +54,15 @@ Looking at your output:
 ## ✅ What You Should Have
 
 Based on the ABI in your code:
+
 ```javascript
 "function getProposal(uint256 proposalId) view returns (
-  uint256 id, 
-  address creator, 
+  uint256 id,
+  address creator,
   uint40 startTime,    // ← Timestamp, not block number
   uint40 endTime,      // ← Timestamp, not block number
-  uint256 forVotes, 
-  uint256 againstVotes, 
+  uint256 forVotes,
+  uint256 againstVotes,
   uint8 state,         // ← Should be 0-7
   bool executed,       // ← Missing
   bool canceled        // ← Missing
@@ -63,6 +70,7 @@ Based on the ABI in your code:
 ```
 
 ### Expected Data Structure:
+
 ```javascript
 {
   id: '32',
@@ -74,7 +82,7 @@ Based on the ABI in your code:
   state: 2,                   // 0-7 (uint8)
   executed: false,           // bool
   canceled: false,            // bool
-  
+
   // These come from IPFS (not on-chain):
   title: 'AIP-32: Proposal Title',
   description: 'Full proposal description...',
@@ -111,20 +119,35 @@ Based on the ABI in your code:
 ## 🔧 What Needs to Be Fixed
 
 ### 1. **Fix ABI Parsing**
+
 The data structure suggests either:
+
 - Wrong ABI definition
 - Incorrect parsing of return values
 - Calling wrong contract method
 
 ### 2. **Get Correct Return Values**
+
 Ensure you're parsing the tuple correctly:
+
 ```javascript
-const [id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled] = 
-  await governanceContract.getProposal(proposalId);
+const [
+  id,
+  creator,
+  startTime,
+  endTime,
+  forVotes,
+  againstVotes,
+  state,
+  executed,
+  canceled,
+] = await governanceContract.getProposal(proposalId);
 ```
 
 ### 3. **Add IPFS Fetching**
+
 For title/description:
+
 ```javascript
 // After getting on-chain data, fetch IPFS metadata
 if (proposal.ipfsHash) {
@@ -135,7 +158,9 @@ if (proposal.ipfsHash) {
 ```
 
 ### 4. **Fix State Value**
+
 The state `32n` suggests:
+
 - Data misalignment in parsing
 - Wrong field being read
 - Need to verify ABI matches actual contract
@@ -145,6 +170,7 @@ The state `32n` suggests:
 ## 📊 Minimum Required Data for Widget
 
 ### **Essential (Must Have):**
+
 - ✅ `id` - Proposal ID
 - ✅ `forVotes` - For votes count
 - ✅ `againstVotes` - Against votes count
@@ -155,11 +181,13 @@ The state `32n` suggests:
 - ❌ `endTime` - End timestamp - **WRONG (endBlock)**
 
 ### **Important (Should Have):**
+
 - ❌ `title` - From IPFS - **MISSING**
 - ❌ `description` - From IPFS - **MISSING**
 - ❌ `creator` - Proposer address - **HAS (as "proposer")**
 
 ### **Nice to Have:**
+
 - `ipfsHash` - For fetching metadata
 - `quorum` - Quorum threshold
 - Voting breakdown by address
@@ -179,18 +207,19 @@ The state `32n` suggests:
 ## 💡 Quick Test
 
 Try this to verify the ABI:
+
 ```javascript
 const proposal = await governanceContract.getProposal(32);
-console.log('Raw proposal:', proposal);
-console.log('State:', proposal.state?.toString());
-console.log('StartTime:', proposal.startTime?.toString());
-console.log('EndTime:', proposal.endTime?.toString());
-console.log('Executed:', proposal.executed);
-console.log('Canceled:', proposal.canceled);
+console.log("Raw proposal:", proposal);
+console.log("State:", proposal.state?.toString());
+console.log("StartTime:", proposal.startTime?.toString());
+console.log("EndTime:", proposal.endTime?.toString());
+console.log("Executed:", proposal.executed);
+console.log("Canceled:", proposal.canceled);
 ```
 
 This will help identify if the issue is:
+
 - ABI definition
 - Parsing logic
 - Contract method
-

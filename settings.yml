@@ -1,2 +1,10 @@
-example_setting:
-  default: true
+graph_api_key:
+  default: ""
+  type: string
+  description: "The Graph API Key for accessing Aave Governance V3 subgraph. Get your key from https://thegraph.com/studio/apikeys/"
+  required: true
+
+subgraph_id:
+  default: "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK"
+  type: string
+  description: "The Graph Subgraph ID for Aave Governance V3"

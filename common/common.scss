@@ -31,8 +31,24 @@
   top: 180px !important;
   left: auto !important;
 
+  // Ensure widgets maintain order based on data-proposal-order attribute
+  // This ensures consistent ordering across all screen sizes
+  .tally-status-widget-container {
+    // Use CSS custom property to set order from data attribute
+    // JavaScript will set the order via inline style, but we ensure it's respected
+    order: var(--proposal-order, 999) !important;
+  }
+
+  // Tablet: Adjust width and positioning
+  @media (width > 768px) and (width <= 1024px) {
+    width: 100% !important;
+    max-width: 100% !important;
+    right: 5px !important;
+    top: 160px !important;
+  }
+
   // Mobile: Show widgets inline in topic
-  @media (width <= 1024px) {
+  @media (width <= 768px) {
     position: relative !important;
     left: auto !important;
     right: auto !important;
@@ -44,6 +60,12 @@
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
+    gap: 12px !important;
+  }
+
+  // Small mobile: Reduce gap
+  @media (width <= 480px) {
+    gap: 8px !important;
   }
 }
 
@@ -57,6 +79,19 @@
   width: 100% !important;
   max-width: 100% !important;
   margin-bottom: 0 !important;
+
+  // Ensure widgets maintain order based on data-proposal-order attribute
+  // This ensures consistent ordering across all screen sizes (mobile, tablet, desktop)
+  // First proposal appears first, second appears second, etc.
+  order: var(--proposal-order, 999) !important;
+
+  // Prevent flickering/blinking during DOM updates
+  // Use contain to optimize rendering and prevent layout shifts
+  contain: layout style paint !important;
+
+  // Ensure widget stays visible during updates (prevent opacity flicker)
+  opacity: 1 !important;
+  visibility: visible !important;
 
   // When NOT in wrapper (legacy/fallback), use fixed positioning
   &:not(.governance-widgets-wrapper > *) {
@@ -102,6 +137,16 @@
       -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     position: relative !important;
 
+    // Responsive padding
+    @media (width <= 768px) {
+      padding: 16px !important;
+      border-radius: 12px !important;
+    }
+
+    @media (width > 768px) and (width <= 1024px) {
+      padding: 14px !important;
+    }
+
     .widget-close-btn {
       position: absolute !important;
       top: 8px !important;
@@ -139,6 +184,14 @@
       align-items: center;
       margin-bottom: 12px;
       gap: 6px;
+      flex-wrap: wrap;
+
+      // Mobile: Stack badges vertically if needed
+      @media (width <= 480px) {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
 
       .status-badge {
         display: inline-block;
@@ -149,6 +202,12 @@
         text-transform: uppercase;
         letter-spacing: 0.3px;
         white-space: nowrap;
+
+        // Mobile: Larger touch targets
+        @media (width <= 768px) {
+          padding: 6px 12px !important;
+          font-size: 0.75em !important;
+        }
 
         &.active {
           background: #dcfce7;
@@ -299,16 +358,34 @@
 
     .voting-results-inline {
       display: flex;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       gap: 12px;
       margin-bottom: 10px;
       font-size: 0.9em;
       line-height: 1.5;
 
+      // Mobile: Stack vote results
+      @media (width <= 480px) {
+        flex-direction: column;
+        gap: 8px;
+        font-size: 0.85em;
+      }
+
+      // Tablet: Allow wrapping
+      @media (width > 480px) and (width <= 768px) {
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
       .vote-result-inline {
         font-weight: 600;
         white-space: nowrap;
         flex-shrink: 0;
+
+        // Mobile: Allow wrapping on very small screens
+        @media (width <= 360px) {
+          white-space: normal;
+        }
 
         &.vote-for {
           color: #10b981; // Green for "For"
@@ -332,6 +409,11 @@
     .progress-bar-container {
       margin-bottom: 1px;
 
+      // Mobile: More spacing
+      @media (width <= 768px) {
+        margin-bottom: 12px;
+      }
+
       .progress-bar {
         width: 100%;
         height: 6px; // Thinner progress bar
@@ -341,6 +423,12 @@
         background: #f3f4f6; // Light grey background so empty bar is visible
         border: 1px solid #e5e7eb; // Light grey border
         position: relative;
+
+        // Mobile: Slightly taller for visibility
+        @media (width <= 768px) {
+          height: 8px;
+          border-radius: 4px;
+        }
 
         .progress-segment {
           height: 100%;
@@ -380,6 +468,22 @@
       transition: background-color 0.2s;
       margin-top: 10px;
       box-sizing: border-box;
+
+      // Mobile: Larger touch target (minimum 44x44px)
+      @media (width <= 768px) {
+        padding: 12px 16px !important;
+        font-size: 0.9em !important;
+        min-height: 44px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+
+      // Tablet: Medium size
+      @media (width > 768px) and (width <= 1024px) {
+        padding: 10px 14px !important;
+        font-size: 0.875em !important;
+      }
 
       &:hover {
         background-color: var(
@@ -428,6 +532,9 @@
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;
+
+    // Ensure order is maintained on mobile
+    order: var(--proposal-order, 999) !important;
   }
 
   // When inside wrapper, remove fixed positioning
@@ -539,13 +646,27 @@
     }
   }
 
+  // Tablet: Adjust width
+  @media (width > 768px) and (width <= 1024px) {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
   // Mobile: Full width
   @media (width <= 768px) {
     width: 100% !important;
     float: none !important;
     position: relative !important;
     margin-left: 0 !important;
+    margin-right: 0 !important;
     margin-bottom: 20px !important;
+  }
+
+  // Small mobile: Reduce margins
+  @media (width <= 480px) {
+    margin-bottom: 16px !important;
   }
 }
 
@@ -589,11 +710,27 @@
     padding: 20px;
     border-bottom: 1px solid #e5e7eb;
 
+    // Mobile: Adjust padding
+    @media (width <= 768px) {
+      padding: 16px !important;
+    }
+
+    @media (width <= 480px) {
+      padding: 12px !important;
+    }
+
     .proposal-title {
       margin: 0 0 8px 0;
       font-size: 1em;
       font-weight: 600;
       line-height: 1.4;
+
+      // Mobile: Larger text for readability
+      @media (width <= 768px) {
+        font-size: 1.05em !important;
+        line-height: 1.5 !important;
+        margin-bottom: 12px !important;
+      }
 
       a {
         color: #111827;
@@ -615,6 +752,19 @@
       white-space: pre-wrap;
       max-height: 200px;
       overflow-y: auto;
+
+      // Mobile: Better readability
+      @media (width <= 768px) {
+        font-size: 0.9em !important;
+        line-height: 1.7 !important;
+        max-height: 250px !important;
+        margin-top: 16px !important;
+      }
+
+      @media (width <= 480px) {
+        font-size: 0.875em !important;
+        max-height: 300px !important;
+      }
     }
 
     .proposal-author {
@@ -641,6 +791,17 @@
     flex-direction: column;
     gap: 16px;
     background: #f9fafb;
+
+    // Mobile: Adjust padding and gap
+    @media (width <= 768px) {
+      padding: 16px !important;
+      gap: 14px !important;
+    }
+
+    @media (width <= 480px) {
+      padding: 12px !important;
+      gap: 12px !important;
+    }
 
     .status-badge {
       padding: 8px 12px;
@@ -722,6 +883,16 @@
             overflow: hidden;
             position: relative;
 
+            // Mobile: Taller for better visibility
+            @media (width <= 768px) {
+              height: 28px !important;
+              border-radius: 6px !important;
+            }
+
+            @media (width <= 480px) {
+              height: 26px !important;
+            }
+
             .vote-fill {
               height: 100%;
               border-radius: 4px;
@@ -764,6 +935,21 @@
       display: block;
       text-align: center;
       transition: background 0.2s;
+
+      // Mobile: Larger touch target
+      @media (width <= 768px) {
+        padding: 14px 20px !important;
+        font-size: 1em !important;
+        min-height: 48px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+
+      @media (width <= 480px) {
+        padding: 12px 16px !important;
+        font-size: 0.95em !important;
+      }
 
       &:hover {
         background: #1d4ed8;
