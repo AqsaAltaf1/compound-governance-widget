@@ -148,9 +148,14 @@ export default apiInitializer((api) => {
   // const AAVE_SUBGRAPH_AVALANCHE = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-avalanche"; // REMOVED
   
   // Match governance.aave.com, app.aave.com/governance/, and vote.onaave.com URLs
+  // NOTE: Exclude forum topic URLs (governance.aave.com/t/) - those are NOT AIP proposal URLs
+  // Only match:
+  // - governance.aave.com/aip/{id} (AIP pages)
+  // - app.aave.com/governance (governance portal)
+  // - vote.onaave.com (voting portal)
   // Note: [^\s<>"']+ matches any character except whitespace, <, >, ", or '
   // This should match URLs even with HTML-encoded entities like &amp;
-  const AIP_URL_REGEX = /https?:\/\/(?:www\.)?(?:governance\.aave\.com|app\.aave\.com\/governance|vote\.onaave\.com)\/[^\s<>"']+/gi;
+  const AIP_URL_REGEX = /https?:\/\/(?:www\.)?(?:governance\.aave\.com\/(?!t\/)[^\s<>"']+|app\.aave\.com\/governance[^\s<>"']+|vote\.onaave\.com[^\s<>"']+)/gi;
   
   const proposalCache = new Map();
 
@@ -265,14 +270,9 @@ export default apiInitializer((api) => {
         return { proposalId, type: 'aip', urlSource };
       }
       
-      // Pattern: governance.aave.com/t/{slug}/{id} - extract numeric ID from path
-      const forumMatch = url.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
-      if (forumMatch) {
-        proposalId = forumMatch[1];
-        urlSource = 'app.aave.com'; // Default to app.aave.com for forum links
-        console.log("✅ Extracted from governance.aave.com forum:", proposalId);
-        return { proposalId, type: 'aip', urlSource };
-      }
+      // REMOVED: governance.aave.com/t/{slug}/{id} pattern
+      // Forum topic URLs are NOT AIP proposal URLs - they should not be parsed as proposals
+      // This was causing errors where forum topic IDs were being treated as AIP proposal IDs
       
       // Pattern: app.aave.com/governance/{id} or app.aave.com/governance/proposal/{id}
       const appMatch = url.match(/app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i);
@@ -471,15 +471,9 @@ export default apiInitializer((api) => {
     }
     
     console.log("✅ [VALIDATE] Proposal is valid Aave governance proposal");
-    if (hasTempCheck) {
-      console.log("   Type: Temp Check");
-    }
-    if (hasARFC) {
-      console.log("   Type: ARFC");
-    }
-    if (hasAIP) {
-      console.log("   Type: AIP");
-    }
+    if (hasTempCheck) {console.log("   Type: Temp Check");}
+    if (hasARFC) {console.log("   Type: ARFC");}
+    if (hasAIP) {console.log("   Type: AIP");}
     
     return true;
   }
@@ -2285,6 +2279,7 @@ export default apiInitializer((api) => {
     });
   }
 
+  // eslint-disable-next-line no-unused-vars
   function renderMultiStageWidget(stages, widgetId, proposalOrder = null, discussionLink = null, isRelated = true) {
     const statusWidgetId = `aave-governance-widget-${widgetId}`;
     
@@ -2632,9 +2627,13 @@ export default apiInitializer((api) => {
       
       // For "pending" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
+      let exactStartTime = null;
+      let showExactTime = false;
       if (isPending && stageData.startTime) {
         const startTimeInfo = formatVotingStartTime(stageData.startTime);
         timeDisplay = startTimeInfo.relative;
+        exactStartTime = startTimeInfo.exact;
+        showExactTime = startTimeInfo.showExact;
       } else {
         timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       }
@@ -2834,9 +2833,13 @@ export default apiInitializer((api) => {
       
       // For "created" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
+      let exactStartTime = null;
+      let showExactTime = false;
       if (status === 'created' && stageData.votingActivationTimestamp) {
         const startTimeInfo = formatVotingStartTime(stageData.votingActivationTimestamp);
         timeDisplay = startTimeInfo.relative;
+        exactStartTime = startTimeInfo.exact;
+        showExactTime = startTimeInfo.showExact;
       } else {
         timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       }
@@ -3065,20 +3068,8 @@ export default apiInitializer((api) => {
     // Dim ended proposals with opacity instead of changing background color
     const widgetOpacity = hasEndedStage ? 'opacity: 0.6;' : '';
     
-    // Add discussion link notice whenever a discussion link is available
-    const discussionLinkHTML = discussionLink ? `
-      <div style="margin-top: 12px; padding: 10px; background: #fef3c7; border: 1px solid #fbbf24; border-radius: 6px; font-size: 0.85em; line-height: 1.5;">
-        <div style="color: #92400e; font-weight: 600; margin-bottom: 6px;">📋 Discussion:</div>
-        <a href="${discussionLink}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: underline; word-break: break-all;">
-          ${discussionLink}
-        </a>
-        ${!isRelated ? `
-        <div style="color: #78350f; margin-top: 6px; font-size: 0.9em; font-style: italic;">
-          This proposal's discussion is in a different forum topic.
-        </div>
-        ` : ''}
-      </div>
-    ` : '';
+    // Discussion link notice removed - user doesn't want to show the yellow box with discussion URL
+    const discussionLinkHTML = '';
     
     const widgetHTML = `
       <div class="tally-status-widget" style="background: #fff; ${widgetOpacity} border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box; position: relative;">
@@ -4196,10 +4187,9 @@ export default apiInitializer((api) => {
         }, 300);
         
         // Mark URL as rendered after successful insertion
-        const widgetProposalUrl = statusWidget.getAttribute('data-tally-url') || originalUrl;
-        if (widgetProposalUrl) {
-          renderingUrls.add(widgetProposalUrl);
-          console.log(`✅ [MOBILE] Widget rendered and marked: ${widgetProposalUrl}`);
+        if (originalUrl) {
+          renderingUrls.add(originalUrl);
+          console.log(`✅ [MOBILE] Widget rendered and marked: ${originalUrl}`);
         }
       } catch (error) {
         console.error("❌ [MOBILE] Error inserting status widget:", error);
@@ -4501,7 +4491,11 @@ export default apiInitializer((api) => {
       aipLinks.forEach((link, idx) => {
         const href = link.href || link.getAttribute('href') || '';
         console.log(`🔍 [TOPIC] Post ${i + 1}, Link ${idx + 1}: href="${href}"`);
-        if (href && (href.includes('vote.onaave.com') || href.includes('app.aave.com/governance') || href.includes('governance.aave.com/aip/'))) {
+        // Check for AIP URLs but exclude forum topic URLs (governance.aave.com/t/)
+        if (href && 
+            (href.includes('vote.onaave.com') || 
+             href.includes('app.aave.com/governance') || 
+             (href.includes('governance.aave.com') && !href.includes('governance.aave.com/t/') && href.includes('governance.aave.com/aip/')))) {
           // Decode HTML entities
           const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
           if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(href)) {
@@ -4522,6 +4516,13 @@ export default apiInitializer((api) => {
           // Decode HTML entities (e.g., &amp; -> &) to normalize URLs
           // This prevents the same URL from being treated as different due to HTML encoding
           const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          
+          // Explicitly exclude forum topic URLs (governance.aave.com/t/) - these are NOT AIP proposal URLs
+          if (decodedUrl.includes('governance.aave.com/t/')) {
+            console.log(`⚠️ [TOPIC] Skipping forum topic URL (not an AIP proposal): ${decodedUrl}`);
+            return; // Skip this URL
+          }
+          
           if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
             proposals.aip.push(decodedUrl);
             console.log("✅ [TOPIC] Found AIP link (via regex):", decodedUrl);
@@ -4549,8 +4550,10 @@ export default apiInitializer((api) => {
         const oneboxHtml = onebox.innerHTML || '';
         const oneboxContent = oneboxText + ' ' + oneboxHtml;
         
-        // Check for AIP URLs in onebox
-        if (oneboxContent.includes('vote.onaave.com') || oneboxContent.includes('app.aave.com/governance') || oneboxContent.includes('governance.aave.com/aip/')) {
+        // Check for AIP URLs in onebox (exclude forum topic URLs)
+        if (oneboxContent.includes('vote.onaave.com') || 
+            oneboxContent.includes('app.aave.com/governance') || 
+            (oneboxContent.includes('governance.aave.com/aip/') && !oneboxContent.includes('governance.aave.com/t/'))) {
           AIP_URL_REGEX.lastIndex = 0;
           const oneboxMatches = oneboxContent.match(AIP_URL_REGEX);
           if (oneboxMatches) {
@@ -4566,8 +4569,10 @@ export default apiInitializer((api) => {
       });
       
       // Method 4: Also check for AIP links in a more flexible way (in case regex misses some)
-      // Check for vote.onaave.com, app.aave.com/governance, or governance.aave.com
-      if (combinedContent.includes('vote.onaave.com') || combinedContent.includes('app.aave.com/governance') || combinedContent.includes('governance.aave.com/aip/')) {
+      // Check for vote.onaave.com, app.aave.com/governance, or governance.aave.com/aip/ (exclude forum topic URLs)
+      if (combinedContent.includes('vote.onaave.com') || 
+          combinedContent.includes('app.aave.com/governance') || 
+          (combinedContent.includes('governance.aave.com/aip/') && !combinedContent.includes('governance.aave.com/t/'))) {
         // More robust regex that handles URLs with query parameters and HTML encoding
         // Use the same pattern as AIP_URL_REGEX for consistency
         const flexibleAipRegex = /https?:\/\/(?:www\.)?(?:vote\.onaave\.com|app\.aave\.com\/governance|governance\.aave\.com\/aip\/)[^\s<>"']+/gi;
@@ -4653,7 +4658,6 @@ export default apiInitializer((api) => {
   }
 
   // Ensure AIP widgets remain visible after scroll events
-  // eslint-disable-next-line no-unused-vars
   function ensureAIPWidgetsVisible() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     allWidgets.forEach(widget => {
@@ -5106,6 +5110,12 @@ export default apiInitializer((api) => {
       return url; // Not an AIP URL, return as-is
     }
     
+    // Explicitly exclude forum topic URLs (governance.aave.com/t/) - these are NOT AIP proposal URLs
+    if (url.includes('governance.aave.com/t/')) {
+      console.log(`⚠️ [NORMALIZE] Skipping forum topic URL (not an AIP proposal): ${url}`);
+      return url; // Return as-is, but it should not be processed as an AIP URL
+    }
+    
     const proposalInfo = extractAIPProposalInfo(url);
     if (proposalInfo && proposalInfo.proposalId) {
       // Return normalized URL based on proposalId
@@ -5167,9 +5177,7 @@ export default apiInitializer((api) => {
    * Works with any Discourse forum URL pattern: /t/{slug}/{id}
    */
   function extractForumTopicId(forumUrl) {
-    if (!forumUrl) {
-      return null;
-    }
+    if (!forumUrl) {return null;}
     try {
       // Try Discourse pattern first: /t/{slug}/{id} (works on any Discourse forum)
       const discourseMatch = forumUrl.match(/\/t\/[^\/]+\/(\d+)/);
@@ -5184,9 +5192,138 @@ export default apiInitializer((api) => {
       }
       
       return null;
-    } catch {
+    } catch (error) {
       return null;
     }
+  }
+  
+  /**
+   * Get the current forum topic title from the page
+   * Returns the topic title as a string, or null if not found
+   */
+  function getCurrentForumTopicTitle() {
+    try {
+      // Try various Discourse selectors for topic title
+      const selectors = [
+        'h1.fancy-title',
+        '.fancy-title',
+        'h1.topic-title',
+        '.topic-title',
+        'h1',
+        '[data-topic-id] h1',
+        '.topic-meta-data h1',
+        'article[data-topic-id] h1'
+      ];
+      
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const title = element.textContent?.trim() || element.innerText?.trim();
+          if (title && title.length > 0) {
+            console.log(`🔵 [VALIDATE] Found topic title: "${title}"`);
+            return title;
+          }
+        }
+      }
+      
+      console.log(`⚠️ [VALIDATE] Could not find topic title on page`);
+      return null;
+    } catch (error) {
+      console.warn(`⚠️ [VALIDATE] Error getting topic title:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Normalize a topic name for comparison (lowercase, trim whitespace)
+   * Returns normalized string
+   */
+  function normalizeTopicName(name) {
+    if (!name || typeof name !== 'string') {return '';}
+    return name.toLowerCase().trim();
+  }
+  
+  /**
+   * Compare two topic names (case-insensitive)
+   * Returns true if names match after normalization
+   */
+  function compareTopicNames(name1, name2) {
+    const normalized1 = normalizeTopicName(name1);
+    const normalized2 = normalizeTopicName(name2);
+    return normalized1 === normalized2 && normalized1.length > 0;
+  }
+  
+  /**
+   * Extract topic slug from a forum URL
+   * Returns the slug (e.g., "temp-check-focussing-the-aave-v3-multichain-strategy") or null
+   * Works with any Discourse forum URL pattern: /t/{slug}/{id}
+   */
+  function extractTopicSlugFromForumUrl(forumUrl) {
+    if (!forumUrl) {return null;}
+    try {
+      // Try Discourse pattern: /t/{slug}/{id}
+      const discourseMatch = forumUrl.match(/\/t\/([^\/]+)\/\d+/);
+      if (discourseMatch) {
+        return discourseMatch[1];
+      }
+      
+      // Fallback: Check for governance.aave.com specifically
+      const legacyMatch = forumUrl.match(/governance\.aave\.com\/t\/([^\/]+)\/\d+/i);
+      if (legacyMatch) {
+        return legacyMatch[1];
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+  
+  /**
+   * Convert a topic title to a slug format (like Discourse does)
+   * Converts to lowercase, replaces spaces and special chars with hyphens
+   * Returns normalized slug string
+   */
+  function topicTitleToSlug(title) {
+    if (!title || typeof title !== 'string') {return '';}
+    return title
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '') // Remove special characters
+      .replace(/\s+/g, '-')      // Replace spaces with hyphens
+      .replace(/-+/g, '-')       // Replace multiple hyphens with single hyphen
+      .replace(/^-|-$/g, '');    // Remove leading/trailing hyphens
+  }
+  
+  /**
+   * Compare a forum URL's topic slug with a topic title
+   * Returns true if the slug from the URL matches the slug derived from the title
+   * Also handles cases where the URL slug has prefixes like "temp-check-" that may not be in the title
+   */
+  function compareTopicSlugWithTitle(forumUrl, topicTitle) {
+    const slugFromUrl = extractTopicSlugFromForumUrl(forumUrl);
+    if (!slugFromUrl) {return false;}
+    
+    const slugFromTitle = topicTitleToSlug(topicTitle);
+    if (!slugFromTitle) {return false;}
+    
+    // Direct slug comparison (already normalized)
+    if (slugFromUrl === slugFromTitle) {
+      return true;
+    }
+    
+    // Check if the title slug is contained in the URL slug (handles prefixes like "temp-check-")
+    // For example: "temp-check-focussing-the-aave-v3-multichain-strategy" contains "focussing-the-aave-v3-multichain-strategy"
+    if (slugFromUrl.includes(slugFromTitle) && slugFromTitle.length > 10) {
+      return true;
+    }
+    
+    // Also check if URL slug is contained in title slug (handles cases where URL slug is shorter)
+    if (slugFromTitle.includes(slugFromUrl) && slugFromUrl.length > 10) {
+      return true;
+    }
+    
+    return false;
   }
   
   /**
@@ -5330,6 +5467,7 @@ export default apiInitializer((api) => {
     try {
       // Convert hex IPFS hash to base58 if needed, or try direct IPFS gateway
       // IPFS hashes are usually base58, but this might be hex-encoded
+      let ipfsPath = ipfsHash;
       
       // If it's a hex string starting with 0x, try to decode it
       if (ipfsHash.startsWith('0x')) {
@@ -5354,7 +5492,7 @@ export default apiInitializer((api) => {
               console.log(`   ✅ [DISCUSSION] Found IPFS metadata!`);
               return data;
             }
-          } catch {
+          } catch (err) {
             // Try next gateway
             continue;
           }
@@ -5434,7 +5572,7 @@ export default apiInitializer((api) => {
             }
           }
         }
-      } catch {
+      } catch (e) {
         // rawContent is not JSON, ignore
       }
     } else {
@@ -5490,7 +5628,7 @@ export default apiInitializer((api) => {
           // Check entire JSON string representation
           try {
             fieldsToCheck.push(JSON.stringify(ipfsData));
-          } catch {
+          } catch (e) {
             // Ignore JSON stringify errors
           }
         }
@@ -5570,12 +5708,12 @@ export default apiInitializer((api) => {
    * Validate if a Snapshot proposal is related to the current forum topic
    * Returns an object with { isRelated: boolean, discussionLink: string|null }
    * 
-   * A proposal is considered related ONLY if:
-   * 1. The proposal's discussion/reference link matches the current forum topic
-   * 2. OR we're not on a forum page (show all proposals)
+   * A proposal is considered related if:
+   * 1. The proposal's discussion/reference link matches the current forum topic URL
+   * 2. OR the forum topic name matches the proposal discussion name (case-insensitive)
+   * 3. OR we're not on a forum page (show all proposals)
    * 
-   * We do NOT check the proposal body/description - only the official discussion/reference link.
-   * This ensures we only show proposals that are explicitly linked to this forum topic.
+   * We check both URL matching and topic name matching to ensure we show proposals that are related.
    */
   function validateSnapshotProposalForForum(snapshotProposal, currentForumUrl) {
     console.log(`🔍 [VALIDATE] Validating Snapshot proposal: ${snapshotProposal?.data?.title || 'Unknown'}`);
@@ -5593,15 +5731,35 @@ export default apiInitializer((api) => {
     
     const currentTopicId = extractForumTopicId(currentForumUrl);
     if (!currentTopicId) {
-      // Can't extract topic ID, but still show proposal with discussion link if available
-      console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
+      // Can't extract topic ID, but we can still check topic name matching
+      console.log(`⚠️ [VALIDATE] Could not extract topic ID from ${currentForumUrl}, trying topic name matching`);
       const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
+      
+      const currentTopicTitle = getCurrentForumTopicTitle();
+      
+      // Try discussion link topic slug matching first
+      if (currentTopicTitle && discussionLinks.length > 0) {
+        for (const link of discussionLinks) {
+          if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
+            console.log(`✅ [VALIDATE] Snapshot proposal discussion link topic slug matches current forum topic title (case-insensitive)`);
+            return { isRelated: true, discussionLink: link };
+          }
+        }
+      }
+      
+      // Try topic name matching as fallback
+      const proposalTitle = snapshotProposal.data.title || '';
+      if (currentTopicTitle && proposalTitle && compareTopicNames(currentTopicTitle, proposalTitle)) {
+        console.log(`✅ [VALIDATE] Snapshot proposal topic name matches forum topic name (case-insensitive)`);
+        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+      }
+      
       return { isRelated: false, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
     }
     
     console.log(`   Current forum topic ID: ${currentTopicId}`);
     
-    // ONLY check discussion/reference links - this is the official link from the proposal
+    // Check 1: Discussion/reference links (URL matching)
     const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
     for (const link of discussionLinks) {
       const topicId = extractForumTopicId(link);
@@ -5611,7 +5769,27 @@ export default apiInitializer((api) => {
       }
     }
     
-    // If no matching discussion link found, it's not related to this topic
+    // Check 2: Discussion link topic name matching (compare discussion link's topic slug with current topic title)
+    const currentTopicTitle = getCurrentForumTopicTitle();
+    if (currentTopicTitle && discussionLinks.length > 0) {
+      for (const link of discussionLinks) {
+        if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
+          console.log(`✅ [VALIDATE] Snapshot proposal discussion link topic slug matches current forum topic title: "${link}"`);
+          return { isRelated: true, discussionLink: link };
+        }
+      }
+    }
+    
+    // Check 3: Topic name matching (case-insensitive) - compare proposal title with current topic title
+    const proposalTitle = snapshotProposal.data.title || '';
+    if (currentTopicTitle && proposalTitle) {
+      if (compareTopicNames(currentTopicTitle, proposalTitle)) {
+        console.log(`✅ [VALIDATE] Snapshot proposal topic name matches forum topic name (case-insensitive): "${proposalTitle}"`);
+        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+      }
+    }
+    
+    // If no match found, it's not related to this topic
     // But still return the discussion link so it can be displayed
     console.log(`⚠️ [VALIDATE] Snapshot proposal is NOT related to forum topic ${currentTopicId} - will show with discussion link`);
     if (discussionLinks.length > 0) {
@@ -5627,13 +5805,13 @@ export default apiInitializer((api) => {
    * Validate if an AIP proposal is related to the current forum topic
    * Returns true if the proposal is related, false otherwise
    * 
-   * A proposal is considered related ONLY if:
-   * 1. The proposal's discussion/reference link matches the current forum topic
+   * A proposal is considered related if:
+   * 1. The proposal's discussion/reference link matches the current forum topic URL
    * 2. OR the AIP proposal ID matches the forum topic ID (they're directly linked by ID)
-   * 3. OR we're not on a forum page (show all proposals)
+   * 3. OR the forum topic name matches the proposal discussion name (case-insensitive)
+   * 4. OR we're not on a forum page (show all proposals)
    * 
-   * We do NOT check the proposal description/body - only the official discussion/reference link or ID match.
-   * This ensures we only show proposals that are explicitly linked to this forum topic.
+   * We check URL matching, ID matching, and topic name matching to ensure we show proposals that are related.
    */
   async function validateAIPProposalForForum(aipProposal, currentForumUrl) {
     if (!currentForumUrl) {
@@ -5647,9 +5825,29 @@ export default apiInitializer((api) => {
     
     const currentTopicId = extractForumTopicId(currentForumUrl);
     if (!currentTopicId) {
-      // Can't extract topic ID, but still show proposal with discussion link if available
-      console.log(`❌ [VALIDATE] Could not extract topic ID from ${currentForumUrl}`);
+      // Can't extract topic ID, but we can still check topic name matching
+      console.log(`⚠️ [VALIDATE] Could not extract topic ID from ${currentForumUrl}, trying topic name matching`);
       const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
+      
+      const currentTopicTitle = getCurrentForumTopicTitle();
+      
+      // Try discussion link topic slug matching first
+      if (currentTopicTitle && discussionLinks.length > 0) {
+        for (const link of discussionLinks) {
+          if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
+            console.log(`✅ [VALIDATE] AIP proposal discussion link topic slug matches current forum topic title (case-insensitive)`);
+            return { isRelated: true, discussionLink: link };
+          }
+        }
+      }
+      
+      // Try topic name matching as fallback
+      const proposalTitle = aipProposal.data.title || '';
+      if (currentTopicTitle && proposalTitle && compareTopicNames(currentTopicTitle, proposalTitle)) {
+        console.log(`✅ [VALIDATE] AIP proposal topic name matches forum topic name (case-insensitive)`);
+        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+      }
+      
       return { isRelated: false, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
     }
     
@@ -5669,6 +5867,26 @@ export default apiInitializer((api) => {
     if (aipId === currentTopicId) {
       console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
       return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+    }
+    
+    // Check 3: Discussion link topic name matching (compare discussion link's topic slug with current topic title)
+    const currentTopicTitle = getCurrentForumTopicTitle();
+    if (currentTopicTitle && discussionLinks.length > 0) {
+      for (const link of discussionLinks) {
+        if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
+          console.log(`✅ [VALIDATE] AIP proposal discussion link topic slug matches current forum topic title: "${link}"`);
+          return { isRelated: true, discussionLink: link };
+        }
+      }
+    }
+    
+    // Check 4: Topic name matching (case-insensitive) - compare proposal title with current topic title
+    const proposalTitle = aipProposal.data.title || '';
+    if (currentTopicTitle && proposalTitle) {
+      if (compareTopicNames(currentTopicTitle, proposalTitle)) {
+        console.log(`✅ [VALIDATE] AIP proposal topic name matches forum topic name (case-insensitive): "${proposalTitle}"`);
+        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
+      }
     }
     
     // If no match found, it's not related to this topic
@@ -5698,9 +5916,7 @@ export default apiInitializer((api) => {
     };
     
     snapshotProposals.forEach(proposal => {
-      if (!proposal || !proposal.data) {
-        return;
-      }
+      if (!proposal || !proposal.data) {return;}
       
       const stage = proposal.data.stage || 'snapshot';
       
@@ -5748,9 +5964,7 @@ export default apiInitializer((api) => {
     };
     
     aipProposals.forEach(proposal => {
-      if (!proposal || !proposal.data) {
-        return;
-      }
+      if (!proposal || !proposal.data) {return;}
       
       // Use timestamp if already set, otherwise extract from data
       let timestamp = proposal.timestamp || 0;
@@ -5786,12 +6000,8 @@ export default apiInitializer((api) => {
    * - Executed (old) + Created (new) proposals
    */
   function selectBestProposal(proposals, type = 'snapshot') {
-    if (!proposals || proposals.length === 0) {
-      return null;
-    }
-    if (proposals.length === 1) {
-      return proposals[0];
-    }
+    if (!proposals || proposals.length === 0) {return null;}
+    if (proposals.length === 1) {return proposals[0];}
     
     console.log(`🔵 [SELECT] Selecting best proposal from ${proposals.length} ${type} proposal(s)`);
     
@@ -5870,11 +6080,8 @@ export default apiInitializer((api) => {
    * Get all proposals of a specific type (for timeline/history display)
    * Returns array sorted by timestamp (newest first)
    */
-  // eslint-disable-next-line no-unused-vars
-  function getAllProposalsOfType(proposals) {
-    if (!proposals || proposals.length === 0) {
-      return [];
-    }
+  function getAllProposalsOfType(proposals, type = 'snapshot') {
+    if (!proposals || proposals.length === 0) {return [];}
     
     // Sort by timestamp (newest first)
     return [...proposals].sort((a, b) => {
@@ -5889,7 +6096,6 @@ export default apiInitializer((api) => {
    * This is the main function that replaces findOne() patterns
    * Returns: { tempChecks: [], arfcs: [], aips: [] }
    */
-  // eslint-disable-next-line no-unused-vars
   function detectAllProposalsByType(snapshotProposals, aipProposals) {
     const snapshotCategorized = categorizeSnapshotProposals(snapshotProposals || []);
     const aipCategorized = categorizeAIPProposals(aipProposals || []);
@@ -6239,8 +6445,23 @@ export default apiInitializer((api) => {
     
     // ===== AIP WIDGETS - Fetch all, then categorize and select best =====
     if (uniqueAipUrls.length > 0) {
+      // Filter out forum topic URLs - they are NOT AIP proposal URLs
+      const validAipUrls = uniqueAipUrls.filter(url => {
+        if (url && url.includes('governance.aave.com/t/')) {
+          console.log(`⚠️ [TOPIC] Filtering out forum topic URL (not an AIP proposal): ${url}`);
+          return false;
+        }
+        return true;
+      });
+      
+      if (validAipUrls.length === 0) {
+        console.log(`🔵 [TOPIC] No valid AIP URLs after filtering (all were forum topic URLs)`);
+      } else {
+        console.log(`🔵 [TOPIC] Processing ${validAipUrls.length} valid AIP URL(s) (filtered out ${uniqueAipUrls.length - validAipUrls.length} forum topic URL(s))`);
+      }
+      
       // Fetch all AIP proposals first
-      const aipPromises = uniqueAipUrls.map((aipUrl, aipIndex) => {
+      const aipPromises = validAipUrls.map((aipUrl, aipIndex) => {
         // Check if this URL is already being fetched or rendered
         const normalizedUrl = normalizeAIPUrl(aipUrl);
         if (fetchingUrls.has(normalizedUrl) || renderingUrls.has(normalizedUrl) ||
