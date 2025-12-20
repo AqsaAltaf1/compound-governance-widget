@@ -4411,7 +4411,8 @@ export default apiInitializer((api) => {
       forum: [] // Aave Governance Forum links
     };
     
-    // Find all posts in the topic
+    // Find all posts in the topic - search entire document to catch lazy-loaded posts
+    // Use multiple selectors to find posts even if they're hidden or not yet fully rendered
     const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id]'));
     console.log("🔍 [TOPIC] Found", allPosts.length, "posts to search");
     
@@ -4420,6 +4421,46 @@ export default apiInitializer((api) => {
       if (altPosts.length > 0) {
         allPosts.push(...altPosts);
       }
+    }
+    
+    // Also search the entire document body for AIP URLs (catches lazy-loaded content)
+    // This ensures we find proposals even if posts aren't fully rendered yet
+    const entireDocumentText = document.body.textContent || document.body.innerText || '';
+    const entireDocumentHtml = document.body.innerHTML || '';
+    const entireDocumentContent = entireDocumentText + ' ' + entireDocumentHtml;
+    
+    // Search entire document for AIP URLs (fallback if posts aren't found)
+    if (allPosts.length === 0 || entireDocumentContent.includes('vote.onaave.com') || 
+        entireDocumentContent.includes('app.aave.com/governance') || 
+        entireDocumentContent.includes('governance.aave.com/aip/')) {
+      console.log("🔍 [TOPIC] Also searching entire document body for AIP URLs (catches lazy-loaded content)");
+      AIP_URL_REGEX.lastIndex = 0;
+      const documentAipMatches = entireDocumentContent.match(AIP_URL_REGEX);
+      if (documentAipMatches) {
+        documentAipMatches.forEach((url, idx) => {
+          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          // Exclude forum topic URLs
+          if (!decodedUrl.includes('governance.aave.com/t/')) {
+            if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
+              proposals.aip.push(decodedUrl);
+              console.log(`✅ [TOPIC] Found AIP link in document body (match ${idx + 1}):`, decodedUrl);
+            }
+          }
+        });
+      }
+      
+      // Also check all links in the document
+      const allDocumentLinks = document.querySelectorAll('a[href*="vote.onaave.com"], a[href*="app.aave.com/governance"], a[href*="governance.aave.com/aip/"]');
+      allDocumentLinks.forEach(link => {
+        const href = link.href || link.getAttribute('href') || '';
+        if (href && !href.includes('governance.aave.com/t/')) {
+          const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(href)) {
+            proposals.aip.push(decodedUrl);
+            console.log("✅ [TOPIC] Found AIP link in document (via link href):", decodedUrl);
+          }
+        }
+      });
     }
     
     // Search through all posts
@@ -4650,7 +4691,6 @@ export default apiInitializer((api) => {
   }
 
   // Ensure AIP widgets remain visible after scroll events
-  // eslint-disable-next-line no-unused-vars
   function ensureAIPWidgetsVisible() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     allWidgets.forEach(widget => {
@@ -4669,6 +4709,17 @@ export default apiInitializer((api) => {
         console.log("✅ [AIP] Forced AIP widget visibility after scroll");
       }
     });
+  }
+
+  // Debounced scroll handler to ensure AIP widgets always remain visible
+  let aipVisibilityScrollTimeout = null;
+  function handleScrollForAIPVisibility() {
+    if (aipVisibilityScrollTimeout) {
+      clearTimeout(aipVisibilityScrollTimeout);
+    }
+    aipVisibilityScrollTimeout = setTimeout(() => {
+      ensureAIPWidgetsVisible();
+    }, 50); // Debounce to 50ms for smooth performance
   }
 
   function hideWidgetIfNoProposal() {
@@ -5073,25 +5124,30 @@ export default apiInitializer((api) => {
     // Render widgets - one per URL
     setupTopicWidgetWithProposals(allProposals);
     
-    // If no AIP URLs found initially, retry after a delay to catch async-loaded content (oneboxes, etc.)
+    // If no AIP URLs found initially, retry multiple times to catch async-loaded content (oneboxes, lazy-loaded posts, etc.)
     if (allProposals.aip.length === 0) {
-      console.log("🔵 [TOPIC] No AIP URLs found initially - will retry after content loads (oneboxes, etc.)");
-      setTimeout(() => {
-        console.log("🔵 [TOPIC] Retrying AIP URL search after delay...");
-        const retryProposals = findAllProposalsInTopic();
-        if (retryProposals.aip.length > 0) {
-          console.log(`✅ [TOPIC] Found ${retryProposals.aip.length} AIP URL(s) on retry - updating widgets`);
-          // Merge with existing proposals
-          const mergedProposals = {
-            snapshot: [...new Set([...allProposals.snapshot, ...retryProposals.snapshot])],
-            aip: [...new Set([...allProposals.aip, ...retryProposals.aip])],
-            forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
-          };
-          setupTopicWidgetWithProposals(mergedProposals);
-        } else {
-          console.log("🔵 [TOPIC] Still no AIP URLs found on retry");
-        }
-      }, 2000); // Wait 2 seconds for oneboxes to load
+      console.log("🔵 [TOPIC] No AIP URLs found initially - will retry multiple times to catch lazy-loaded content");
+      
+      // Multiple retries at different intervals to catch content that loads at different times
+      const retryDelays = [500, 1000, 2000, 3000, 5000];
+      retryDelays.forEach((delay, index) => {
+        setTimeout(() => {
+          console.log(`🔵 [TOPIC] Retrying AIP URL search (attempt ${index + 1}/${retryDelays.length}) after ${delay}ms...`);
+          const retryProposals = findAllProposalsInTopic();
+          if (retryProposals.aip.length > 0) {
+            console.log(`✅ [TOPIC] Found ${retryProposals.aip.length} AIP URL(s) on retry ${index + 1} - updating widgets`);
+            // Merge with existing proposals
+            const mergedProposals = {
+              snapshot: [...new Set([...allProposals.snapshot, ...retryProposals.snapshot])],
+              aip: [...new Set([...allProposals.aip, ...retryProposals.aip])],
+              forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
+            };
+            setupTopicWidgetWithProposals(mergedProposals);
+          } else {
+            console.log(`🔵 [TOPIC] Still no AIP URLs found on retry ${index + 1}`);
+          }
+        }, delay);
+      });
     }
     
     return Promise.resolve();
@@ -6603,6 +6659,19 @@ export default apiInitializer((api) => {
             }, aipWidgetId, proposalOrder, validation.discussionLink, validation.isRelated);
             console.log(`✅ [RENDER] AIP widget rendered`);
             
+            // CRITICAL: Force immediate visibility RIGHT AFTER rendering (before any scroll or lazy loading)
+            // AIP widgets should be visible immediately, regardless of scroll position or viewport
+            setTimeout(() => {
+              const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
+              if (aipWidget) {
+                aipWidget.style.setProperty('display', 'block', 'important');
+                aipWidget.style.setProperty('visibility', 'visible', 'important');
+                aipWidget.style.setProperty('opacity', '1', 'important');
+                aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                console.log(`✅ [AIP] Forced immediate visibility for AIP widget ${aipWidgetId}`);
+              }
+            }, 0);
+            
             // CRITICAL: AIP widgets render asynchronously (in Promise callback) while Snapshot renders synchronously
             // This causes AIP widgets to be inserted later, after Discourse may have applied lazy loading CSS
             // Force immediate visibility RIGHT AFTER rendering for BOTH mobile and desktop
@@ -8030,6 +8099,43 @@ export default apiInitializer((api) => {
   // Initialize topic widget (shows first proposal found, no scroll tracking)
   setTimeout(() => {
     setupTopicWatcher();
+    
+    // Add scroll event listener to ensure AIP widgets always remain visible
+    // This fixes the issue where AIP widgets disappear when scrolling away from the proposal
+    window.addEventListener('scroll', handleScrollForAIPVisibility, { passive: true });
+    console.log("✅ [AIP] Scroll listener added to ensure AIP widgets always remain visible");
+    
+    // Also check periodically to catch any CSS that might hide widgets
+    setInterval(() => {
+      ensureAIPWidgetsVisible();
+    }, 1000); // Check every second
+    
+    // Continuously search for AIP proposals as content loads (catches lazy-loaded posts)
+    // This ensures widgets appear even if proposals are in posts that aren't in viewport yet
+    let continuousSearchCount = 0;
+    const maxContinuousSearches = 10; // Search for up to 10 seconds
+    const continuousSearchInterval = setInterval(() => {
+      continuousSearchCount++;
+      if (continuousSearchCount > maxContinuousSearches) {
+        clearInterval(continuousSearchInterval);
+        console.log("🔵 [TOPIC] Stopped continuous AIP search after", maxContinuousSearches, "attempts");
+        return;
+      }
+      
+      // Check if we already have AIP widgets
+      const existingAipWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"], .tally-status-widget-container .governance-stage[data-stage="aip"]');
+      if (existingAipWidgets.length > 0) {
+        // We have AIP widgets, but keep searching in case there are more proposals
+        console.log(`🔵 [TOPIC] Continuous search ${continuousSearchCount}: Found ${existingAipWidgets.length} existing AIP widget(s), continuing to search for more...`);
+      }
+      
+      // Search for proposals again
+      const foundProposals = findAllProposalsInTopic();
+      if (foundProposals.aip.length > 0) {
+        console.log(`✅ [TOPIC] Continuous search ${continuousSearchCount}: Found ${foundProposals.aip.length} AIP proposal(s) - ensuring widgets are created`);
+        setupTopicWidgetWithProposals(foundProposals);
+      }
+    }, 1000); // Search every second for up to 10 seconds
     
     // On mobile, watch for widgets being added to DOM and immediately force visibility
     const isMobile = window.innerWidth <= 1024 || 
