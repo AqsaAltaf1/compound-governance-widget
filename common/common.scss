@@ -51,6 +51,14 @@
     overflow-y: visible !important;
   }
 
+  // CRITICAL: Force AIP widgets to always be visible (topic-level widgets, not viewport-dependent)
+  .tally-status-widget-container[data-proposal-type="aip"],
+  .tally-status-widget-container[data-widget-type="aip"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
   // Tablet: Adjust width and positioning
   @media (width > 768px) and (width <= 1024px) {
     width: 100% !important;
@@ -104,33 +112,6 @@
   // Ensure widget stays visible during updates (prevent opacity flicker)
   opacity: 1 !important;
   visibility: visible !important;
-
-  // Force AIP widgets to always be visible regardless of scroll position
-  &[data-proposal-type="aip"],
-  &[data-widget-type="aip"],
-  &[data-tally-url*="vote.onaave.com"],
-  &[data-tally-url*="app.aave.com/governance"],
-  &[data-tally-url*="governance.aave.com/aip/"] {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-
-    // Override any hiding classes/styles
-    &.hidden,
-    &.d-none,
-    &.is-hidden {
-      display: block !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-    }
-  }
-
-  // Also ensure widgets with AIP stages inside are visible
-  &:has(.governance-stage[data-stage="aip"]) {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-  }
 
   // When NOT in wrapper (legacy/fallback), use fixed positioning
   &:not(.governance-widgets-wrapper > *) {

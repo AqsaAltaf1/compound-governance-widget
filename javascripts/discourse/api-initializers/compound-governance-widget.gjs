@@ -4411,56 +4411,155 @@ export default apiInitializer((api) => {
       forum: [] // Aave Governance Forum links
     };
     
-    // Find all posts in the topic - search entire document to catch lazy-loaded posts
-    // Use multiple selectors to find posts even if they're hidden or not yet fully rendered
-    const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id]'));
-    console.log("🔍 [TOPIC] Found", allPosts.length, "posts to search");
+    // CRITICAL FIX: Scan the topic content area HTML to catch URLs in lazy-loaded or hidden posts
+    // This ensures AIP URLs are found even if posts aren't fully rendered yet
+    // But we limit it to topic content only (not navigation/sidebar/etc)
+    // Only scan if we're actually on a topic page (check URL pattern)
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    
+    if (isTopicPage) {
+      const topicContentSelectors = [
+        '.topic-body',
+        '.post-stream', 
+        '.posts-wrapper',
+        '.topic-post-stream',
+        '[data-topic-id]',
+        'main .posts-wrapper',
+        '.topic-area',
+        '.topic-body-wrapper'
+      ];
+      
+      let topicContentHTML = '';
+      
+      // Find the topic content container (not the entire page)
+      for (const selector of topicContentSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          topicContentHTML = element.innerHTML || '';
+          console.log(`🔍 [TOPIC] Found topic content container: ${selector}, HTML length: ${topicContentHTML.length}`);
+          break;
+        }
+      }
+      
+      // Fallback: If no specific container found, try to find main content area
+      // But still more targeted than entire page
+      if (!topicContentHTML) {
+        const mainContent = document.querySelector('main, [role="main"], .contents');
+        if (mainContent) {
+          topicContentHTML = mainContent.innerHTML || '';
+          console.log(`🔍 [TOPIC] Using main content area as fallback, HTML length: ${topicContentHTML.length}`);
+        }
+      }
+      
+      // Only scan topic content HTML (not entire page) for proposals
+      if (topicContentHTML && topicContentHTML.length > 0) {
+        console.log("🔍 [TOPIC] Scanning topic content HTML for proposals (catches all posts including lazy-loaded ones)...");
+        console.log(`🔍 [TOPIC] Topic content HTML length: ${topicContentHTML.length} characters`);
+        
+        // Scan topic content HTML for AIP URLs
+        AIP_URL_REGEX.lastIndex = 0;
+        const topicAipMatches = topicContentHTML.match(AIP_URL_REGEX);
+        console.log(`🔍 [TOPIC] AIP regex found ${topicAipMatches ? topicAipMatches.length : 0} match(es) in topic content HTML`);
+        
+        if (topicAipMatches) {
+          topicAipMatches.forEach((url, idx) => {
+            console.log(`🔍 [TOPIC] AIP match ${idx + 1}: "${url}"`);
+            const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            // Exclude forum topic URLs (governance.aave.com/t/) - these are NOT AIP proposal URLs
+            if (!decodedUrl.includes('governance.aave.com/t/')) {
+              if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
+                proposals.aip.push(decodedUrl);
+                console.log("✅ [TOPIC] Found AIP link in topic content HTML:", decodedUrl);
+              } else {
+                console.log(`⚠️ [TOPIC] AIP URL already in list: ${decodedUrl}`);
+              }
+            } else {
+              console.log(`⚠️ [TOPIC] Skipping forum topic URL (not an AIP): ${decodedUrl}`);
+            }
+          });
+        } else {
+          // Debug: Check if AIP URL patterns exist in HTML but regex didn't match
+          const hasVoteOnaave = topicContentHTML.includes('vote.onaave.com');
+          const hasAppAave = topicContentHTML.includes('app.aave.com/governance');
+          const hasGovernanceAave = topicContentHTML.includes('governance.aave.com/aip/');
+          console.log(`🔍 [TOPIC] AIP pattern check in HTML - vote.onaave.com: ${hasVoteOnaave}, app.aave.com: ${hasAppAave}, governance.aave.com/aip/: ${hasGovernanceAave}`);
+          
+          if (hasVoteOnaave || hasAppAave || hasGovernanceAave) {
+            // Try to find the URL manually
+            const patterns = [
+              /https?:\/\/[^\s<>"']*vote\.onaave\.com[^\s<>"']*/gi,
+              /https?:\/\/[^\s<>"']*app\.aave\.com\/governance[^\s<>"']*/gi,
+              /https?:\/\/[^\s<>"']*governance\.aave\.com\/aip\/[^\s<>"']*/gi
+            ];
+            
+            patterns.forEach((pattern, idx) => {
+              pattern.lastIndex = 0;
+              const matches = topicContentHTML.match(pattern);
+              if (matches) {
+                console.log(`⚠️ [TOPIC] Found AIP-like URLs with pattern ${idx + 1}:`, matches);
+                matches.forEach(url => {
+                  const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                  if (!decodedUrl.includes('governance.aave.com/t/') && !proposals.aip.includes(decodedUrl)) {
+                    proposals.aip.push(decodedUrl);
+                    console.log("✅ [TOPIC] Found AIP link via fallback pattern:", decodedUrl);
+                  }
+                });
+              }
+            });
+          }
+        }
+        
+        // Scan topic content HTML for Snapshot URLs
+        const topicSnapshotMatches = topicContentHTML.match(SNAPSHOT_URL_REGEX);
+        if (topicSnapshotMatches) {
+          topicSnapshotMatches.forEach((url) => {
+            const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            if (decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth')) {
+              if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                proposals.snapshot.push(decodedUrl);
+                console.log("✅ [TOPIC] Found Snapshot link in topic content HTML:", decodedUrl);
+              }
+            }
+          });
+        }
+        
+        // Scan topic content HTML for Forum URLs
+        const topicForumMatches = topicContentHTML.match(AAVE_FORUM_URL_REGEX);
+        if (topicForumMatches) {
+          topicForumMatches.forEach((url) => {
+            const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            const cleanUrl = decodedUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
+            if (!proposals.forum.includes(cleanUrl) && !proposals.forum.includes(url)) {
+              proposals.forum.push(cleanUrl);
+              console.log("✅ [TOPIC] Found Forum link in topic content HTML:", cleanUrl);
+            }
+          });
+        }
+      }
+    } else {
+      console.log("🔍 [TOPIC] Not on a topic page - skipping full HTML scan (prevents widgets on wrong pages)");
+    }
+    
+    // Find all posts in the topic (for more detailed post-by-post scanning)
+    // Also try to find posts that might be lazy-loaded (check for post-like elements even if not visible)
+    const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
+    console.log("🔍 [TOPIC] Found", allPosts.length, "rendered posts to search (supplementing full page scan)");
+    
+    // Also check for lazy-loaded posts that might be in the DOM but not visible
+    if (allPosts.length === 0) {
+      console.log("⚠️ [TOPIC] No posts found with standard selectors - trying alternative selectors for lazy-loaded posts");
+      const altPosts = Array.from(document.querySelectorAll('article, .cooked, .post-content, [class*="post"], [id*="post"]'));
+      if (altPosts.length > 0) {
+        console.log(`🔍 [TOPIC] Found ${altPosts.length} potential posts with alternative selectors`);
+        allPosts.push(...altPosts);
+      }
+    }
     
     if (allPosts.length === 0) {
       const altPosts = Array.from(document.querySelectorAll('article, .cooked, .post-content, [class*="post"]'));
       if (altPosts.length > 0) {
         allPosts.push(...altPosts);
       }
-    }
-    
-    // Also search the entire document body for AIP URLs (catches lazy-loaded content)
-    // This ensures we find proposals even if posts aren't fully rendered yet
-    const entireDocumentText = document.body.textContent || document.body.innerText || '';
-    const entireDocumentHtml = document.body.innerHTML || '';
-    const entireDocumentContent = entireDocumentText + ' ' + entireDocumentHtml;
-    
-    // Search entire document for AIP URLs (fallback if posts aren't found)
-    if (allPosts.length === 0 || entireDocumentContent.includes('vote.onaave.com') || 
-        entireDocumentContent.includes('app.aave.com/governance') || 
-        entireDocumentContent.includes('governance.aave.com/aip/')) {
-      console.log("🔍 [TOPIC] Also searching entire document body for AIP URLs (catches lazy-loaded content)");
-      AIP_URL_REGEX.lastIndex = 0;
-      const documentAipMatches = entireDocumentContent.match(AIP_URL_REGEX);
-      if (documentAipMatches) {
-        documentAipMatches.forEach((url, idx) => {
-          const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-          // Exclude forum topic URLs
-          if (!decodedUrl.includes('governance.aave.com/t/')) {
-            if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(url)) {
-              proposals.aip.push(decodedUrl);
-              console.log(`✅ [TOPIC] Found AIP link in document body (match ${idx + 1}):`, decodedUrl);
-            }
-          }
-        });
-      }
-      
-      // Also check all links in the document
-      const allDocumentLinks = document.querySelectorAll('a[href*="vote.onaave.com"], a[href*="app.aave.com/governance"], a[href*="governance.aave.com/aip/"]');
-      allDocumentLinks.forEach(link => {
-        const href = link.href || link.getAttribute('href') || '';
-        if (href && !href.includes('governance.aave.com/t/')) {
-          const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-          if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(href)) {
-            proposals.aip.push(decodedUrl);
-            console.log("✅ [TOPIC] Found AIP link in document (via link href):", decodedUrl);
-          }
-        }
-      });
     }
     
     // Search through all posts
@@ -4691,8 +4790,18 @@ export default apiInitializer((api) => {
   }
 
   // Ensure AIP widgets remain visible after scroll events
+  // CRITICAL: AIP widgets are topic-level and should ALWAYS be visible once found
+  // This function should be called frequently to prevent AIP widgets from being hidden
   function ensureAIPWidgetsVisible() {
+    // Only run on topic pages - don't process widgets on other pages
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (!isTopicPage) {
+      return; // Don't process widgets if not on a topic page
+    }
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+    let aipWidgetCount = 0;
+    let hiddenAIPCount = 0;
+    
     allWidgets.forEach(widget => {
       const widgetType = widget.getAttribute('data-proposal-type');
       const widgetTypeAttr = widget.getAttribute('data-widget-type');
@@ -4700,33 +4809,46 @@ export default apiInitializer((api) => {
       const url = widget.getAttribute('data-tally-url') || '';
       const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
       
-      // If this is an AIP widget, force it to be visible
+      // If this is an AIP widget, ALWAYS force it to be visible
       if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
+        aipWidgetCount++;
+        
+        // Always force visibility for AIP widgets (don't check if hidden first)
+        // This ensures they stay visible even if other code tries to hide them
         widget.style.setProperty('display', 'block', 'important');
         widget.style.setProperty('visibility', 'visible', 'important');
         widget.style.setProperty('opacity', '1', 'important');
         widget.classList.remove('hidden', 'd-none', 'is-hidden');
-        console.log("✅ [AIP] Forced AIP widget visibility after scroll");
+        
+        // Force reflow to ensure styles are applied
+        void widget.offsetHeight;
+        
+        // Check if it's actually visible now
+        const computedStyle = window.getComputedStyle(widget);
+        if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+          hiddenAIPCount++;
+          console.warn(`⚠️ [AIP] AIP widget still hidden after force visibility attempt - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+        }
       }
     });
-  }
-
-  // Debounced scroll handler to ensure AIP widgets always remain visible
-  let aipVisibilityScrollTimeout = null;
-  function handleScrollForAIPVisibility() {
-    if (aipVisibilityScrollTimeout) {
-      clearTimeout(aipVisibilityScrollTimeout);
+    
+    if (aipWidgetCount > 0) {
+      if (hiddenAIPCount > 0) {
+        console.warn(`⚠️ [AIP] ${hiddenAIPCount} of ${aipWidgetCount} AIP widget(s) are still hidden after force visibility`);
+      } else {
+        // Only log if all AIP widgets are visible (reduces console noise)
+        // console.log(`✅ [AIP] Ensured ${aipWidgetCount} AIP widget(s) are visible`);
+      }
     }
-    aipVisibilityScrollTimeout = setTimeout(() => {
-      ensureAIPWidgetsVisible();
-    }, 50); // Debounce to 50ms for smooth performance
   }
 
   function hideWidgetIfNoProposal() {
-    // Only hide Snapshot widgets, NOT AIP widgets
-    // AIP widgets are topic-level and should remain visible regardless of scroll position
+    // CRITICAL: Only hide Snapshot widgets, NEVER AIP widgets
+    // AIP widgets are topic-level and should ALWAYS remain visible regardless of scroll position
+    // This function is called when no proposal is visible in viewport, but AIP widgets should persist
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     let removedCount = 0;
+    let aipWidgetCount = 0;
     
     allWidgets.forEach(widget => {
       // Check widget type - only remove Snapshot widgets, keep AIP widgets
@@ -4736,11 +4858,17 @@ export default apiInitializer((api) => {
       const url = widget.getAttribute('data-tally-url') || '';
       const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
       
-      // Skip AIP widgets - they should always be visible
+      // CRITICAL: Skip AIP widgets - they should ALWAYS be visible (topic-level, not viewport-dependent)
       // Check multiple ways to identify AIP widgets
       if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
-        console.log("🔵 [WIDGET] Keeping AIP widget visible (topic-level widget) - type:", widgetType, "widgetType:", widgetTypeAttr, "hasAIP:", hasAIP, "isAIPUrl:", isAIPUrl);
-        return; // Skip this widget
+        aipWidgetCount++;
+        // Force visibility for AIP widgets (in case something tried to hide them)
+        widget.style.setProperty('display', 'block', 'important');
+        widget.style.setProperty('visibility', 'visible', 'important');
+        widget.style.setProperty('opacity', '1', 'important');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        console.log("✅ [WIDGET] Preserving AIP widget (topic-level, always visible) - type:", widgetType, "widgetType:", widgetTypeAttr, "hasAIP:", hasAIP, "isAIPUrl:", isAIPUrl);
+        return; // Skip this widget - NEVER remove AIP widgets
       }
       
       // Remove only Snapshot widgets
@@ -4762,16 +4890,35 @@ export default apiInitializer((api) => {
     });
     
     // Clean up empty container (only if no widgets remain)
+    // CRITICAL: Check for AIP widgets before removing container
     const container = document.getElementById('governance-widgets-wrapper');
-    if (container && container.children.length === 0) {
-      container.remove();
-      console.log("🔵 [CONTAINER] Removed empty widgets container");
+    if (container) {
+      // Check if there are any AIP widgets in the container
+      const aipWidgetsInContainer = container.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
+      const allWidgetsInContainer = container.querySelectorAll('.tally-status-widget-container');
+      
+      // Only remove container if it's empty AND there are no AIP widgets anywhere
+      if (container.children.length === 0 || (allWidgetsInContainer.length === 0 && aipWidgetsInContainer.length === 0)) {
+        // Double check: make sure no AIP widgets exist anywhere before removing container
+        const allAIPWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
+        if (allAIPWidgets.length === 0) {
+          container.remove();
+          console.log("🔵 [CONTAINER] Removed empty widgets container (no AIP widgets present)");
+        } else {
+          console.log(`🔵 [CONTAINER] Keeping container because ${allAIPWidgets.length} AIP widget(s) exist`);
+        }
+      }
     }
     
     if (removedCount > 0) {
       console.log("🔵 [WIDGET] Removed", removedCount, "Snapshot widget(s) - no Snapshot proposal in current post (AIP widgets kept visible)");
     }
-    // Reset current visible proposal
+    if (aipWidgetCount > 0) {
+      console.log(`✅ [WIDGET] Preserved ${aipWidgetCount} AIP widget(s) - they are topic-level and always visible`);
+      // Force visibility for all AIP widgets after removing Snapshot widgets
+      ensureAIPWidgetsVisible();
+    }
+    // Reset current visible proposal (but this doesn't affect AIP widgets)
     currentVisibleProposal = null;
   }
 
@@ -5124,18 +5271,23 @@ export default apiInitializer((api) => {
     // Render widgets - one per URL
     setupTopicWidgetWithProposals(allProposals);
     
-    // If no AIP URLs found initially, retry multiple times to catch async-loaded content (oneboxes, lazy-loaded posts, etc.)
+    // If no AIP URLs found initially, retry multiple times to catch lazy-loaded content
+    // This is critical because AIP URLs might be in posts that aren't rendered until scrolled into view
     if (allProposals.aip.length === 0) {
-      console.log("🔵 [TOPIC] No AIP URLs found initially - will retry multiple times to catch lazy-loaded content");
+      console.log("🔵 [TOPIC] No AIP URLs found initially - will retry multiple times to catch lazy-loaded posts");
       
-      // Multiple retries at different intervals to catch content that loads at different times
-      const retryDelays = [500, 1000, 2000, 3000, 5000];
-      retryDelays.forEach((delay, index) => {
+      // Multiple retries with increasing delays to catch lazy-loaded content
+      const retryDelays = [1000, 2000, 3000, 5000, 8000]; // 1s, 2s, 3s, 5s, 8s
+      let retryCount = 0;
+      
+      retryDelays.forEach((delay) => {
         setTimeout(() => {
-          console.log(`🔵 [TOPIC] Retrying AIP URL search (attempt ${index + 1}/${retryDelays.length}) after ${delay}ms...`);
+          retryCount++;
+          console.log(`🔵 [TOPIC] Retry ${retryCount}/${retryDelays.length}: Searching for AIP URLs after ${delay}ms...`);
+          
           const retryProposals = findAllProposalsInTopic();
           if (retryProposals.aip.length > 0) {
-            console.log(`✅ [TOPIC] Found ${retryProposals.aip.length} AIP URL(s) on retry ${index + 1} - updating widgets`);
+            console.log(`✅ [TOPIC] Found ${retryProposals.aip.length} AIP URL(s) on retry ${retryCount} - updating widgets`);
             // Merge with existing proposals
             const mergedProposals = {
               snapshot: [...new Set([...allProposals.snapshot, ...retryProposals.snapshot])],
@@ -5143,8 +5295,12 @@ export default apiInitializer((api) => {
               forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
             };
             setupTopicWidgetWithProposals(mergedProposals);
+            // Update allProposals so subsequent retries don't duplicate
+            allProposals.aip = mergedProposals.aip;
+            allProposals.snapshot = mergedProposals.snapshot;
+            allProposals.forum = mergedProposals.forum;
           } else {
-            console.log(`🔵 [TOPIC] Still no AIP URLs found on retry ${index + 1}`);
+            console.log(`🔵 [TOPIC] Retry ${retryCount}: Still no AIP URLs found`);
           }
         }, delay);
       });
@@ -6167,42 +6323,90 @@ export default apiInitializer((api) => {
   // Separate function to set up widget with proposals (to allow re-running after extraction)
   // Render widgets - one per proposal URL
   function setupTopicWidgetWithProposals(allProposals) {
+    // CRITICAL: Only run on topic pages - prevent widgets from appearing on other pages
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (!isTopicPage) {
+      console.log("🔍 [TOPIC] Not on a topic page - skipping widget setup (prevents widgets on wrong pages)");
+      return;
+    }
+    
     // Note: Don't check isWidgetSetupRunning here - that flag is for debouncedSetupTopicWidget
     // This function can be called multiple times if proposals change
     
     // Check if widgets already exist and match current proposals - if so, don't clear them
+    // CRITICAL: Separate AIP widgets from Snapshot widgets - AIP widgets should never be cleared
     const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+    const existingAIPWidgets = [];
+    const existingSnapshotWidgets = [];
     const existingUrls = new Set();
+    
     existingWidgets.forEach(widget => {
+      const widgetType = widget.getAttribute('data-proposal-type');
+      const widgetTypeAttr = widget.getAttribute('data-widget-type');
+      const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+      const url = widget.getAttribute('data-tally-url') || '';
+      const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+      const isAIPWidget = widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl;
+      
+      if (isAIPWidget) {
+        existingAIPWidgets.push(widget);
+      } else {
+        existingSnapshotWidgets.push(widget);
+      }
+      
       const widgetUrl = widget.getAttribute('data-tally-url');
-      if (widgetUrl) {
-        // Normalize URL for comparison
+      if (widgetUrl && !isAIPWidget) {
+        // Only add Snapshot URLs to the comparison set (AIP widgets are handled separately)
         const normalizedUrl = normalizeAIPUrl(widgetUrl);
         existingUrls.add(normalizedUrl);
       }
     });
     
-    // Normalize all current proposal URLs for comparison
-    // Snapshot URLs: use as-is
-    // AIP URLs: normalize to ignore query parameters
-    const normalizedAipUrlsForComparison = allProposals.aip.map(url => normalizeAIPUrl(url));
-    const currentUrls = new Set([...allProposals.snapshot, ...normalizedAipUrlsForComparison]);
+    // Normalize all current proposal URLs for comparison (only Snapshot URLs)
+    // AIP URLs are handled separately - if AIP widgets exist, keep them regardless
+    const currentUrls = new Set([...allProposals.snapshot]); // Only Snapshot URLs for comparison
     
-    // Only clear widgets if the proposals have changed (different URLs)
-    const urlsMatch = existingUrls.size === currentUrls.size && 
+    // Check if Snapshot widgets match (AIP widgets are always preserved)
+    const snapshotUrlsMatch = existingUrls.size === currentUrls.size && 
                      [...existingUrls].every(url => currentUrls.has(url)) &&
                      [...currentUrls].every(url => existingUrls.has(url));
     
-    if (urlsMatch && existingWidgets.length > 0) {
-      console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s)), skipping re-render`);
+    // CRITICAL: If AIP widgets already exist, ALWAYS preserve them and ensure they're visible
+    // AIP widgets are topic-level and should never be removed, regardless of proposals found
+    if (existingAIPWidgets.length > 0) {
+      console.log(`✅ [TOPIC] Found ${existingAIPWidgets.length} existing AIP widget(s) - they will be preserved and kept visible`);
+      // Force visibility for existing AIP widgets
+      ensureAIPWidgetsVisible();
+    }
+    
+    // If Snapshot widgets match and we have the expected AIP widgets, skip re-render
+    // AIP widgets are preserved regardless
+    if (snapshotUrlsMatch && existingSnapshotWidgets.length === allProposals.snapshot.length && 
+        existingAIPWidgets.length >= allProposals.aip.length) {
+      console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s): ${existingSnapshotWidgets.length} Snapshot, ${existingAIPWidgets.length} AIP), skipping re-render`);
+      // Still ensure AIP widgets are visible
+      ensureAIPWidgetsVisible();
       return; // Don't re-render if widgets already match
     }
     
-    // Clear all existing widgets only if proposals have changed
+    // Clear existing widgets only if proposals have changed
+    // CRITICAL: Never clear AIP widgets - they are topic-level and should always stay visible
     if (existingWidgets.length > 0) {
-      console.log(`🔵 [TOPIC] Proposals changed - clearing ${existingWidgets.length} existing widget(s) before creating new ones`);
+      console.log(`🔵 [TOPIC] Proposals changed - clearing ${existingWidgets.length} existing widget(s) before creating new ones (AIP widgets will be preserved)`);
       existingWidgets.forEach(widget => {
-        // Get URL from widget before removing it
+        // Check if this is an AIP widget - if so, skip it (never remove AIP widgets)
+        const widgetType = widget.getAttribute('data-proposal-type');
+        const widgetTypeAttr = widget.getAttribute('data-widget-type');
+        const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+        const url = widget.getAttribute('data-tally-url') || '';
+        const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+        
+        if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
+          console.log("🔵 [WIDGET] Preserving AIP widget during proposal change - type:", widgetType, "widgetType:", widgetTypeAttr);
+          return; // Skip AIP widgets - never remove them
+        }
+        
+        // Only remove Snapshot widgets
         const widgetUrl = widget.getAttribute('data-tally-url');
         if (widgetUrl) {
           // Remove from tracking sets when clearing widget
@@ -6214,21 +6418,36 @@ export default apiInitializer((api) => {
     }
     
     // Also clear the container if it exists (will be recreated if needed)
+    // CRITICAL: Don't remove container if it has AIP widgets
     const container = document.getElementById('governance-widgets-wrapper');
     if (container) {
-      container.remove();
-      console.log("🔵 [TOPIC] Cleared widgets container");
+      // Check if there are any AIP widgets in the container
+      const aipWidgetsInContainer = container.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
+      if (aipWidgetsInContainer.length === 0) {
+        container.remove();
+        console.log("🔵 [TOPIC] Cleared widgets container (no AIP widgets)");
+      } else {
+        console.log(`🔵 [TOPIC] Keeping widgets container because it has ${aipWidgetsInContainer.length} AIP widget(s)`);
+      }
     }
     
     // Clear all tracking sets when starting fresh
     renderingUrls.clear();
     fetchingUrls.clear();
     
+    // Only clear widgets if there are no proposals at all
+    // hideWidgetIfNoProposal() already preserves AIP widgets, so it's safe to call
     if (allProposals.snapshot.length === 0 && allProposals.aip.length === 0) {
-      console.log("🔵 [TOPIC] No proposals found - removing widgets");
-      hideWidgetIfNoProposal();
+      console.log("🔵 [TOPIC] No proposals found - removing widgets (AIP widgets preserved if any exist)");
+      hideWidgetIfNoProposal(); // This function already preserves AIP widgets
+      // Still ensure any existing AIP widgets stay visible
+      ensureAIPWidgetsVisible();
       return;
     }
+    
+    // CRITICAL: Always ensure existing AIP widgets stay visible
+    // This ensures AIP widgets persist even when setupTopicWidgetWithProposals is called multiple times
+    ensureAIPWidgetsVisible();
     
     // Normalize and deduplicate URLs to prevent creating multiple widgets for the same proposal
     // For AIP URLs, normalize to base URL (ignore query parameters like ipfsHash)
@@ -6659,18 +6878,14 @@ export default apiInitializer((api) => {
             }, aipWidgetId, proposalOrder, validation.discussionLink, validation.isRelated);
             console.log(`✅ [RENDER] AIP widget rendered`);
             
-            // CRITICAL: Force immediate visibility RIGHT AFTER rendering (before any scroll or lazy loading)
-            // AIP widgets should be visible immediately, regardless of scroll position or viewport
-            setTimeout(() => {
-              const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
-              if (aipWidget) {
-                aipWidget.style.setProperty('display', 'block', 'important');
-                aipWidget.style.setProperty('visibility', 'visible', 'important');
-                aipWidget.style.setProperty('opacity', '1', 'important');
-                aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-                console.log(`✅ [AIP] Forced immediate visibility for AIP widget ${aipWidgetId}`);
-              }
-            }, 0);
+            // CRITICAL: Immediately ensure AIP widget stays visible (topic-level widget, not viewport-dependent)
+            // Use requestAnimationFrame to ensure widget is in DOM before checking
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                ensureAIPWidgetsVisible();
+                console.log(`✅ [AIP] Ensured AIP widget visibility immediately after render`);
+              });
+            });
             
             // CRITICAL: AIP widgets render asynchronously (in Promise callback) while Snapshot renders synchronously
             // This causes AIP widgets to be inserted later, after Discourse may have applied lazy loading CSS
@@ -6802,6 +7017,13 @@ export default apiInitializer((api) => {
   
   // Watch for new posts being added to the topic and re-check for proposals
   function setupTopicWatcher() {
+    // Only run on topic pages (not on homepage, categories, etc.)
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (!isTopicPage) {
+      console.log("🔍 [TOPIC] Not on a topic page - skipping topic watcher setup");
+      return;
+    }
+    
     // Watch for new posts being added
     const postObserver = new MutationObserver((mutations) => {
       // Ignore mutations that are only widget-related to prevent flickering
@@ -6838,12 +7060,80 @@ export default apiInitializer((api) => {
       console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget changes)");
     }
     
+    // Also watch the entire topic content area for any content changes (catches lazy-loaded posts)
+    // This is important because lazy-loaded posts might be added outside the post-stream container
+    const topicContentObserver = new MutationObserver((mutations) => {
+      let hasNewContent = false;
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // Check if it's a post or contains post-like content
+            const isPost = node.classList?.contains('post') || 
+                          node.classList?.contains('topic-post') ||
+                          node.querySelector?.('.post, .topic-post, [data-post-id]');
+            // Check if it's not a widget
+            const isWidget = node.classList?.contains('tally-status-widget-container') ||
+                           node.classList?.contains('governance-widgets-wrapper');
+            if (isPost && !isWidget) {
+              hasNewContent = true;
+              break;
+            }
+          }
+        }
+        if (hasNewContent) {
+          break;
+        }
+      }
+      
+      if (hasNewContent) {
+        console.log("🔵 [TOPIC] New content detected in topic - re-scanning for AIP URLs");
+        debouncedSetupTopicWidget();
+      }
+    });
+    
+    // Observe topic content containers for lazy-loaded content
+    const topicContentSelectors = ['.topic-body', '.post-stream', '.posts-wrapper', '.topic-post-stream', 'main'];
+    topicContentSelectors.forEach(selector => {
+      const element = document.querySelector(selector);
+      if (element) {
+        topicContentObserver.observe(element, { childList: true, subtree: true });
+        console.log(`✅ [TOPIC] Watching ${selector} for lazy-loaded content`);
+      }
+    });
+    
     // Detect mobile for faster initial load
     const isMobile = window.innerWidth <= 1024 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
-    // Initial setup - use debounced version
+    // CRITICAL: Run immediate scan first (before debounce) to find AIP URLs on page load
+    // This ensures AIP widgets appear immediately, not just when scrolling
+    console.log("🔍 [TOPIC] Running immediate scan for AIP URLs on page load...");
+    setupTopicWidget(); // Run immediately without debounce for initial load
+    
+    // Then also set up debounced version for subsequent changes
     debouncedSetupTopicWidget();
+    
+    // CRITICAL: Also scan when user scrolls - this catches lazy-loaded posts
+    // Use a debounced scroll handler to avoid too many scans
+    let scrollScanTimeout = null;
+    const handleScroll = () => {
+      if (scrollScanTimeout) {
+        clearTimeout(scrollScanTimeout);
+      }
+      scrollScanTimeout = setTimeout(() => {
+        // Check if we've found AIP URLs yet
+        const existingAIPWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
+        if (existingAIPWidgets.length === 0) {
+          console.log("🔍 [TOPIC] Scrolling detected - re-scanning for AIP URLs in case posts were lazy-loaded");
+          debouncedSetupTopicWidget();
+        } else {
+          // AIP widgets exist - just ensure they're visible
+          ensureAIPWidgetsVisible();
+        }
+      }, 500); // Debounce scroll events
+    };
+    
+    window.addEventListener('scroll', handleScroll, { passive: true });
     
     // On mobile, use shorter delays for faster widget display
     // On desktop, use longer delays to catch late-loading content
@@ -7074,6 +7364,10 @@ export default apiInitializer((api) => {
       });
 
       if (mostVisible && mostVisible.isIntersecting) {
+        // CRITICAL: Always ensure AIP widgets are visible before doing any scroll tracking
+        // This prevents them from being hidden by scroll events
+        ensureAIPWidgetsVisible();
+        
         // First, try to get current post number from Discourse timeline
         const postInfo = getCurrentPostNumber();
         
@@ -7134,17 +7428,20 @@ export default apiInitializer((api) => {
                   showWidget(); // Make sure widget is visible
                   setupAutoRefresh(widgetId, proposalInfo, proposalUrl);
                 } else {
-                  // Invalid data - hide widget
+                  // Invalid data - hide widget (but keep AIP widgets visible)
                   hideWidgetIfNoProposal();
+                  ensureAIPWidgetsVisible();
                 }
               })
               .catch(error => {
                 console.error("❌ [SCROLL] Error fetching proposal data:", error);
                 hideWidgetIfNoProposal();
+                ensureAIPWidgetsVisible();
               });
           } else {
-            // Could not extract proposal info - hide widget
+            // Could not extract proposal info - hide widget (but keep AIP widgets visible)
             hideWidgetIfNoProposal();
+            ensureAIPWidgetsVisible();
           }
         } else {
           // No Snapshot proposal URL found - hide Snapshot widgets (AIP widgets remain visible)
@@ -8097,64 +8394,69 @@ export default apiInitializer((api) => {
   setTimeout(setupGlobalComposerDetection, 500);
 
   // Initialize topic widget (shows first proposal found, no scroll tracking)
+  // Only run on topic pages to prevent widgets from appearing on wrong pages
   setTimeout(() => {
-    setupTopicWatcher();
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (isTopicPage) {
+      setupTopicWatcher();
+    } else {
+      console.log("🔍 [TOPIC] Not on a topic page - skipping topic widget initialization");
+    }
     
-    // Add scroll event listener to ensure AIP widgets always remain visible
-    // This fixes the issue where AIP widgets disappear when scrolling away from the proposal
-    window.addEventListener('scroll', handleScrollForAIPVisibility, { passive: true });
-    console.log("✅ [AIP] Scroll listener added to ensure AIP widgets always remain visible");
-    
-    // Also check periodically to catch any CSS that might hide widgets
-    setInterval(() => {
-      ensureAIPWidgetsVisible();
-    }, 1000); // Check every second
-    
-    // Continuously search for AIP proposals as content loads (catches lazy-loaded posts)
-    // This ensures widgets appear even if proposals are in posts that aren't in viewport yet
-    let continuousSearchCount = 0;
-    const maxContinuousSearches = 10; // Search for up to 10 seconds
-    const continuousSearchInterval = setInterval(() => {
-      continuousSearchCount++;
-      if (continuousSearchCount > maxContinuousSearches) {
-        clearInterval(continuousSearchInterval);
-        console.log("🔵 [TOPIC] Stopped continuous AIP search after", maxContinuousSearches, "attempts");
-        return;
-      }
+    // Watch for widgets being added to DOM and immediately force visibility (works on all devices)
+    // CRITICAL: Only process widgets on topic pages - remove widgets on non-topic pages
+    const widgetObserver = new MutationObserver((mutations) => {
+      const isCurrentTopicPage = window.location.pathname.match(/^\/t\//);
       
-      // Check if we already have AIP widgets
-      const existingAipWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"], .tally-status-widget-container .governance-stage[data-stage="aip"]');
-      if (existingAipWidgets.length > 0) {
-        // We have AIP widgets, but keep searching in case there are more proposals
-        console.log(`🔵 [TOPIC] Continuous search ${continuousSearchCount}: Found ${existingAipWidgets.length} existing AIP widget(s), continuing to search for more...`);
-      }
-      
-      // Search for proposals again
-      const foundProposals = findAllProposalsInTopic();
-      if (foundProposals.aip.length > 0) {
-        console.log(`✅ [TOPIC] Continuous search ${continuousSearchCount}: Found ${foundProposals.aip.length} AIP proposal(s) - ensuring widgets are created`);
-        setupTopicWidgetWithProposals(foundProposals);
-      }
-    }, 1000); // Search every second for up to 10 seconds
-    
-    // On mobile, watch for widgets being added to DOM and immediately force visibility
-    const isMobile = window.innerWidth <= 1024 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobile) {
-      const widgetObserver = new MutationObserver((mutations) => {
+      // If not on topic page, remove any widgets that get added
+      if (!isCurrentTopicPage) {
         mutations.forEach((mutation) => {
           mutation.addedNodes.forEach((node) => {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // Check if the added node is a widget or contains widgets
               const widgets = node.classList?.contains('tally-status-widget-container') 
                 ? [node] 
                 : node.querySelectorAll?.('.tally-status-widget-container') || [];
-              
-              widgets.forEach((widget) => {
-                if (widget && widget.parentNode) {
+              widgets.forEach((widget) => widget.remove());
+              // Also check if node itself is the container
+              if (node.id === 'governance-widgets-wrapper') {
+                node.remove();
+              }
+            }
+          });
+        });
+        // Also clean up any existing widgets and container
+        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+        allWidgets.forEach(widget => widget.remove());
+        const container = document.getElementById('governance-widgets-wrapper');
+        if (container) {
+          container.remove();
+        }
+        return;
+      }
+      
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // Check if the added node is a widget or contains widgets
+            const widgets = node.classList?.contains('tally-status-widget-container') 
+              ? [node] 
+              : node.querySelectorAll?.('.tally-status-widget-container') || [];
+            
+            widgets.forEach((widget) => {
+              if (widget && widget.parentNode) {
+                // Check if this is an AIP widget
+                const widgetType = widget.getAttribute('data-proposal-type');
+                const widgetTypeAttr = widget.getAttribute('data-widget-type');
+                const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+                const url = widget.getAttribute('data-tally-url') || '';
+                const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+                const isAIPWidget = widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl;
+                
+                if (isAIPWidget) {
+                  // Force AIP widgets to be visible immediately when added to DOM
                   const computedStyle = window.getComputedStyle(widget);
                   if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-                    console.log(`🔵 [MOBILE] Widget detected in DOM but hidden, forcing visibility immediately`);
+                    console.log(`✅ [AIP] AIP widget detected in DOM but hidden, forcing visibility immediately`);
                     widget.style.setProperty('display', 'block', 'important');
                     widget.style.setProperty('visibility', 'visible', 'important');
                     widget.style.setProperty('opacity', '1', 'important');
@@ -8162,39 +8464,99 @@ export default apiInitializer((api) => {
                     
                     // Force reflow
                     void widget.offsetHeight;
-                    
-                    // Check if widget is in viewport - if not, it might be positioned off-screen
-                    const rect = widget.getBoundingClientRect();
-                    const isInViewport = rect.top >= 0 && rect.left >= 0 && 
-                                        rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-                                        rect.right <= (window.innerWidth || document.documentElement.clientWidth);
-                    
-                    if (!isInViewport && rect.height > 0) {
-                      console.log(`🔵 [MOBILE] Widget is in DOM but not in viewport - position: top=${rect.top}, left=${rect.left}`);
-                      // Widget exists but might be off-screen - this is OK, it will be visible when user scrolls
-                    }
                   }
                 }
-              });
-            }
-          });
+              }
+            });
+          }
         });
       });
-      
-      // Observe the document body for widget additions
-      widgetObserver.observe(document.body, {
-        childList: true,
-        subtree: true
+      // Also check all existing AIP widgets periodically (handles cases where they get hidden after being visible)
+      ensureAIPWidgetsVisible();
+    });
+    
+    // Observe the document body for widget additions
+    widgetObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    
+    // Periodic check to ensure AIP widgets stay visible (prevents them from being hidden by other code)
+    // CRITICAL: AIP widgets are topic-level and should ALWAYS be visible once found
+    // Run more frequently to catch any hiding attempts immediately
+    const aipVisibilityInterval = setInterval(() => {
+      ensureAIPWidgetsVisible();
+    }, 300); // Check every 300ms to keep AIP widgets visible (very aggressive)
+    
+    // Store interval ID so it can be cleared if needed (though it should run for the page lifetime)
+    window._aipVisibilityInterval = aipVisibilityInterval;
+    
+    // Also watch for AIP widgets being hidden via MutationObserver
+    // This catches when CSS classes or styles are changed to hide widgets
+    const aipWidgetObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'attributes' && (mutation.attributeName === 'style' || mutation.attributeName === 'class')) {
+          const target = mutation.target;
+          // Check if this is an AIP widget
+          if (target.classList && target.classList.contains('tally-status-widget-container')) {
+            const widgetType = target.getAttribute('data-proposal-type');
+            const widgetTypeAttr = target.getAttribute('data-widget-type');
+            const url = target.getAttribute('data-tally-url') || '';
+            const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+            
+            if (widgetType === 'aip' || widgetTypeAttr === 'aip' || isAIPUrl) {
+              // AIP widget was modified - check if it's hidden and restore visibility
+              const computedStyle = window.getComputedStyle(target);
+              if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                console.warn(`⚠️ [AIP] AIP widget was hidden (${mutation.attributeName} changed), restoring visibility immediately`);
+                ensureAIPWidgetsVisible();
+              }
+            }
+          }
+        }
       });
-      
-      console.log("✅ [MOBILE] Widget visibility observer set up");
-    }
+    });
+    
+    // Observe all AIP widgets for style/class changes
+    const observeAIPWidgets = () => {
+      const aipWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
+      aipWidgets.forEach(widget => {
+        aipWidgetObserver.observe(widget, {
+          attributes: true,
+          attributeFilter: ['style', 'class'],
+          subtree: false
+        });
+      });
+    };
+    
+    // Initial observation
+    observeAIPWidgets();
+    
+    // Re-observe periodically to catch newly added AIP widgets
+    setInterval(observeAIPWidgets, 1000);
+    
+    console.log("✅ [AIP] Widget visibility observer, periodic check, and MutationObserver set up");
   }, 1000);
 
   // Re-initialize topic widget on page changes
   api.onPageChange(() => {
     // Reset current proposal so we can detect the first one again
     currentVisibleProposal = null;
+    
+    // CRITICAL: Clean up widgets if we're not on a topic page
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (!isTopicPage) {
+      console.log("🔍 [TOPIC] Page changed to non-topic page - cleaning up widgets");
+      // Remove all widgets and container
+      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+      allWidgets.forEach(widget => widget.remove());
+      const container = document.getElementById('governance-widgets-wrapper');
+      if (container) {
+        container.remove();
+      }
+      return;
+    }
+    
     setTimeout(() => {
       setupTopicWatcher();
       setupGlobalComposerDetection();
