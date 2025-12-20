@@ -74,43 +74,10 @@ export default apiInitializer((api) => {
   // Support both governance.aave.com and app.aave.com/governance/
   const AAVE_GOVERNANCE_PORTAL = "https://app.aave.com/governance";
   
-  // Aave Governance V3 - Using The Graph API with API key from theme settings
-  // SECURITY: API key must be configured in theme settings (Admin → Customize → Themes → Components → Settings)
-  // Get your API key from: https://thegraph.com/studio/apikeys/
-  let GRAPH_API_KEY = "";
-  let SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
-  
-  // Try to get settings from Discourse theme settings
-  try {
-    const siteSettings = api.container?.lookup('service:site-settings');
-    const themeSettings = api.container?.lookup('service:theme-settings');
-    
-    // Try theme settings first (for theme components)
-    if (themeSettings) {
-      GRAPH_API_KEY = themeSettings.graph_api_key || "";
-      SUBGRAPH_ID = themeSettings.subgraph_id || SUBGRAPH_ID;
-    }
-    
-    // Fallback: try to get from site settings if theme settings not available
-    if (!GRAPH_API_KEY && siteSettings) {
-      // Note: This is a fallback - theme settings are preferred
-      console.warn("⚠️ [CONFIG] Theme settings not found, using site settings fallback");
-    }
-  } catch (error) {
-    console.warn("⚠️ [CONFIG] Could not access theme settings:", error);
-  }
-  
-  // Validate API key is set
-  if (!GRAPH_API_KEY || GRAPH_API_KEY.trim() === "") {
-    console.error("❌ [CONFIG] GRAPH_API_KEY is not configured!");
-    console.error("   Please configure it in: Admin → Customize → Themes → Components → Settings");
-    console.error("   Get your API key from: https://thegraph.com/studio/apikeys/");
-    // Don't throw error - allow widget to continue (it will fail gracefully on API calls)
-  }
-  
-  const AAVE_V3_SUBGRAPH = GRAPH_API_KEY 
-    ? `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`
-    : null;
+  // Aave Governance V3 - Using The Graph API with API key (method from ava.mjs)
+  const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
+  const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
+  const AAVE_V3_SUBGRAPH = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
   
   // REMOVED: All fallback methods (on-chain, Data API, markdown) - using only The Graph API
   // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
@@ -920,14 +887,6 @@ export default apiInitializer((api) => {
       `;
       
       console.log("🔵 [AIP] GraphQL Query:", query);
-
-      // Check if API key is configured
-      if (!AAVE_V3_SUBGRAPH) {
-        console.error("❌ [AIP] Cannot fetch proposal: GRAPH_API_KEY is not configured!");
-        console.error("   Please configure it in: Admin → Customize → Themes → Components → Settings");
-        console.error("   Get your API key from: https://thegraph.com/studio/apikeys/");
-        return null;
-      }
 
       const response = await fetchWithRetry(AAVE_V3_SUBGRAPH, {
         method: "POST",
@@ -2673,11 +2632,11 @@ export default apiInitializer((api) => {
         <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
           ${progressBarHtml}
           ${shouldShowVotes ? `
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-            <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
-          </div>
+            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+              <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+              <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
+              <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+            </div>
           ` : isPending ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
               Voting Starting Soon
@@ -2690,11 +2649,11 @@ export default apiInitializer((api) => {
       ` : `
         ${progressBarHtml}
         ${shouldShowVotes ? `
-        <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-          <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-          <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-          <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
-        </div>
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
+            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
+            <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+          </div>
         ` : isPending ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
             Voting Starting Soon
@@ -3097,10 +3056,10 @@ export default apiInitializer((api) => {
           const widgetUrl = statusWidget.getAttribute('data-tally-url');
           if (widgetUrl === proposalUrl) {
             console.log("✅ [MOBILE] Widget already in correct position with same URL, skipping re-insertion");
-          // Remove URL from rendering set now that widget is confirmed in DOM
-          if (proposalUrl) {
-            renderingUrls.delete(proposalUrl);
-          }
+            // Remove URL from rendering set now that widget is confirmed in DOM
+            if (proposalUrl) {
+              renderingUrls.delete(proposalUrl);
+            }
             return; // Exit early - widget is already positioned correctly with same content
           }
           // If URL is different, continue to update/replace the widget
@@ -5487,8 +5446,8 @@ export default apiInitializer((api) => {
       setTimeout(() => debouncedSetupTopicWidget(), 100);
       setTimeout(() => debouncedSetupTopicWidget(), 500);
     } else {
-    setTimeout(() => debouncedSetupTopicWidget(), 500);
-    setTimeout(() => debouncedSetupTopicWidget(), 1500);
+      setTimeout(() => debouncedSetupTopicWidget(), 500);
+      setTimeout(() => debouncedSetupTopicWidget(), 1500);
     }
     
     console.log("✅ [TOPIC] Topic widget setup complete");

@@ -1,31 +1,8 @@
 import { ethers } from "ethers";
 import fetch from "node-fetch";
 
-/**
- * SECURITY: API key must be set via environment variable
- * Usage: GRAPH_API_KEY=your_key_here node recombee.mjs
- * Get your API key from: https://thegraph.com/studio/apikeys/
- */
-
-// SECURITY: API key must be set via environment variable
-const GRAPH_API_KEY = process.env.GRAPH_API_KEY || "";
-const SUBGRAPH_ID =
-  process.env.SUBGRAPH_ID || "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
-
-if (!GRAPH_API_KEY || GRAPH_API_KEY.trim() === "") {
-  console.error("❌ ERROR: GRAPH_API_KEY environment variable is not set!");
-  console.error("");
-  console.error("Please set it before running:");
-  console.error("  export GRAPH_API_KEY=your_key_here");
-  console.error("  node recombee.mjs");
-  console.error("");
-  console.error("Or inline:");
-  console.error("  GRAPH_API_KEY=your_key_here node recombee.mjs");
-  console.error("");
-  console.error("Get your API key from: https://thegraph.com/studio/apikeys/");
-  process.exit(1);
-}
-
+const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
+const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
 const SUBGRAPH_URL = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
 
 // Aave Governance V3 Contract Addresses by Chain

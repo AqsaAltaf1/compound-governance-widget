@@ -4,38 +4,16 @@
  * Fetches proposal data from The Graph subgraph for Aave Governance V3
  *
  * Usage:
- *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs [proposalId]
- *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs [url]
+ *   node fetch-aave-proposal.mjs [proposalId]
+ *   node fetch-aave-proposal.mjs [url]
  *
  * Examples:
- *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs 411
- *   GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs "https://app.aave.com/governance/v3/proposal/?proposalId=411"
- *
- * SECURITY: API key should be set via environment variable
- * Get your API key from: https://thegraph.com/studio/apikeys/
+ *   node fetch-aave-proposal.mjs 411
+ *   node fetch-aave-proposal.mjs "https://app.aave.com/governance/v3/proposal/?proposalId=411"
  */
 
-// SECURITY: API key must be set via environment variable
-const GRAPH_API_KEY = process.env.GRAPH_API_KEY || "";
-const SUBGRAPH_ID =
-  process.env.SUBGRAPH_ID || "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
-
-if (!GRAPH_API_KEY || GRAPH_API_KEY.trim() === "") {
-  console.error("❌ ERROR: GRAPH_API_KEY environment variable is not set!");
-  console.error("");
-  console.error("Please set it before running:");
-  console.error("  export GRAPH_API_KEY=your_key_here");
-  console.error("  node fetch-aave-proposal.mjs [proposalId]");
-  console.error("");
-  console.error("Or inline:");
-  console.error(
-    "  GRAPH_API_KEY=your_key_here node fetch-aave-proposal.mjs [proposalId]"
-  );
-  console.error("");
-  console.error("Get your API key from: https://thegraph.com/studio/apikeys/");
-  process.exit(1);
-}
-
+const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
+const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
 const SUBGRAPH_URL = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
 
 /**
