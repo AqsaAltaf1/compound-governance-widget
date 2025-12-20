@@ -2627,13 +2627,9 @@ export default apiInitializer((api) => {
       
       // For "pending" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
-      let exactStartTime = null;
-      let showExactTime = false;
       if (isPending && stageData.startTime) {
         const startTimeInfo = formatVotingStartTime(stageData.startTime);
         timeDisplay = startTimeInfo.relative;
-        exactStartTime = startTimeInfo.exact;
-        showExactTime = startTimeInfo.showExact;
       } else {
         timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       }
@@ -2833,13 +2829,9 @@ export default apiInitializer((api) => {
       
       // For "created" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
-      let exactStartTime = null;
-      let showExactTime = false;
       if (status === 'created' && stageData.votingActivationTimestamp) {
         const startTimeInfo = formatVotingStartTime(stageData.votingActivationTimestamp);
         timeDisplay = startTimeInfo.relative;
-        exactStartTime = startTimeInfo.exact;
-        showExactTime = startTimeInfo.showExact;
       } else {
         timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       }
@@ -4658,6 +4650,7 @@ export default apiInitializer((api) => {
   }
 
   // Ensure AIP widgets remain visible after scroll events
+  // eslint-disable-next-line no-unused-vars
   function ensureAIPWidgetsVisible() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     allWidgets.forEach(widget => {
@@ -5192,7 +5185,8 @@ export default apiInitializer((api) => {
       }
       
       return null;
-    } catch (error) {
+    // eslint-disable-next-line no-unused-vars
+    } catch (_error) {
       return null;
     }
   }
@@ -5274,7 +5268,8 @@ export default apiInitializer((api) => {
       }
       
       return null;
-    } catch (error) {
+    // eslint-disable-next-line no-unused-vars
+    } catch (_error) {
       return null;
     }
   }
@@ -5467,7 +5462,6 @@ export default apiInitializer((api) => {
     try {
       // Convert hex IPFS hash to base58 if needed, or try direct IPFS gateway
       // IPFS hashes are usually base58, but this might be hex-encoded
-      let ipfsPath = ipfsHash;
       
       // If it's a hex string starting with 0x, try to decode it
       if (ipfsHash.startsWith('0x')) {
@@ -5492,7 +5486,8 @@ export default apiInitializer((api) => {
               console.log(`   ✅ [DISCUSSION] Found IPFS metadata!`);
               return data;
             }
-          } catch (err) {
+          // eslint-disable-next-line no-unused-vars
+          } catch (_err) {
             // Try next gateway
             continue;
           }
@@ -5572,7 +5567,8 @@ export default apiInitializer((api) => {
             }
           }
         }
-      } catch (e) {
+      // eslint-disable-next-line no-unused-vars
+      } catch (_e) {
         // rawContent is not JSON, ignore
       }
     } else {
@@ -5628,7 +5624,8 @@ export default apiInitializer((api) => {
           // Check entire JSON string representation
           try {
             fieldsToCheck.push(JSON.stringify(ipfsData));
-          } catch (e) {
+          // eslint-disable-next-line no-unused-vars
+          } catch (_e) {
             // Ignore JSON stringify errors
           }
         }
@@ -6080,7 +6077,8 @@ export default apiInitializer((api) => {
    * Get all proposals of a specific type (for timeline/history display)
    * Returns array sorted by timestamp (newest first)
    */
-  function getAllProposalsOfType(proposals, type = 'snapshot') {
+  // eslint-disable-next-line no-unused-vars
+  function getAllProposalsOfType(proposals, _type = 'snapshot') {
     if (!proposals || proposals.length === 0) {return [];}
     
     // Sort by timestamp (newest first)
@@ -6096,6 +6094,7 @@ export default apiInitializer((api) => {
    * This is the main function that replaces findOne() patterns
    * Returns: { tempChecks: [], arfcs: [], aips: [] }
    */
+  // eslint-disable-next-line no-unused-vars
   function detectAllProposalsByType(snapshotProposals, aipProposals) {
     const snapshotCategorized = categorizeSnapshotProposals(snapshotProposals || []);
     const aipCategorized = categorizeAIPProposals(aipProposals || []);
