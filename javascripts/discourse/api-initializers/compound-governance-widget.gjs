@@ -2200,6 +2200,7 @@ export default apiInitializer((api) => {
   // Render status widget on the right side (outside post box) - like the image
   // Render multi-stage widget showing Temp Check, ARFC, and AIP all together
   // Get or create the widgets container for column layout
+  // Returns container for large screens (fixed positioning), null for mobile (inline positioning)
   function getOrCreateWidgetsContainer() {
     // Don't create container on mobile - widgets should be inline
     const isMobile = window.innerWidth <= 1024;
@@ -3091,15 +3092,15 @@ export default apiInitializer((api) => {
     statusWidget.style.maxWidth = '100%';
     statusWidget.style.marginBottom = '0';
     
-    // Position widget - use container for desktop, inline for mobile
-    // Use more reliable mobile detection
+    // Position widget - use fixed positioning on right for large screens, inline (top) for smaller screens
     const isMobile = window.innerWidth <= 1024 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isLargeScreen = window.innerWidth > 1024;
     
-    console.log(`🔵 [MOBILE] Detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}`);
+    console.log(`🔵 [WIDGET] Detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}, isLargeScreen: ${isLargeScreen}`);
     
-    // Ensure widget is visible on mobile
     if (isMobile) {
+      // Mobile/small screens: inline positioning at top of proposal
       statusWidget.style.display = 'block';
       statusWidget.style.visibility = 'visible';
       statusWidget.style.opacity = '1';
@@ -3120,6 +3121,7 @@ export default apiInitializer((api) => {
       });
     }
     
+    // Use inline positioning for mobile/small screens (insert before first post)
     if (isMobile) {
       // On mobile, check if widget is already in the correct position to prevent re-insertion
       // But allow re-rendering if content needs to be updated
@@ -3140,7 +3142,7 @@ export default apiInitializer((api) => {
           
           // Only skip if URL matches AND order matches (prevent unnecessary re-insertion that causes blinking)
           if (widgetUrl === proposalUrl && widgetOrder === expectedOrder) {
-            console.log("✅ [MOBILE] Widget already in correct position with same URL and order, skipping re-insertion to prevent blinking");
+            console.log("✅ [WIDGET] Widget already in correct position with same URL and order, skipping re-insertion to prevent blinking");
             // Remove URL from rendering set now that widget is confirmed in DOM
             if (proposalUrl) {
               renderingUrls.delete(proposalUrl);
@@ -3152,8 +3154,8 @@ export default apiInitializer((api) => {
         }
       }
       
-      // On mobile, use same ordering logic as desktop - new widgets appear at bottom
       // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
+      // Widgets appear at top of proposal, before first post
       try {
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
         const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
@@ -3206,7 +3208,7 @@ export default apiInitializer((api) => {
           
           if (insertBefore) {
             widgetsContainer.insertBefore(statusWidget, insertBefore);
-            console.log(`✅ [MOBILE] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
+            console.log(`✅ [WIDGET] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
           } else {
             // No widget with higher order, insert at end (after all existing widgets, before first post)
             if (firstPost && firstPost.parentNode) {
@@ -3223,7 +3225,7 @@ export default apiInitializer((api) => {
                 document.body.appendChild(statusWidget);
               }
             }
-            console.log(`✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
+            console.log(`✅ [WIDGET] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
           }
           
           // CRITICAL: Force immediate visibility RIGHT AFTER insertion (before requestAnimationFrame)
@@ -3245,9 +3247,9 @@ export default apiInitializer((api) => {
               statusWidget.style.setProperty('opacity', '1', 'important');
               statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
               const computedStyle = window.getComputedStyle(statusWidget);
-              console.log(`🔵 [MOBILE] Widget inserted - computed display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+              console.log(`🔵 [WIDGET] Widget inserted - computed display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
               if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-                console.warn(`⚠️ [MOBILE] Widget is hidden after insertion! Forcing visibility again.`);
+                console.warn(`⚠️ [WIDGET] Widget is hidden after insertion! Forcing visibility again.`);
                 statusWidget.style.setProperty('display', 'block', 'important');
                 statusWidget.style.setProperty('visibility', 'visible', 'important');
                 statusWidget.style.setProperty('opacity', '1', 'important');
@@ -3308,21 +3310,21 @@ export default apiInitializer((api) => {
                   }
                 }
               });
-              console.log(`✅ [MOBILE] Re-sorted ${allWidgets.length} widget(s) in correct order (1, 2, 3...)`);
+              console.log(`✅ [WIDGET] Re-sorted ${allWidgets.length} widget(s) in correct order (1, 2, 3...)`);
             }
           }
         } else {
           // No existing widgets, insert before first post or at beginning
           if (firstPost && firstPost.parentNode) {
             firstPost.parentNode.insertBefore(statusWidget, firstPost);
-            console.log("✅ [MOBILE] Widget inserted before first post (first widget)");
+            console.log("✅ [WIDGET] Widget inserted before first post (first widget)");
           } else if (topicBody) {
             if (topicBody.firstChild) {
               topicBody.insertBefore(statusWidget, topicBody.firstChild);
             } else {
               topicBody.appendChild(statusWidget);
             }
-            console.log("✅ [MOBILE] Widget inserted in topic body (first widget)");
+            console.log("✅ [WIDGET] Widget inserted in topic body (first widget)");
           } else {
             const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
             if (mainContent) {
@@ -3331,7 +3333,7 @@ export default apiInitializer((api) => {
               } else {
                 mainContent.appendChild(statusWidget);
               }
-              console.log("✅ [MOBILE] Widget inserted in main content (first widget)");
+              console.log("✅ [WIDGET] Widget inserted in main content (first widget)");
             } else {
               const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
               if (bodyFirstChild) {
@@ -3339,7 +3341,7 @@ export default apiInitializer((api) => {
               } else {
                 document.body.appendChild(statusWidget);
               }
-              console.log("✅ [MOBILE] Widget inserted in body (first widget)");
+              console.log("✅ [WIDGET] Widget inserted in body (first widget)");
             }
           }
         }
@@ -3349,7 +3351,7 @@ export default apiInitializer((api) => {
           renderingUrls.delete(proposalUrl);
         }
       } catch (error) {
-        console.error("❌ [MOBILE] Error inserting widget:", error);
+        console.error("❌ [WIDGET] Error inserting widget:", error);
         // Remove URL from rendering set on error
         if (proposalUrl) {
           renderingUrls.delete(proposalUrl);
@@ -3371,8 +3373,7 @@ export default apiInitializer((api) => {
         }
       }
     } else {
-      // Desktop: Append to container for column layout
-      // Insert widget in correct order based on proposal order (order in content)
+      // Desktop/Large screens: Use fixed positioning on right side
       const widgetsContainer = getOrCreateWidgetsContainer();
       if (widgetsContainer) {
         // Get proposal order for this widget (order in content, not stage order)
@@ -3382,7 +3383,7 @@ export default apiInitializer((api) => {
         const existingWidgets = Array.from(widgetsContainer.children);
         let insertBefore = null;
         
-        // Find first widget with higher proposal order (or same order, insert after)
+        // Find first widget with higher proposal order
         for (const widget of existingWidgets) {
           const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
           if (widgetProposalOrder > thisProposalOrder) {
@@ -3400,20 +3401,16 @@ export default apiInitializer((api) => {
           console.log(`✅ [DESKTOP] Widget appended at end (proposal order: ${thisProposalOrder})`);
         }
         
-        // Position is already set by updateContainerPosition - no need to update
-        
-        // CRITICAL: Force immediate visibility RIGHT AFTER insertion (before requestAnimationFrame)
-        // This ensures widget is visible even if Discourse applies lazy loading CSS
+        // CRITICAL: Force immediate visibility RIGHT AFTER insertion
         if (statusWidget && statusWidget.parentNode) {
           statusWidget.style.setProperty('display', 'block', 'important');
           statusWidget.style.setProperty('visibility', 'visible', 'important');
           statusWidget.style.setProperty('opacity', '1', 'important');
           statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-          // Force immediate reflow
           void statusWidget.offsetHeight;
         }
         
-        // Also force visibility in next frame to catch any late-applied CSS
+        // Also force visibility in next frame
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             if (statusWidget && statusWidget.parentNode) {
@@ -3421,17 +3418,15 @@ export default apiInitializer((api) => {
               statusWidget.style.setProperty('visibility', 'visible', 'important');
               statusWidget.style.setProperty('opacity', '1', 'important');
               statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-              // Force reflow
               void statusWidget.offsetHeight;
               
-              // Verify visibility
               const computedStyle = window.getComputedStyle(statusWidget);
               if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
                 console.warn(`⚠️ [DESKTOP] Widget hidden after insertion, forcing visibility again`);
                 statusWidget.style.setProperty('display', 'block', 'important');
                 statusWidget.style.setProperty('visibility', 'visible', 'important');
                 statusWidget.style.setProperty('opacity', '1', 'important');
-                void statusWidget.offsetHeight; // Force reflow again
+                void statusWidget.offsetHeight;
               } else {
                 console.log(`✅ [DESKTOP] Widget visible after insertion`);
               }
@@ -3444,7 +3439,7 @@ export default apiInitializer((api) => {
           renderingUrls.delete(proposalUrl);
         }
       } else {
-        // Fallback: if container creation failed, insert inline (shouldn't happen on desktop)
+        // Fallback: if container creation failed, insert inline
         console.warn("⚠️ [DESKTOP] Container not available, inserting inline");
         const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream');
         if (topicBody) {
@@ -5337,6 +5332,40 @@ export default apiInitializer((api) => {
   // These functions ensure proposals are only shown if they're related to the current forum topic
   
   /**
+   * Normalize a forum URL for comparison
+   * Returns a normalized URL with protocol, host, and path up to topic ID (removes query params, fragments, trailing slashes)
+   * Example: https://governance.aave.com/t/slug/123/456?param=1#frag -> https://governance.aave.com/t/slug/123
+   */
+  function normalizeForumUrl(forumUrl) {
+    if (!forumUrl) {return null;}
+    try {
+      // Decode HTML entities
+      let url = forumUrl.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+      
+      // Extract the base URL and path up to topic ID
+      // Pattern: protocol://host/t/slug/topicId (with optional trailing path, query, fragment)
+      const urlMatch = url.match(/^(https?:\/\/[^\/]+)\/t\/([^\/]+)\/(\d+)/i);
+      if (urlMatch) {
+        const protocol = urlMatch[1].toLowerCase().startsWith('https') ? 'https' : 'http';
+        const host = urlMatch[1].replace(/^https?:\/\//i, '').toLowerCase();
+        // Remove www. prefix for normalization
+        const normalizedHost = host.replace(/^www\./, '');
+        const slug = urlMatch[2];
+        const topicId = urlMatch[3];
+        
+        // Construct normalized URL: protocol://host/t/slug/topicId
+        const normalized = `${protocol}://${normalizedHost}/t/${slug}/${topicId}`;
+        return normalized;
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn(`⚠️ [NORMALIZE] Error normalizing forum URL: ${forumUrl}`, error);
+      return null;
+    }
+  }
+  
+  /**
    * Get the current forum topic URL if we're on a forum page
    * Returns the normalized forum topic URL or null
    * Works on any Discourse forum, not just governance.aave.com
@@ -5355,9 +5384,15 @@ export default apiInitializer((api) => {
         const slug = topicMatch[1];
         const topicId = topicMatch[2];
         
-        // Construct normalized forum topic URL
+        // Construct forum topic URL and normalize it
         const forumUrl = `${baseUrl}/t/${slug}/${topicId}`;
-        console.log(`🔵 [VALIDATE] Current forum topic URL: ${forumUrl}`);
+        const normalized = normalizeForumUrl(forumUrl);
+        if (normalized) {
+          console.log(`🔵 [VALIDATE] Current forum topic URL: ${normalized}`);
+          return normalized;
+        }
+        // Fallback to non-normalized if normalization fails
+        console.log(`🔵 [VALIDATE] Current forum topic URL (fallback): ${forumUrl}`);
         return forumUrl;
       }
       
@@ -5365,10 +5400,16 @@ export default apiInitializer((api) => {
       const forumMatch = currentUrl.match(/https?:\/\/(?:www\.)?governance\.aave\.com\/t\/[^\s<>"']+/i);
       if (forumMatch) {
         const forumUrl = forumMatch[0];
-        // Normalize URL (remove trailing slashes, fragments, query params)
-        const normalized = forumUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
-        console.log(`🔵 [VALIDATE] Current forum topic URL (legacy): ${normalized}`);
-        return normalized;
+        // Normalize URL using normalizeForumUrl
+        const normalized = normalizeForumUrl(forumUrl);
+        if (normalized) {
+          console.log(`🔵 [VALIDATE] Current forum topic URL (legacy, normalized): ${normalized}`);
+          return normalized;
+        }
+        // Fallback to simple normalization if normalizeForumUrl fails
+        const simpleNormalized = forumUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
+        console.log(`🔵 [VALIDATE] Current forum topic URL (legacy, simple): ${simpleNormalized}`);
+        return simpleNormalized;
       }
     } catch (error) {
       console.warn(`⚠️ [VALIDATE] Error getting current forum URL:`, error);
@@ -5407,6 +5448,7 @@ export default apiInitializer((api) => {
    * Get the current forum topic title from the page
    * Returns the topic title as a string, or null if not found
    */
+  // eslint-disable-next-line no-unused-vars
   function getCurrentForumTopicTitle() {
     try {
       // Try various Discourse selectors for topic title
@@ -5453,6 +5495,7 @@ export default apiInitializer((api) => {
    * Compare two topic names (case-insensitive)
    * Returns true if names match after normalization
    */
+  // eslint-disable-next-line no-unused-vars
   function compareTopicNames(name1, name2) {
     const normalized1 = normalizeTopicName(name1);
     const normalized2 = normalizeTopicName(name2);
@@ -5507,6 +5550,7 @@ export default apiInitializer((api) => {
    * Returns true if the slug from the URL matches the slug derived from the title
    * Also handles cases where the URL slug has prefixes like "temp-check-" that may not be in the title
    */
+  // eslint-disable-next-line no-unused-vars
   function compareTopicSlugWithTitle(forumUrl, topicTitle) {
     const slugFromUrl = extractTopicSlugFromForumUrl(forumUrl);
     if (!slugFromUrl) {return false;}
@@ -5918,11 +5962,11 @@ export default apiInitializer((api) => {
    * Returns an object with { isRelated: boolean, discussionLink: string|null }
    * 
    * A proposal is considered related if:
-   * 1. The proposal's discussion/reference link matches the current forum topic URL
-   * 2. OR the forum topic name matches the proposal discussion name (case-insensitive)
-   * 3. OR we're not on a forum page (show all proposals)
+   * 1. The proposal's discussion/reference link matches the current forum topic URL (full URL match)
+   * 2. OR we're not on a forum page (show all proposals)
    * 
-   * We check both URL matching and topic name matching to ensure we show proposals that are related.
+   * Forum thread URLs are unique and stable, whereas titles can vary slightly.
+   * The URL is treated as the sole authoritative link for matching.
    */
   function validateSnapshotProposalForForum(snapshotProposal, currentForumUrl) {
     console.log(`🔍 [VALIDATE] Validating Snapshot proposal: ${snapshotProposal?.data?.title || 'Unknown'}`);
@@ -5938,69 +5982,30 @@ export default apiInitializer((api) => {
       return { isRelated: false, discussionLink: null };
     }
     
-    const currentTopicId = extractForumTopicId(currentForumUrl);
-    if (!currentTopicId) {
-      // Can't extract topic ID, but we can still check topic name matching
-      console.log(`⚠️ [VALIDATE] Could not extract topic ID from ${currentForumUrl}, trying topic name matching`);
+    // Normalize current forum URL for comparison
+    const normalizedCurrentUrl = normalizeForumUrl(currentForumUrl);
+    if (!normalizedCurrentUrl) {
+      // Can't normalize current URL - cannot match
+      console.log(`⚠️ [VALIDATE] Could not normalize current forum URL: ${currentForumUrl} - cannot match without URL`);
       const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
-      
-      const currentTopicTitle = getCurrentForumTopicTitle();
-      
-      // Try discussion link topic slug matching first
-      if (currentTopicTitle && discussionLinks.length > 0) {
-        for (const link of discussionLinks) {
-          if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
-            console.log(`✅ [VALIDATE] Snapshot proposal discussion link topic slug matches current forum topic title (case-insensitive)`);
-            return { isRelated: true, discussionLink: link };
-          }
-        }
-      }
-      
-      // Try topic name matching as fallback
-      const proposalTitle = snapshotProposal.data.title || '';
-      if (currentTopicTitle && proposalTitle && compareTopicNames(currentTopicTitle, proposalTitle)) {
-        console.log(`✅ [VALIDATE] Snapshot proposal topic name matches forum topic name (case-insensitive)`);
-        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
-      }
-      
       return { isRelated: false, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
     }
     
-    console.log(`   Current forum topic ID: ${currentTopicId}`);
+    console.log(`   Current normalized forum URL: ${normalizedCurrentUrl}`);
     
-    // Check 1: Discussion/reference links (URL matching)
+    // Check: Discussion/reference links (full URL matching)
     const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
     for (const link of discussionLinks) {
-      const topicId = extractForumTopicId(link);
-      if (topicId === currentTopicId) {
-        console.log(`✅ [VALIDATE] Snapshot proposal is related to forum topic ${currentTopicId} (found matching discussion link: ${link})`);
+      const normalizedLink = normalizeForumUrl(link);
+      if (normalizedLink && normalizedLink === normalizedCurrentUrl) {
+        console.log(`✅ [VALIDATE] Snapshot proposal is related to forum topic (found matching discussion link: ${link})`);
         return { isRelated: true, discussionLink: link };
-      }
-    }
-    
-    // Check 2: Discussion link topic name matching (compare discussion link's topic slug with current topic title)
-    const currentTopicTitle = getCurrentForumTopicTitle();
-    if (currentTopicTitle && discussionLinks.length > 0) {
-      for (const link of discussionLinks) {
-        if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
-          console.log(`✅ [VALIDATE] Snapshot proposal discussion link topic slug matches current forum topic title: "${link}"`);
-          return { isRelated: true, discussionLink: link };
-        }
-      }
-    }
-    
-    // Check 3: Topic name matching (case-insensitive) - compare proposal title with current topic title
-    const proposalTitle = snapshotProposal.data.title || '';
-    if (currentTopicTitle && proposalTitle) {
-      if (compareTopicNames(currentTopicTitle, proposalTitle)) {
-        console.log(`✅ [VALIDATE] Snapshot proposal topic name matches forum topic name (case-insensitive): "${proposalTitle}"`);
-        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
       }
     }
     
     // If no match found, it's not related to this topic
     // But still return the discussion link so it can be displayed
-    console.log(`⚠️ [VALIDATE] Snapshot proposal is NOT related to forum topic ${currentTopicId} - will show with discussion link`);
+    console.log(`⚠️ [VALIDATE] Snapshot proposal is NOT related to current forum topic - will show with discussion link`);
     if (discussionLinks.length > 0) {
       console.log(`   Found discussion links: ${discussionLinks.join(', ')}`);
       return { isRelated: false, discussionLink: discussionLinks[0] };
@@ -6015,12 +6020,12 @@ export default apiInitializer((api) => {
    * Returns true if the proposal is related, false otherwise
    * 
    * A proposal is considered related if:
-   * 1. The proposal's discussion/reference link matches the current forum topic URL
+   * 1. The proposal's discussion/reference link matches the current forum topic URL (full URL match)
    * 2. OR the AIP proposal ID matches the forum topic ID (they're directly linked by ID)
-   * 3. OR the forum topic name matches the proposal discussion name (case-insensitive)
-   * 4. OR we're not on a forum page (show all proposals)
+   * 3. OR we're not on a forum page (show all proposals)
    * 
-   * We check URL matching, ID matching, and topic name matching to ensure we show proposals that are related.
+   * Forum thread URLs are unique and stable, whereas titles can vary slightly.
+   * The URL is treated as the sole authoritative link for matching.
    */
   async function validateAIPProposalForForum(aipProposal, currentForumUrl) {
     if (!currentForumUrl) {
@@ -6032,75 +6037,52 @@ export default apiInitializer((api) => {
       return { isRelated: false, discussionLink: null };
     }
     
-    const currentTopicId = extractForumTopicId(currentForumUrl);
-    if (!currentTopicId) {
-      // Can't extract topic ID, but we can still check topic name matching
-      console.log(`⚠️ [VALIDATE] Could not extract topic ID from ${currentForumUrl}, trying topic name matching`);
-      const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
-      
-      const currentTopicTitle = getCurrentForumTopicTitle();
-      
-      // Try discussion link topic slug matching first
-      if (currentTopicTitle && discussionLinks.length > 0) {
-        for (const link of discussionLinks) {
-          if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
-            console.log(`✅ [VALIDATE] AIP proposal discussion link topic slug matches current forum topic title (case-insensitive)`);
-            return { isRelated: true, discussionLink: link };
-          }
+    // Normalize current forum URL for comparison
+    const normalizedCurrentUrl = normalizeForumUrl(currentForumUrl);
+    if (!normalizedCurrentUrl) {
+      // Can't normalize current URL - try ID matching as fallback
+      const currentTopicId = extractForumTopicId(currentForumUrl);
+      if (currentTopicId) {
+        // Check if AIP proposal ID matches forum topic ID (they're directly linked by ID)
+        const aipId = String(aipProposal.data.id || '');
+        if (aipId === currentTopicId) {
+          console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
+          const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
+          return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
         }
       }
-      
-      // Try topic name matching as fallback
-      const proposalTitle = aipProposal.data.title || '';
-      if (currentTopicTitle && proposalTitle && compareTopicNames(currentTopicTitle, proposalTitle)) {
-        console.log(`✅ [VALIDATE] AIP proposal topic name matches forum topic name (case-insensitive)`);
-        return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
-      }
-      
+      // Can't match without normalized URL or matching ID
+      console.log(`⚠️ [VALIDATE] Could not normalize current forum URL: ${currentForumUrl} - cannot match without URL`);
+      const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
       return { isRelated: false, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
     }
     
-    // Check 1: Discussion/reference links (primary check)
+    console.log(`   Current normalized forum URL: ${normalizedCurrentUrl}`);
+    
+    // Check 1: Discussion/reference links (full URL matching)
     const discussionLinks = await extractDiscussionLinksFromAIP(aipProposal);
     for (const link of discussionLinks) {
-      const topicId = extractForumTopicId(link);
-      if (topicId === currentTopicId) {
-        console.log(`✅ [VALIDATE] AIP proposal is related to forum topic ${currentTopicId} (found matching discussion link: ${link})`);
+      const normalizedLink = normalizeForumUrl(link);
+      if (normalizedLink && normalizedLink === normalizedCurrentUrl) {
+        console.log(`✅ [VALIDATE] AIP proposal is related to forum topic (found matching discussion link: ${link})`);
         return { isRelated: true, discussionLink: link };
       }
     }
     
     // Check 2: AIP proposal ID matches forum topic ID (they're directly linked by ID)
     // This is a special case where AIPs and forum topics share the same ID
-    const aipId = String(aipProposal.data.id || '');
-    if (aipId === currentTopicId) {
-      console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
-      return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
-    }
-    
-    // Check 3: Discussion link topic name matching (compare discussion link's topic slug with current topic title)
-    const currentTopicTitle = getCurrentForumTopicTitle();
-    if (currentTopicTitle && discussionLinks.length > 0) {
-      for (const link of discussionLinks) {
-        if (compareTopicSlugWithTitle(link, currentTopicTitle)) {
-          console.log(`✅ [VALIDATE] AIP proposal discussion link topic slug matches current forum topic title: "${link}"`);
-          return { isRelated: true, discussionLink: link };
-        }
-      }
-    }
-    
-    // Check 4: Topic name matching (case-insensitive) - compare proposal title with current topic title
-    const proposalTitle = aipProposal.data.title || '';
-    if (currentTopicTitle && proposalTitle) {
-      if (compareTopicNames(currentTopicTitle, proposalTitle)) {
-        console.log(`✅ [VALIDATE] AIP proposal topic name matches forum topic name (case-insensitive): "${proposalTitle}"`);
+    const currentTopicId = extractForumTopicId(currentForumUrl);
+    if (currentTopicId) {
+      const aipId = String(aipProposal.data.id || '');
+      if (aipId === currentTopicId) {
+        console.log(`✅ [VALIDATE] AIP proposal ID ${aipId} matches forum topic ID - directly related`);
         return { isRelated: true, discussionLink: discussionLinks.length > 0 ? discussionLinks[0] : null };
       }
     }
     
     // If no match found, it's not related to this topic
     // But still return the discussion link so it can be displayed
-    console.log(`⚠️ [VALIDATE] AIP proposal is NOT related to forum topic ${currentTopicId} - will show with discussion link`);
+    console.log(`⚠️ [VALIDATE] AIP proposal is NOT related to current forum topic - will show with discussion link`);
     if (discussionLinks.length > 0) {
       console.log(`   Found discussion links: ${discussionLinks.join(', ')}`);
       return { isRelated: false, discussionLink: discussionLinks[0] };
