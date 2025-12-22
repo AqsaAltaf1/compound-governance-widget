@@ -68,7 +68,12 @@ export default apiInitializer((api) => {
   
   // Aave Governance Forum Configuration
   // Primary entry point: Aave Governance Forum thread
+  // Matches governance.aave.com specifically (for backward compatibility)
   const AAVE_FORUM_URL_REGEX = /https?:\/\/(?:www\.)?governance\.aave\.com\/t\/[^\s<>"']+/gi;
+  
+  // Discourse Forum URL Pattern - matches any Discourse forum URL (works for any Discourse instance)
+  // Pattern: https://[domain]/t/[slug]/[topicId]
+  const DISCOURSE_FORUM_URL_REGEX = /https?:\/\/[^\s<>"']+\/t\/[^\/\s<>"']+\/\d+/gi;
   
   // Aave AIP Configuration
   // Support both governance.aave.com and app.aave.com/governance/
@@ -5593,18 +5598,26 @@ export default apiInitializer((api) => {
     const discussionLinks = [];
     
     // Check 1: proposal.discussion field (direct discussion link)
-    // Only extract Aave forum URLs (governance.aave.com)
+    // Extract any Discourse forum URLs (works for any Discourse instance, not just governance.aave.com)
     const discussion = snapshotProposal.data.discussion;
     console.log(`   📋 [DISCUSSION] snapshotProposal.data.discussion =`, discussion);
     if (discussion) {
-      // Only extract Aave forum URLs, not other URLs
+      // Try specific Aave forum regex first (for backward compatibility)
       AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-      const forumMatch = discussion.match(AAVE_FORUM_URL_REGEX);
+      let forumMatch = discussion.match(AAVE_FORUM_URL_REGEX);
       if (forumMatch) {
         console.log(`   ✅ [DISCUSSION] Found Aave forum links in discussion field:`, forumMatch);
         discussionLinks.push(...forumMatch);
       } else {
-        console.log(`   ❌ [DISCUSSION] No Aave forum URLs found in discussion field (value: "${discussion}")`);
+        // Try general Discourse forum regex (matches any Discourse instance)
+        DISCOURSE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
+        forumMatch = discussion.match(DISCOURSE_FORUM_URL_REGEX);
+        if (forumMatch) {
+          console.log(`   ✅ [DISCUSSION] Found Discourse forum links in discussion field:`, forumMatch);
+          discussionLinks.push(...forumMatch);
+        } else {
+          console.log(`   ❌ [DISCUSSION] No forum URLs found in discussion field (value: "${discussion}")`);
+        }
       }
     } else {
       console.log(`   ⚠️ [DISCUSSION] discussion field is null/undefined`);
@@ -5616,12 +5629,21 @@ export default apiInitializer((api) => {
     if (plugins) {
       try {
         const pluginsStr = typeof plugins === 'string' ? plugins : JSON.stringify(plugins);
-        const forumMatch = pluginsStr.match(AAVE_FORUM_URL_REGEX);
+        // Try specific Aave forum regex first, then general Discourse regex
+        AAVE_FORUM_URL_REGEX.lastIndex = 0;
+        let forumMatch = pluginsStr.match(AAVE_FORUM_URL_REGEX);
         if (forumMatch) {
-          console.log(`   ✅ [DISCUSSION] Found forum links in plugins:`, forumMatch);
+          console.log(`   ✅ [DISCUSSION] Found Aave forum links in plugins:`, forumMatch);
           discussionLinks.push(...forumMatch);
         } else {
-          console.log(`   ❌ [DISCUSSION] No forum links found in plugins`);
+          DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+          forumMatch = pluginsStr.match(DISCOURSE_FORUM_URL_REGEX);
+          if (forumMatch) {
+            console.log(`   ✅ [DISCUSSION] Found Discourse forum links in plugins:`, forumMatch);
+            discussionLinks.push(...forumMatch);
+          } else {
+            console.log(`   ❌ [DISCUSSION] No forum links found in plugins`);
+          }
         }
       } catch (e) {
         console.log(`   ❌ [DISCUSSION] Error parsing plugins:`, e.message);
@@ -5636,14 +5658,21 @@ export default apiInitializer((api) => {
     if (rawProposal) {
       if (rawProposal.discussion) {
         console.log(`   📋 [DISCUSSION] _rawProposal.discussion =`, rawProposal.discussion);
-        // Only extract Aave forum URLs, not other URLs
-        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-        const forumMatch = rawProposal.discussion.match(AAVE_FORUM_URL_REGEX);
+        // Try specific Aave forum regex first, then general Discourse regex
+        AAVE_FORUM_URL_REGEX.lastIndex = 0;
+        let forumMatch = rawProposal.discussion.match(AAVE_FORUM_URL_REGEX);
         if (forumMatch) {
           console.log(`   ✅ [DISCUSSION] Found Aave forum links in _rawProposal.discussion:`, forumMatch);
           discussionLinks.push(...forumMatch);
         } else {
-          console.log(`   ❌ [DISCUSSION] No Aave forum URLs found in _rawProposal.discussion`);
+          DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+          forumMatch = rawProposal.discussion.match(DISCOURSE_FORUM_URL_REGEX);
+          if (forumMatch) {
+            console.log(`   ✅ [DISCUSSION] Found Discourse forum links in _rawProposal.discussion:`, forumMatch);
+            discussionLinks.push(...forumMatch);
+          } else {
+            console.log(`   ❌ [DISCUSSION] No forum URLs found in _rawProposal.discussion`);
+          }
         }
       } else {
         console.log(`   ⚠️ [DISCUSSION] _rawProposal.discussion is null/undefined`);
@@ -5654,12 +5683,21 @@ export default apiInitializer((api) => {
           const pluginsStr = typeof rawProposal.plugins === 'string' 
             ? rawProposal.plugins 
             : JSON.stringify(rawProposal.plugins);
-          const forumMatch = pluginsStr.match(AAVE_FORUM_URL_REGEX);
+          // Try specific Aave forum regex first, then general Discourse regex
+          AAVE_FORUM_URL_REGEX.lastIndex = 0;
+          let forumMatch = pluginsStr.match(AAVE_FORUM_URL_REGEX);
           if (forumMatch) {
-            console.log(`   ✅ [DISCUSSION] Found forum links in _rawProposal.plugins:`, forumMatch);
+            console.log(`   ✅ [DISCUSSION] Found Aave forum links in _rawProposal.plugins:`, forumMatch);
             discussionLinks.push(...forumMatch);
           } else {
-            console.log(`   ❌ [DISCUSSION] No forum links found in _rawProposal.plugins`);
+            DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+            forumMatch = pluginsStr.match(DISCOURSE_FORUM_URL_REGEX);
+            if (forumMatch) {
+              console.log(`   ✅ [DISCUSSION] Found Discourse forum links in _rawProposal.plugins:`, forumMatch);
+              discussionLinks.push(...forumMatch);
+            } else {
+              console.log(`   ❌ [DISCUSSION] No forum links found in _rawProposal.plugins`);
+            }
           }
         } catch (e) {
           console.log(`   ❌ [DISCUSSION] Error parsing _rawProposal.plugins:`, e.message);
@@ -5676,16 +5714,22 @@ export default apiInitializer((api) => {
       const combinedText = `${title} ${body}`;
       
       if (combinedText.length > 0) {
-        console.log(`   📋 [DISCUSSION] Checking proposal body/description for Aave forum links (${combinedText.length} chars)`);
-        // Only extract Aave forum URLs (governance.aave.com)
-        // Reset regex lastIndex before using (regex is global)
+        console.log(`   📋 [DISCUSSION] Checking proposal body/description for forum links (${combinedText.length} chars)`);
+        // Try specific Aave forum regex first, then general Discourse regex
         AAVE_FORUM_URL_REGEX.lastIndex = 0;
-        const forumMatches = combinedText.match(AAVE_FORUM_URL_REGEX);
+        let forumMatches = combinedText.match(AAVE_FORUM_URL_REGEX);
         if (forumMatches && forumMatches.length > 0) {
           console.log(`   ✅ [DISCUSSION] Found Aave forum links in proposal body/description:`, forumMatches);
           discussionLinks.push(...forumMatches);
         } else {
-          console.log(`   ❌ [DISCUSSION] No Aave forum URLs found in proposal body/description`);
+          DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+          forumMatches = combinedText.match(DISCOURSE_FORUM_URL_REGEX);
+          if (forumMatches && forumMatches.length > 0) {
+            console.log(`   ✅ [DISCUSSION] Found Discourse forum links in proposal body/description:`, forumMatches);
+            discussionLinks.push(...forumMatches);
+          } else {
+            console.log(`   ❌ [DISCUSSION] No forum URLs found in proposal body/description`);
+          }
         }
       }
     }
@@ -5787,13 +5831,21 @@ export default apiInitializer((api) => {
       console.log(`   📋 [DISCUSSION] rawContent type: ${typeof rawContent}, length: ${typeof rawContent === 'string' ? rawContent.length : 'N/A'}`);
       
       if (typeof rawContent === 'string') {
-        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-        const matches = rawContent.match(AAVE_FORUM_URL_REGEX);
+        // Try specific Aave forum regex first, then general Discourse regex
+        AAVE_FORUM_URL_REGEX.lastIndex = 0;
+        let matches = rawContent.match(AAVE_FORUM_URL_REGEX);
         if (matches && matches.length > 0) {
-          console.log(`   ✅ [DISCUSSION] Found forum URLs in rawContent:`, matches);
+          console.log(`   ✅ [DISCUSSION] Found Aave forum URLs in rawContent:`, matches);
           discussionLinks.push(...matches);
         } else {
-          console.log(`   ❌ [DISCUSSION] No forum URLs found in rawContent string`);
+          DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+          matches = rawContent.match(DISCOURSE_FORUM_URL_REGEX);
+          if (matches && matches.length > 0) {
+            console.log(`   ✅ [DISCUSSION] Found Discourse forum URLs in rawContent:`, matches);
+            discussionLinks.push(...matches);
+          } else {
+            console.log(`   ❌ [DISCUSSION] No forum URLs found in rawContent string`);
+          }
         }
       }
       
@@ -5814,11 +5866,19 @@ export default apiInitializer((api) => {
           
           for (const fieldValue of parsedFields) {
             if (fieldValue && typeof fieldValue === 'string') {
-              AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-              const matches = fieldValue.match(AAVE_FORUM_URL_REGEX);
+              // Try specific Aave forum regex first, then general Discourse regex
+              AAVE_FORUM_URL_REGEX.lastIndex = 0;
+              let matches = fieldValue.match(AAVE_FORUM_URL_REGEX);
               if (matches && matches.length > 0) {
-                console.log(`   ✅ [DISCUSSION] Found forum URLs in parsed rawContent:`, matches);
+                console.log(`   ✅ [DISCUSSION] Found Aave forum URLs in parsed rawContent:`, matches);
                 discussionLinks.push(...matches);
+              } else {
+                DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+                matches = fieldValue.match(DISCOURSE_FORUM_URL_REGEX);
+                if (matches && matches.length > 0) {
+                  console.log(`   ✅ [DISCUSSION] Found Discourse forum URLs in parsed rawContent:`, matches);
+                  discussionLinks.push(...matches);
+                }
               }
             }
           }
@@ -5888,11 +5948,19 @@ export default apiInitializer((api) => {
         
         for (const fieldValue of fieldsToCheck) {
           if (fieldValue && typeof fieldValue === 'string') {
-            AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-            const matches = fieldValue.match(AAVE_FORUM_URL_REGEX);
+            // Try specific Aave forum regex first, then general Discourse regex
+            AAVE_FORUM_URL_REGEX.lastIndex = 0;
+            let matches = fieldValue.match(AAVE_FORUM_URL_REGEX);
             if (matches && matches.length > 0) {
-              console.log(`   ✅ [DISCUSSION] Found forum URLs in IPFS metadata:`, matches);
+              console.log(`   ✅ [DISCUSSION] Found Aave forum URLs in IPFS metadata:`, matches);
               discussionLinks.push(...matches);
+            } else {
+              DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+              matches = fieldValue.match(DISCOURSE_FORUM_URL_REGEX);
+              if (matches && matches.length > 0) {
+                console.log(`   ✅ [DISCUSSION] Found Discourse forum URLs in IPFS metadata:`, matches);
+                discussionLinks.push(...matches);
+              }
             }
           }
         }
@@ -5907,11 +5975,19 @@ export default apiInitializer((api) => {
       const combinedText = `${description} ${body}`;
       
       if (combinedText.length > 0) {
-        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-        const forumMatches = combinedText.match(AAVE_FORUM_URL_REGEX);
+        // Try specific Aave forum regex first, then general Discourse regex
+        AAVE_FORUM_URL_REGEX.lastIndex = 0;
+        let forumMatches = combinedText.match(AAVE_FORUM_URL_REGEX);
         if (forumMatches && forumMatches.length > 0) {
-          console.log(`   ✅ [DISCUSSION] Found forum links in description/body:`, forumMatches);
+          console.log(`   ✅ [DISCUSSION] Found Aave forum links in description/body:`, forumMatches);
           discussionLinks.push(...forumMatches);
+        } else {
+          DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+          forumMatches = combinedText.match(DISCOURSE_FORUM_URL_REGEX);
+          if (forumMatches && forumMatches.length > 0) {
+            console.log(`   ✅ [DISCUSSION] Found Discourse forum links in description/body:`, forumMatches);
+            discussionLinks.push(...forumMatches);
+          }
         }
       }
     }
@@ -5922,11 +5998,19 @@ export default apiInitializer((api) => {
       console.log(`   📋 [DISCUSSION] metadata exists:`, !!metadata);
       try {
         const metadataStr = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
-        AAVE_FORUM_URL_REGEX.lastIndex = 0; // Reset regex
-        const forumMatch = metadataStr.match(AAVE_FORUM_URL_REGEX);
+        // Try specific Aave forum regex first, then general Discourse regex
+        AAVE_FORUM_URL_REGEX.lastIndex = 0;
+        let forumMatch = metadataStr.match(AAVE_FORUM_URL_REGEX);
         if (forumMatch) {
-          console.log(`   ✅ [DISCUSSION] Found forum links in metadata:`, forumMatch);
+          console.log(`   ✅ [DISCUSSION] Found Aave forum links in metadata:`, forumMatch);
           discussionLinks.push(...forumMatch);
+        } else {
+          DISCOURSE_FORUM_URL_REGEX.lastIndex = 0;
+          forumMatch = metadataStr.match(DISCOURSE_FORUM_URL_REGEX);
+          if (forumMatch) {
+            console.log(`   ✅ [DISCUSSION] Found Discourse forum links in metadata:`, forumMatch);
+            discussionLinks.push(...forumMatch);
+          }
         }
       } catch (e) {
         console.log(`   ❌ [DISCUSSION] Error parsing metadata:`, e.message);
