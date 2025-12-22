@@ -378,6 +378,11 @@
           color: #92400e;
           border: 1px solid #fde68a;
         }
+
+        // Large screens: Add left margin
+        @media (width > 1800px) {
+          margin-left: 15px;
+        }
       }
 
       .days-left-badge {
@@ -461,6 +466,11 @@
         background: #fef3c7;
         color: #92400e;
         border: 1px solid #fde68a;
+      }
+
+      // Large screens: Add left margin
+      @media (width > 1800px) {
+        margin-left: 15px;
       }
     }
 
@@ -977,6 +987,11 @@
         background: #f3f4f6;
         color: #6b7280;
         border: 1px solid #d1d5db;
+      }
+
+      // Large screens: Add left margin
+      @media (width > 1800px) {
+        margin-left: 15px;
       }
     }
 
