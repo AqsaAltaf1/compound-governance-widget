@@ -2275,15 +2275,80 @@ export default apiInitializer((api) => {
   }
 
   // Create loading placeholder/skeleton for widgets
-  // Shows immediately when proposal is detected, before data is fetched
+  // DISABLED: Loaders are not shown - widgets appear directly when ready
+  // eslint-disable-next-line no-unused-vars
   function createLoadingPlaceholder(url, widgetId, proposalOrder = null) {
+    // Loaders disabled - return immediately without creating anything
+    return null;
+    /* DISABLED CODE - Unreachable due to early return above
     const isMobile = window.innerWidth <= 1024 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
-    // Check if placeholder already exists for this URL
-    const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${url}"]`);
-    if (existingPlaceholder) {
-      return existingPlaceholder; // Already exists
+    // Helper function to normalize URLs for comparison (removes trailing slashes, query params, normalizes)
+    const normalizeUrlForComparison = (urlToNormalize) => {
+      if (!urlToNormalize) {
+        return '';
+      }
+      // Remove trailing slash, query parameters, and fragments
+      let normalized = urlToNormalize.trim()
+        .replace(/\/+$/, '') // Remove trailing slashes
+        .split('?')[0] // Remove query parameters
+        .split('#')[0]; // Remove fragments
+      return normalized.toLowerCase();
+    };
+    
+    const normalizedUrl = normalizeUrlForComparison(url);
+    
+    // CRITICAL: Check if placeholder is already being created (race condition prevention)
+    if (creatingPlaceholders.has(normalizedUrl) || creatingPlaceholders.has(url)) {
+      console.log(`🔵 [LOADING] Placeholder creation already in progress for ${url}, skipping duplicate`);
+      // Wait a bit and check if placeholder was created
+      const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${url}"]`);
+      if (existingPlaceholder) {
+        return existingPlaceholder;
+      }
+      // If not found, continue (might be a race condition)
+    }
+    
+    // Mark as being created
+    creatingPlaceholders.add(normalizedUrl);
+    creatingPlaceholders.add(url);
+    
+    // CRITICAL: Check ALL existing placeholders and widgets to prevent duplicates
+    // Check both by exact URL match and normalized URL match
+    const allContainers = document.querySelectorAll('.tally-status-widget-container[data-tally-url]');
+    for (const container of allContainers) {
+      const containerUrl = container.getAttribute('data-tally-url');
+      if (!containerUrl) continue;
+      
+      const containerNormalizedUrl = normalizeUrlForComparison(containerUrl);
+      
+      // Check if URLs match (exact match or normalized match)
+      if (containerUrl === url || containerNormalizedUrl === normalizedUrl) {
+        // If it's already a placeholder, return it (don't create duplicate)
+        if (container.classList.contains('loading-placeholder')) {
+          console.log(`🔵 [LOADING] Placeholder already exists for ${url} (found: ${containerUrl}), not creating duplicate`);
+          creatingPlaceholders.delete(normalizedUrl);
+          creatingPlaceholders.delete(url);
+          return container;
+        } else {
+          // If it's a real widget, remove it before creating placeholder (data is incomplete)
+          console.log(`🔵 [LOADING] Found existing widget for ${url} (found: ${containerUrl}), removing it before creating placeholder`);
+          container.remove();
+          break; // Only remove one
+        }
+      }
+    }
+    
+    // Also check by widget ID if provided (additional safeguard)
+    if (widgetId) {
+      const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
+      if (placeholderById && placeholderById.classList.contains('loading-placeholder')) {
+        console.log(`🔵 [LOADING] Placeholder already exists with ID ${widgetId}, not creating duplicate`);
+        creatingPlaceholders.delete(normalizedUrl);
+        creatingPlaceholders.delete(url);
+        return placeholderById;
+      }
     }
     
     // Generate widget ID if not provided
@@ -2365,7 +2430,12 @@ export default apiInitializer((api) => {
     placeholder.style.setProperty('visibility', 'visible', 'important');
     placeholder.style.setProperty('opacity', '1', 'important');
     
+    // Clean up tracking (placeholder is now in DOM)
+    creatingPlaceholders.delete(normalizedUrl);
+    creatingPlaceholders.delete(url);
+    
     return placeholder;
+    */
   }
 
   // Render status widget on the right side (outside post box) - like the image
@@ -2452,38 +2522,158 @@ export default apiInitializer((api) => {
     
     const isMobile = window.innerWidth <= 1400;
     
-    // Always ensure visibility FIRST (before positioning)
-    container.style.setProperty('display', 'flex', 'important');
-    container.style.setProperty('visibility', 'visible', 'important');
-    container.style.setProperty('opacity', '1', 'important');
-    container.classList.remove('hidden', 'd-none', 'is-hidden');
+    // Get all widgets from the container
+    const widgets = Array.from(container.querySelectorAll('.tally-status-widget-container'));
     
     if (isMobile) {
-      // Mobile/Tablet: Use relative positioning (inline in topic) - respect CSS
-      container.style.setProperty('position', 'relative', 'important');
-      container.style.setProperty('left', 'auto', 'important');
-      container.style.setProperty('right', 'auto', 'important');
-      container.style.setProperty('top', 'auto', 'important');
-      container.style.setProperty('width', '100%', 'important');
-      container.style.setProperty('max-width', '100%', 'important');
+      // Mobile/Tablet: Move widgets from container to topic body (inline before first post)
+      if (widgets.length > 0) {
+        console.log(`🔵 [RESIZE] Moving ${widgets.length} widget(s) from container to topic body (mobile)`);
+        
+        const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
+        const firstPost = allPosts.length > 0 ? allPosts[0] : null;
+        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+        
+        // Sort widgets by order attribute to maintain correct order
+        widgets.sort((a, b) => {
+          const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
+          const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
+          return orderA - orderB;
+        });
+        
+        // Move each widget to topic body (before first post)
+        widgets.forEach((widget) => {
+          // Update widget styles for mobile (inline positioning)
+          widget.style.setProperty('position', 'relative', 'important');
+          widget.style.setProperty('left', 'auto', 'important');
+          widget.style.setProperty('right', 'auto', 'important');
+          widget.style.setProperty('top', 'auto', 'important');
+          widget.style.setProperty('width', '100%', 'important');
+          widget.style.setProperty('max-width', '100%', 'important');
+          widget.style.setProperty('margin-bottom', '20px', 'important');
+          
+          // Remove widget from container
+          widget.remove();
+          
+          // Insert before first post
+          if (firstPost && firstPost.parentNode) {
+            // Find last widget before first post
+            const siblings = Array.from(firstPost.parentNode.children);
+            let insertBefore = firstPost;
+            for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
+              if (siblings[i].classList.contains('tally-status-widget-container')) {
+                insertBefore = siblings[i].nextSibling || firstPost;
+                break;
+              }
+            }
+            firstPost.parentNode.insertBefore(widget, insertBefore);
+          } else if (topicBody) {
+            // Fallback: append to topic body
+            const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+            if (widgetsInBody.length > 0) {
+              const lastWidget = widgetsInBody[widgetsInBody.length - 1];
+              if (lastWidget.nextSibling) {
+                topicBody.insertBefore(widget, lastWidget.nextSibling);
+              } else {
+                topicBody.appendChild(widget);
+              }
+            } else {
+              if (topicBody.firstChild) {
+                topicBody.insertBefore(widget, topicBody.firstChild);
+              } else {
+                topicBody.appendChild(widget);
+              }
+            }
+          }
+        });
+        
+        console.log(`✅ [RESIZE] Moved ${widgets.length} widget(s) to topic body`);
+      }
+      
+      // Hide/remove container on mobile (widgets are now inline)
+      container.style.setProperty('display', 'none', 'important');
     } else {
+      // Desktop: Move widgets from topic body back to container (fixed positioning)
+      if (container.parentNode === document.body) {
+        // Container is already in body, just ensure it's visible
+        container.style.setProperty('display', 'flex', 'important');
+      } else {
+        // Container not in body, re-append it
+        document.body.appendChild(container);
+        container.style.setProperty('display', 'flex', 'important');
+      }
+      
+      // Find widgets in topic body that should be in container
+      const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+      const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
+      
+      if (topicBody || firstPost) {
+        // Get all widgets that are currently in topic body
+        const widgetsInTopic = Array.from(document.querySelectorAll('.tally-status-widget-container'));
+        const widgetsToMove = widgetsInTopic.filter(widget => {
+          // Check if widget is in topic body (not in container)
+          const parent = widget.parentNode;
+          return parent && parent !== container && 
+                 (parent === topicBody || 
+                  (firstPost && parent.contains(firstPost)) ||
+                  parent.classList.contains('posts-wrapper') ||
+                  parent.classList.contains('post-stream') ||
+                  parent.classList.contains('topic-post-stream'));
+        });
+        
+        if (widgetsToMove.length > 0) {
+          console.log(`🔵 [RESIZE] Moving ${widgetsToMove.length} widget(s) from topic body to container (desktop)`);
+          
+          // Sort widgets by order attribute to maintain correct order
+          widgetsToMove.sort((a, b) => {
+            const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
+            const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
+            return orderA - orderB;
+          });
+          
+          // Move each widget to container
+          widgetsToMove.forEach(widget => {
+            // Update widget styles for desktop (fixed positioning in container)
+            widget.style.setProperty('position', 'relative', 'important');
+            widget.style.setProperty('left', 'auto', 'important');
+            widget.style.setProperty('right', 'auto', 'important');
+            widget.style.setProperty('top', 'auto', 'important');
+            widget.style.setProperty('width', '100%', 'important');
+            widget.style.setProperty('max-width', '100%', 'important');
+            widget.style.setProperty('margin-bottom', '12px', 'important');
+            
+            widget.remove();
+            container.appendChild(widget);
+          });
+          
+          console.log(`✅ [RESIZE] Moved ${widgetsToMove.length} widget(s) to container`);
+        }
+      }
+      
       // Desktop: Use fixed positioning (right side)
       container.style.setProperty('position', 'fixed', 'important');
       container.style.setProperty('z-index', '500', 'important');
       container.style.setProperty('right', '5px', 'important');
       container.style.setProperty('left', 'auto', 'important');
       container.style.setProperty('top', '180px', 'important');
+      container.style.setProperty('width', 'auto', 'important');
+      container.style.setProperty('max-width', 'none', 'important');
       // Optimize for fixed positioning (prevent flickering during scroll)
       container.style.setProperty('will-change', 'transform', 'important');
       container.style.setProperty('backface-visibility', 'hidden', 'important');
       container.style.setProperty('transform', 'translateZ(0)', 'important');
     }
     
+    // Always ensure visibility for widgets
+    container.style.setProperty('visibility', 'visible', 'important');
+    container.style.setProperty('opacity', '1', 'important');
+    container.classList.remove('hidden', 'd-none', 'is-hidden');
+    
     // Log position data for debugging
     const rect = container.getBoundingClientRect();
     console.log("📍 [POSITION DATA] Container position:", {
-      right: '5px',
-      top: '180px',
+      isMobile,
+      widgetsInContainer: container.querySelectorAll('.tally-status-widget-container').length,
       actualLeft: `${rect.left}px`,
       actualTop: `${rect.top}px`,
       actualRight: `${rect.right}px`,
@@ -2509,17 +2699,50 @@ export default apiInitializer((api) => {
     
     // CRITICAL: Remove loading placeholder if it exists (replace with actual widget)
     // Remove by URL (more reliable than ID since widgetId might differ)
+    // Use normalized URL comparison to catch variations
     if (proposalUrl) {
-      const placeholder = document.querySelector(`.loading-placeholder[data-tally-url="${proposalUrl}"]`);
-      if (placeholder) {
-        console.log(`✅ [LOADING] Removing loading placeholder for ${proposalUrl}, replacing with actual widget`);
-        placeholder.remove();
-      }
+      const normalizeUrlForComparison = (urlToNormalize) => {
+        if (!urlToNormalize) {
+          return '';
+        }
+        return urlToNormalize.trim()
+          .replace(/\/+$/, '')
+          .split('?')[0]
+          .split('#')[0]
+          .toLowerCase();
+      };
+      
+      const normalizedProposalUrl = normalizeUrlForComparison(proposalUrl);
+      
+      // Find and remove all placeholders that match this URL (exact or normalized)
+      const allPlaceholders = document.querySelectorAll('.loading-placeholder[data-tally-url]');
+      let removedCount = 0;
+      allPlaceholders.forEach(placeholder => {
+        const placeholderUrl = placeholder.getAttribute('data-tally-url');
+        if (!placeholderUrl) {
+          return;
+        }
+        
+        const normalizedPlaceholderUrl = normalizeUrlForComparison(placeholderUrl);
+        
+        // Check if URLs match (exact match or normalized match)
+        if (placeholderUrl === proposalUrl || normalizedPlaceholderUrl === normalizedProposalUrl) {
+          console.log(`✅ [LOADING] Removing loading placeholder for ${proposalUrl} (found: ${placeholderUrl})`);
+          placeholder.remove();
+          removedCount++;
+        }
+      });
+      
       // Also try removing by widgetId as fallback
       const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
-      if (placeholderById) {
+      if (placeholderById && placeholderById.classList.contains('loading-placeholder')) {
         console.log(`✅ [LOADING] Removing loading placeholder by ID for ${widgetId}`);
         placeholderById.remove();
+        removedCount++;
+      }
+      
+      if (removedCount === 0) {
+        console.log(`🔵 [LOADING] No loading placeholder found to remove for ${proposalUrl}`);
       }
     }
     
@@ -3875,6 +4098,80 @@ export default apiInitializer((api) => {
     // Check if mobile to determine update strategy
     const isMobile = window.innerWidth <= 1400 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    // CRITICAL: Check if data is incomplete - show loader instead of empty widget
+    // On mobile, if time data (daysLeft/hoursLeft) is missing, show loader
+    const hasTitle = proposalData.title && proposalData.title !== "Snapshot Proposal";
+    const hasTimeData = proposalData.daysLeft !== null && proposalData.daysLeft !== undefined;
+    const isDataIncomplete = !hasTitle || (isMobile && !hasTimeData);
+    
+    if (isDataIncomplete) {
+      console.log(`🔵 [WIDGET] Data incomplete - showing loader instead of empty widget (mobile: ${isMobile}, hasTitle: ${hasTitle}, hasTimeData: ${hasTimeData})`);
+      
+      // Check if loading placeholder already exists for this URL
+      const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${originalUrl}"]`);
+      if (existingPlaceholder) {
+        console.log(`🔵 [WIDGET] Loading placeholder already exists for ${originalUrl}, keeping it`);
+        return; // Don't create duplicate loader
+      }
+      
+      // Check if a real widget already exists (not a placeholder)
+      const existingWidget = document.querySelector(`.tally-status-widget-container[data-tally-url="${originalUrl}"]:not(.loading-placeholder)`);
+      if (existingWidget) {
+        // Replace existing widget with loader if data is incomplete
+        console.log(`🔵 [WIDGET] Replacing incomplete widget with loader for ${originalUrl}`);
+        existingWidget.remove();
+      }
+      
+      // Loaders disabled - don't show anything if data is incomplete
+      return; // Don't render widget with incomplete data
+    }
+    
+    // CRITICAL: Remove loading placeholder if it exists (replace with actual widget)
+    // Use normalized URL comparison to catch variations
+    const normalizeUrlForComparison = (urlToNormalize) => {
+      if (!urlToNormalize) {
+        return '';
+      }
+      return urlToNormalize.trim()
+        .replace(/\/+$/, '')
+        .split('?')[0]
+        .split('#')[0]
+        .toLowerCase();
+    };
+    
+    const normalizedOriginalUrl = normalizeUrlForComparison(originalUrl);
+    
+    // Find and remove all placeholders that match this URL (exact or normalized)
+    const allPlaceholders = document.querySelectorAll('.loading-placeholder[data-tally-url]');
+    let removedCount = 0;
+    allPlaceholders.forEach(placeholder => {
+      const placeholderUrl = placeholder.getAttribute('data-tally-url');
+      if (!placeholderUrl) {
+        return;
+      }
+      
+      const normalizedPlaceholderUrl = normalizeUrlForComparison(placeholderUrl);
+      
+      // Check if URLs match (exact match or normalized match)
+      if (placeholderUrl === originalUrl || normalizedPlaceholderUrl === normalizedOriginalUrl) {
+        console.log(`✅ [LOADING] Removing loading placeholder for ${originalUrl} (found: ${placeholderUrl})`);
+        placeholder.remove();
+        removedCount++;
+      }
+    });
+    
+    // Also try removing by widgetId as fallback
+    const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
+    if (placeholderById && placeholderById.classList.contains('loading-placeholder')) {
+      console.log(`✅ [LOADING] Removing loading placeholder by ID for ${widgetId}`);
+      placeholderById.remove();
+      removedCount++;
+    }
+    
+    if (removedCount === 0) {
+      console.log(`🔵 [LOADING] No loading placeholder found to remove for ${originalUrl}`);
+    }
     
     // Check if widget with same ID already exists (for in-place updates during auto-refresh)
     const existingWidgetById = document.getElementById(statusWidgetId);
@@ -7270,18 +7567,7 @@ export default apiInitializer((api) => {
         fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(url); // Also add original for backward compatibility
         
-        // CRITICAL: Create loading placeholder IMMEDIATELY when URL is detected
-        // This shows user that widget is loading instead of showing nothing
-        try {
-          const urlHash = url.split('').reduce((acc, char) => {
-            return ((acc << 5) - acc) + char.charCodeAt(0);
-          }, 0);
-          const widgetId = `snapshot_${Math.abs(urlHash)}`;
-          createLoadingPlaceholder(url, widgetId, orderedProposals.findIndex(p => p.url === url && p.type === 'snapshot'));
-          console.log(`✅ [LOADING] Created loading placeholder for Snapshot URL: ${url}`);
-        } catch (err) {
-          console.warn(`⚠️ [LOADING] Failed to create loading placeholder for ${url}:`, err);
-        }
+        // Loaders disabled - widgets will appear directly when ready
         
         return true;
       });
@@ -7545,18 +7831,7 @@ export default apiInitializer((api) => {
         fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(aipUrl);
         
-        // CRITICAL: Create loading placeholder IMMEDIATELY when AIP URL is detected
-        try {
-          const urlHash = aipUrl.split('').reduce((acc, char) => {
-            return ((acc << 5) - acc) + char.charCodeAt(0);
-          }, 0);
-          const widgetId = `aip_${Math.abs(urlHash)}`;
-          const proposalOrderIndex = orderedProposals.findIndex(p => p.url === aipUrl && p.type === 'aip');
-          createLoadingPlaceholder(aipUrl, widgetId, proposalOrderIndex >= 0 ? proposalOrderIndex : null);
-          console.log(`✅ [LOADING] Created loading placeholder for AIP URL: ${aipUrl}`);
-        } catch (err) {
-          console.warn(`⚠️ [LOADING] Failed to create loading placeholder for ${aipUrl}:`, err);
-        }
+        // Loaders disabled - widgets will appear directly when ready
         
         console.log(`🔵 [TOPIC] Fetching AIP proposal ${aipIndex + 1} from: ${aipUrl}`);
         return fetchProposalDataByType(aipUrl, 'aip')
@@ -7808,7 +8083,14 @@ export default apiInitializer((api) => {
     // This ensures widgets appear on page load and stay visible, not just when scrolling
     // Reduced delays for faster visibility: immediate, 100ms, 300ms
     ensureAIPWidgetsVisible(); // Immediate
+    
+    // Remove any existing loading placeholders (loaders are disabled)
     setTimeout(() => {
+      const allPlaceholders = document.querySelectorAll('.loading-placeholder');
+      if (allPlaceholders.length > 0) {
+        console.log(`🧹 [CLEANUP] Removing ${allPlaceholders.length} loading placeholder(s) - loaders are disabled`);
+        allPlaceholders.forEach(placeholder => placeholder.remove());
+      }
       ensureAIPWidgetsVisible();
       console.log("✅ [TOPIC] Ensured all widgets are visible after processing all proposals");
     }, 100);
@@ -7827,6 +8109,9 @@ export default apiInitializer((api) => {
   const renderingUrls = new Set();
   // Track URLs currently being fetched to prevent duplicate fetches
   const fetchingUrls = new Set();
+  // Track URLs for which loading placeholders are being created (prevents duplicates)
+  // eslint-disable-next-line no-unused-vars
+  const creatingPlaceholders = new Set();
   
   function debouncedSetupTopicWidget() {
     // Clear any pending setup
