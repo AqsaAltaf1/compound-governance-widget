@@ -65,7 +65,7 @@ export default apiInitializer((api) => {
   // Snapshot API Configuration
   // Support both production (snapshot.org) and testnet (testnet.snapshot.box) domains
   const SNAPSHOT_GRAPHQL_ENDPOINT = "https://hub.snapshot.org/graphql";
-  const SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT = "https://testnet.snapshot.org/graphql";
+  const SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT = "https://testnet.hub.snapshot.org/graphql";
   // Match both snapshot.org and testnet.snapshot.box URLs
   const SNAPSHOT_URL_REGEX = /https?:\/\/(?:www\.)?(?:snapshot\.org|testnet\.snapshot\.box)\/#\/[^\s<>"']+/gi;
   
@@ -636,7 +636,7 @@ export default apiInitializer((api) => {
               console.log("✅ [SNAPSHOT] Proposal fetched with format 2 (hash only)");
               
               // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
-              if (!isValidAaveGovernanceProposal(retryResult2.data.proposal, space)) {
+              if (!isValidAaveGovernanceProposal(retryResult2.data.proposal, space, isTestnet)) {
                 console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
                 return null;
               }
@@ -666,7 +666,7 @@ export default apiInitializer((api) => {
                 console.log("✅ [SNAPSHOT] Proposal fetched with format 3 ('s:' prefix)");
                 
                 // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
-                if (!isValidAaveGovernanceProposal(retryResult3.data.proposal, space)) {
+                if (!isValidAaveGovernanceProposal(retryResult3.data.proposal, space, isTestnet)) {
                   console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
                   return null;
                 }
@@ -705,14 +705,30 @@ export default apiInitializer((api) => {
       } else if (errorName === 'TypeError' || errorMessage.includes('Failed to fetch')) {
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const isCorsError = errorMessage.includes('CORS') || errorMessage.includes('preflight') || 
-                           (errorMessage.includes('blocked') && isLocalhost);
+                           errorMessage.includes('blocked');
+        const currentOrigin = window.location.origin;
         
         console.error("❌ [SNAPSHOT] Network error - possible causes:");
-        if (isLocalhost && (isCorsError || isTestnet)) {
+        if (isCorsError && isTestnet) {
+          console.error("   🔴 CORS policy blocking request to testnet.hub.snapshot.org");
+          console.error(`   📝 Request origin: ${currentOrigin}`);
+          console.error("   📝 This happens because:");
+          console.error("      - testnet.hub.snapshot.org has restrictive CORS policies");
+          console.error("      - It only allows requests from specific whitelisted domains");
+          console.error("      - Custom Discourse domains are not whitelisted");
+          console.error("   💡 Solutions:");
+          if (isLocalhost) {
+            console.error("      1. Use a CORS browser extension (e.g., 'CORS Unblock' for Chrome)");
+            console.error("      2. Launch Chrome with: --disable-web-security --user-data-dir=/tmp/chrome_dev");
+          }
+          console.error("      3. Use production Snapshot proposals (snapshot.org) instead of testnet");
+          console.error("      4. Contact Snapshot team to whitelist your domain");
+          console.error("      5. Set up a backend proxy server to fetch Snapshot data");
+        } else if (isLocalhost && (isCorsError || isTestnet)) {
           console.error("   🔴 CORS policy blocking request from localhost (common in local development)");
           console.error("   📝 This happens because:");
           console.error("      - Browser blocks cross-origin requests from localhost");
-          console.error("      - testnet.snapshot.org doesn't allow requests from localhost");
+          console.error("      - testnet.hub.snapshot.org doesn't allow requests from localhost");
           console.error("      - This is a browser security feature, not a code bug");
           console.error("   💡 Solutions for local development:");
           console.error("      1. Use a CORS browser extension (e.g., 'CORS Unblock' for Chrome)");
@@ -2201,46 +2217,56 @@ export default apiInitializer((api) => {
           <div class="status-badge ${isActive ? 'active' : isExecuted ? 'executed' : 'inactive'}">
             ${isActive ? 'ACTIVE' : isExecuted ? 'EXECUTED' : 'INACTIVE'}
           </div>
-          ${totalVotes > 0 ? `
-            <div class="voting-section">
-              <div class="voting-bar">
-                <div class="vote-option vote-for">
-                  <div class="vote-label-row">
-                    <span class="vote-label">For</span>
-                    <span class="vote-amount">${formatVoteAmount(votesFor)}</span>
+          ${(() => {
+            const statusLower = (proposalData.status || '').toLowerCase();
+            const isPending = statusLower === 'pending';
+            const showVoteButton = totalVotes > 0 && !isPending;
+            
+            if (showVoteButton) {
+              return `
+                <div class="voting-section">
+                  <div class="voting-bar">
+                    <div class="vote-option vote-for">
+                      <div class="vote-label-row">
+                        <span class="vote-label">For</span>
+                        <span class="vote-amount">${formatVoteAmount(votesFor)}</span>
+                      </div>
+                      <div class="vote-bar">
+                        <div class="vote-fill vote-for" style="width: ${percentFor}%">${percentFor}%</div>
+                      </div>
+                    </div>
+                    <div class="vote-option vote-against">
+                      <div class="vote-label-row">
+                        <span class="vote-label">Against</span>
+                        <span class="vote-amount">${formatVoteAmount(votesAgainst)}</span>
+                      </div>
+                      <div class="vote-bar">
+                        <div class="vote-fill vote-against" style="width: ${percentAgainst}%">${percentAgainst}%</div>
+                      </div>
+                    </div>
+                    <div class="vote-option vote-abstain">
+                      <div class="vote-label-row">
+                        <span class="vote-label">Abstain</span>
+                        <span class="vote-amount">${formatVoteAmount(votesAbstain)}</span>
+                      </div>
+                      <div class="vote-bar">
+                        <div class="vote-fill vote-abstain" style="width: ${percentAbstain}%">${percentAbstain}%</div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="vote-bar">
-                    <div class="vote-fill vote-for" style="width: ${percentFor}%">${percentFor}%</div>
-                  </div>
+                  <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
+                    Vote on Snapshot
+                  </a>
                 </div>
-                <div class="vote-option vote-against">
-                  <div class="vote-label-row">
-                    <span class="vote-label">Against</span>
-                    <span class="vote-amount">${formatVoteAmount(votesAgainst)}</span>
-                  </div>
-                  <div class="vote-bar">
-                    <div class="vote-fill vote-against" style="width: ${percentAgainst}%">${percentAgainst}%</div>
-                  </div>
-                </div>
-                <div class="vote-option vote-abstain">
-                  <div class="vote-label-row">
-                    <span class="vote-label">Abstain</span>
-                    <span class="vote-amount">${formatVoteAmount(votesAbstain)}</span>
-                  </div>
-                  <div class="vote-bar">
-                    <div class="vote-fill vote-abstain" style="width: ${percentAbstain}%">${percentAbstain}%</div>
-                  </div>
-                </div>
-              </div>
-              <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
-                Vote on Snapshot
-              </a>
-            </div>
-          ` : `
-            <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
-              View on Snapshot
-            </a>
-          `}
+              `;
+            } else {
+              return `
+                <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
+                  View on Snapshot
+                </a>
+              `;
+            }
+          })()}
         </div>
       </div>
     `;
@@ -2668,12 +2694,13 @@ export default apiInitializer((api) => {
       
       const isActive = stageData.status === 'active' || stageData.status === 'open';
       const isPending = stageData.status === 'pending';
+      const isCreated = stageData.status === 'created';
       const isPassed = stageData.status === 'passed' || 
                        stageData.status === 'closed' || 
                        (stageData.status === 'executed' && supportPercent > 50) ||
                        (stageData.status !== 'active' && stageData.status !== 'open' && stageData.status !== 'pending' && supportPercent > 50);
-      const status = isPassed ? 'Passed' : (isActive ? 'Active' : (isPending ? 'Pending' : 'Closed'));
-      const statusClass = isPassed ? 'executed' : (isActive ? 'active' : (isPending ? 'pending' : 'inactive'));
+      const status = isPassed ? 'Passed' : (isActive ? 'Active' : (isPending ? 'Pending' : (isCreated ? 'Created' : 'Closed')));
+      const statusClass = isPassed ? 'executed' : (isActive ? 'active' : (isPending ? 'pending' : (isCreated ? 'created' : 'inactive')));
       
       // For "pending" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
@@ -2958,6 +2985,11 @@ export default apiInitializer((api) => {
       const isCancelledOrFailed = stageData.status === 'cancelled' || stageData.status === 'failed';
       const shouldShowVotes = !isCancelledOrFailed && votesAvailable && totalVotes !== null && totalVotes > 0;
       
+      // Define status flags for button text logic
+      const isActive = stageData.status === 'active' || stageData.status === 'open';
+      const isPending = stageData.status === 'pending';
+      const isCreated = stageData.status === 'created';
+      
       // Progress bar HTML - For AIP: show For/Against votes, no abstain
       // Only show progress bar if votes are available AND proposal is not cancelled/failed
       const progressBarHtml = shouldShowVotes ? `
@@ -3038,7 +3070,7 @@ export default apiInitializer((api) => {
         `}
         ${quorumHtml}
         <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
-          ${status === 'active' ? 'Vote on Aave' : 'View on Aave'}
+          ${isActive && !isPending && !isCreated ? 'Vote on Aave' : 'View on Aave'}
         </a>
       `;
       
@@ -3924,17 +3956,20 @@ export default apiInitializer((api) => {
     if (proposalData.type === 'snapshot') {
       if (proposalData.stage === 'temp-check') {
         stageLabel = 'Temp Check';
-        buttonText = 'Vote on Snapshot';
+        // Show "View on Snapshot" for pending/created, "Vote on Snapshot" for active
+        buttonText = (status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
       } else if (proposalData.stage === 'arfc') {
         stageLabel = 'ARFC';
-        buttonText = 'Vote on Snapshot';
+        // Show "View on Snapshot" for pending/created, "Vote on Snapshot" for active
+        buttonText = (status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
       } else {
         stageLabel = 'Snapshot';
         buttonText = 'View on Snapshot';
       }
     } else if (proposalData.type === 'aip') {
       stageLabel = 'AIP (On-Chain)';
-      buttonText = proposalData.status === 'active' ? 'Vote on Aave' : 'View on Aave';
+      // Show "View on Aave" for pending/created, "Vote on Aave" for active (not pending/created)
+      buttonText = (status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Aave' : (status === 'active' ? 'Vote on Aave' : 'View on Aave');
     } else {
       // Default fallback (shouldn't happen, but just in case)
       stageLabel = '';
@@ -6119,6 +6154,7 @@ export default apiInitializer((api) => {
     
     if (!snapshotProposal || !snapshotProposal.data) {
       console.log(`   ❌ No proposal data`);
+
       return { isRelated: false, discussionLink: null };
     }
     
@@ -8039,9 +8075,12 @@ export default apiInitializer((api) => {
           fetchProposalData(proposalId, url, proposalInfo.govId, proposalInfo.urlProposalNumber)
             .then(data => {
               if (data && data.title && data.title !== "Snapshot Proposal") {
+                console.log("🔵 [COMPOSER] Proposal data:", { title: data.title, description: data.description ? data.description.substring(0, 100) : 'NO DESCRIPTION', type: data.type });
                 // Render widget only (don't modify reply box textarea)
                 renderProposalWidget(widgetContainer, data, url);
                 console.log("✅ [COMPOSER] Widget rendered successfully");
+              } else {
+                console.warn("⚠️ [COMPOSER] Invalid proposal data:", data);
               }
             })
             .catch(err => {
@@ -8699,5 +8738,6 @@ export default apiInitializer((api) => {
     }, 500);
   });
 });
+
 
 
