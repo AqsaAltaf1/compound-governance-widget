@@ -63,8 +63,11 @@ export default apiInitializer((api) => {
   });
 
   // Snapshot API Configuration
+  // Support both production (snapshot.org) and testnet (testnet.snapshot.box) domains
   const SNAPSHOT_GRAPHQL_ENDPOINT = "https://hub.snapshot.org/graphql";
-  const SNAPSHOT_URL_REGEX = /https?:\/\/(?:www\.)?snapshot\.org\/#\/[^\s<>"']+/gi;
+  const SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT = "https://testnet.snapshot.org/graphql";
+  // Match both snapshot.org and testnet.snapshot.box URLs
+  const SNAPSHOT_URL_REGEX = /https?:\/\/(?:www\.)?(?:snapshot\.org|testnet\.snapshot\.box)\/#\/[^\s<>"']+/gi;
   
   // Aave Governance Forum Configuration
   // Primary entry point: Aave Governance Forum thread
@@ -179,33 +182,35 @@ export default apiInitializer((api) => {
 
 
   // Extract Snapshot proposal info from URL
-  // Format: https://snapshot.org/#/{space}/{proposal-id}
+  // Format: https://snapshot.org/#/{space}/{proposal-id} or https://testnet.snapshot.box/#/{space}/{proposal-id}
   // Example: https://snapshot.org/#/aave.eth/0x1234...
+  // Example: https://testnet.snapshot.box/#/s-tn:sepolia-testnet-123.eth/proposal/0x1234...
   function extractSnapshotProposalInfo(url) {
     console.log("🔍 Extracting Snapshot proposal info from URL:", url);
     
     try {
-      // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
-      // Also handles: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
-      // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
+      // Match pattern for both production and testnet: {domain}/#/{space}/proposal/{proposal-id}
       // Handles: snapshot.org/#/s:aavedao.eth/proposal/0x1234...
-      const proposalMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
+      // Handles: testnet.snapshot.box/#/s-tn:sepolia-testnet-123.eth/proposal/0x1234...
+      const proposalMatch = url.match(/(?:snapshot\.org|testnet\.snapshot\.box)\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
       if (proposalMatch) {
         const space = proposalMatch[1];
         const proposalId = proposalMatch[2];
-        console.log("✅ Extracted Snapshot format:", { space, proposalId });
-        return { space, proposalId, type: 'snapshot' };
+        const isTestnet = url.includes('testnet.snapshot.box');
+        console.log("✅ Extracted Snapshot format:", { space, proposalId, isTestnet });
+        return { space, proposalId, type: 'snapshot', isTestnet };
       }
       
-      // Match pattern: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
-      const directMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
+      // Match pattern: {domain}/#/{space}/{proposal-id} (without /proposal/)
+      const directMatch = url.match(/(?:snapshot\.org|testnet\.snapshot\.box)\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
       if (directMatch) {
         const space = directMatch[1];
         const proposalId = directMatch[2];
         // Skip if proposalId is "proposal" (means it's the /proposal/ path but regex didn't match correctly)
         if (proposalId.toLowerCase() !== 'proposal') {
-          console.log("✅ Extracted Snapshot format (direct):", { space, proposalId });
-          return { space, proposalId, type: 'snapshot' };
+          const isTestnet = url.includes('testnet.snapshot.box');
+          console.log("✅ Extracted Snapshot format (direct):", { space, proposalId, isTestnet });
+          return { space, proposalId, type: 'snapshot', isTestnet };
         }
       }
       
@@ -419,23 +424,30 @@ export default apiInitializer((api) => {
 
   // Validate that a Snapshot proposal is a valid Aave governance proposal
   // Must be of type AIP, Temp Check, or ARFC
-  function isValidAaveGovernanceProposal(proposal, space) {
+  function isValidAaveGovernanceProposal(proposal, space, isTestnet = false) {
     if (!proposal) {
       return false;
     }
     
-    // Verify space is from Aave (aave.eth or aavedao.eth)
-    const cleanSpace = space.startsWith('s:') ? space.substring(2) : space;
-    const isAaveSpace = cleanSpace === 'aave.eth' || 
-                       cleanSpace === 'aavedao.eth' ||
-                       cleanSpace === 's:aave.eth' ||
-                       cleanSpace === 's:aavedao.eth' ||
-                       space === 'aave.eth' ||
-                       space === 'aavedao.eth';
-    
-    if (!isAaveSpace) {
-      console.log("❌ [VALIDATE] Proposal space is not Aave:", cleanSpace);
-      return false;
+    // Handle testnet spaces differently - allow testnet spaces for testing
+    if (isTestnet) {
+      console.log("🔵 [VALIDATE] Testnet proposal detected - allowing testnet space:", space);
+      // For testnet, we can be more lenient - allow any testnet space
+      // Still check proposal type (AIP, Temp Check, ARFC) below
+    } else {
+      // Verify space is from Aave (aave.eth or aavedao.eth) for production
+      const cleanSpace = space.startsWith('s:') ? space.substring(2) : space;
+      const isAaveSpace = cleanSpace === 'aave.eth' || 
+                         cleanSpace === 'aavedao.eth' ||
+                         cleanSpace === 's:aave.eth' ||
+                         cleanSpace === 's:aavedao.eth' ||
+                         space === 'aave.eth' ||
+                         space === 'aavedao.eth';
+      
+      if (!isAaveSpace) {
+        console.log("❌ [VALIDATE] Proposal space is not Aave:", cleanSpace);
+        return false;
+      }
     }
     
     // Check proposal title and body for AIP, Temp Check, or ARFC indicators
@@ -484,9 +496,11 @@ export default apiInitializer((api) => {
   }
 
   // Fetch Snapshot proposal data
-  async function fetchSnapshotProposal(space, proposalId, cacheKey) {
+  async function fetchSnapshotProposal(space, proposalId, cacheKey, isTestnet = false) {
     try {
-      console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId);
+      // Use testnet endpoint if isTestnet is true
+      const graphqlEndpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
+      console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId, "isTestnet:", isTestnet);
 
       // Query by full ID
       const queryById = `
@@ -535,6 +549,10 @@ export default apiInitializer((api) => {
       if (space.startsWith('s:')) {
         cleanSpace = space.substring(2); // Remove 's:' prefix for API
       }
+      // Handle testnet space format: s-tn:sepolia-testnet-123.eth
+      if (space.startsWith('s-tn:')) {
+        cleanSpace = space.substring(5); // Remove 's-tn:' prefix for API
+      }
       
       // Try format 1: {space}/{proposal-id} (most common)
       const fullProposalId1 = `${cleanSpace}/${proposalId}`;
@@ -554,10 +572,10 @@ export default apiInitializer((api) => {
         query: queryById,
         variables: { id: fullProposalId }
       };
-      console.log("🔵 [SNAPSHOT] Making request to:", SNAPSHOT_GRAPHQL_ENDPOINT);
+      console.log("🔵 [SNAPSHOT] Making request to:", graphqlEndpoint);
       console.log("🔵 [SNAPSHOT] Request body:", JSON.stringify(requestBody, null, 2));
       
-      const response = await fetchWithRetry(SNAPSHOT_GRAPHQL_ENDPOINT, {
+      const response = await fetchWithRetry(graphqlEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -582,7 +600,7 @@ export default apiInitializer((api) => {
           console.log("✅ [SNAPSHOT] Proposal fetched successfully with format 1");
           
           // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
-          if (!isValidAaveGovernanceProposal(proposal, space)) {
+          if (!isValidAaveGovernanceProposal(proposal, space, isTestnet)) {
             console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
             return null;
           }
@@ -595,7 +613,7 @@ export default apiInitializer((api) => {
           console.warn("⚠️ [SNAPSHOT] Format 1 failed, trying format 2 (proposal hash only)...");
           
           // Try format 2: Just the proposal hash
-          const retryResponse2 = await fetchWithRetry(SNAPSHOT_GRAPHQL_ENDPOINT, {
+          const retryResponse2 = await fetchWithRetry(graphqlEndpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -625,7 +643,7 @@ export default apiInitializer((api) => {
           // Try format 3: With 's:' prefix
           if (space.startsWith('s:') && cleanSpace !== space) {
             console.warn("⚠️ [SNAPSHOT] Format 2 failed, trying format 3 (with 's:' prefix)...");
-            const retryResponse3 = await fetchWithRetry(SNAPSHOT_GRAPHQL_ENDPOINT, {
+            const retryResponse3 = await fetchWithRetry(graphqlEndpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -667,8 +685,9 @@ export default apiInitializer((api) => {
       console.error("❌ [SNAPSHOT] Error fetching proposal:", {
         name: errorName,
         message: errorMessage,
-        url: SNAPSHOT_GRAPHQL_ENDPOINT,
+        url: graphqlEndpoint,
         proposalId,
+        isTestnet,
         fullError: error
       });
       
@@ -4373,11 +4392,13 @@ export default apiInitializer((api) => {
         snapshotMatches.forEach(url => {
           // Decode HTML entities to normalize URLs
           const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-          // Only include Aave Snapshot space links (aave.eth or s:aavedao.eth)
-          if (decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth')) {
+          // Include Aave Snapshot space links (aave.eth or s:aavedao.eth) OR testnet Snapshot URLs
+          const isAaveSpace = decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth');
+          const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+          if (isAaveSpace || isTestnet) {
             if (!extractedLinks.snapshot.includes(decodedUrl) && !extractedLinks.snapshot.includes(url)) {
               extractedLinks.snapshot.push(decodedUrl);
-              console.log("✅ [FORUM] Found Snapshot link:", decodedUrl);
+              console.log("✅ [FORUM] Found Snapshot link:", decodedUrl, isTestnet ? "(testnet)" : "(production)");
             }
           }
         });
@@ -4514,10 +4535,12 @@ export default apiInitializer((api) => {
         if (topicSnapshotMatches) {
           topicSnapshotMatches.forEach((url) => {
             const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-            if (decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth')) {
+            const isAaveSpace = decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth');
+            const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+            if (isAaveSpace || isTestnet) {
               if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
                 proposals.snapshot.push(decodedUrl);
-                console.log("✅ [TOPIC] Found Snapshot link in topic content HTML:", decodedUrl);
+                console.log("✅ [TOPIC] Found Snapshot link in topic content HTML:", decodedUrl, isTestnet ? "(testnet)" : "(production)");
               }
             }
           });
@@ -4607,8 +4630,10 @@ export default apiInitializer((api) => {
         snapshotMatches.forEach(url => {
           // Decode HTML entities to normalize URLs
           const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-          // Only include Aave Snapshot space links
-          if (decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth')) {
+          // Include Aave Snapshot space links OR testnet Snapshot URLs
+          const isAaveSpace = decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth');
+          const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+          if (isAaveSpace || isTestnet) {
             if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
               proposals.snapshot.push(decodedUrl);
             }
@@ -4973,7 +4998,7 @@ export default apiInitializer((api) => {
         if (!proposalInfo) {
           return null;
         }
-        return await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey);
+        return await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey, proposalInfo.isTestnet);
       } else if (type === 'aip') {
         const proposalInfo = extractAIPProposalInfo(url);
         if (!proposalInfo) {
@@ -5149,9 +5174,11 @@ export default apiInitializer((api) => {
         const urlMatch = matches[0].match(SNAPSHOT_URL_REGEX);
         if (urlMatch && urlMatch.length > 0) {
           const foundUrl = urlMatch[0];
-          // Prefer Aave Snapshot links
-          if (foundUrl.includes('aave.eth') || foundUrl.includes('aavedao.eth')) {
-            console.log(`✅ [CASCADE] Found previous Snapshot stage URL: ${foundUrl}`);
+          // Prefer Aave Snapshot links or testnet URLs
+          const isAaveSpace = foundUrl.includes('aave.eth') || foundUrl.includes('aavedao.eth');
+          const isTestnet = foundUrl.includes('testnet.snapshot.box');
+          if (isAaveSpace || isTestnet) {
+            console.log(`✅ [CASCADE] Found previous Snapshot stage URL: ${foundUrl}`, isTestnet ? "(testnet)" : "(production)");
             return foundUrl;
           }
         }
@@ -5165,8 +5192,9 @@ export default apiInitializer((api) => {
       const currentUrl = snapshotData.url || '';
       const previousStageUrl = snapshotUrlMatches.find(url => {
         const isAave = url.includes('aave.eth') || url.includes('aavedao.eth');
+        const isTestnet = url.includes('testnet.snapshot.box');
         const isNotCurrent = !currentUrl || !url.includes(currentUrl.split('/').pop() || '');
-        return isAave && isNotCurrent;
+        return (isAave || isTestnet) && isNotCurrent;
       });
       
       if (previousStageUrl) {
@@ -5203,15 +5231,18 @@ export default apiInitializer((api) => {
     // Pattern 1: Direct Snapshot URLs
     const snapshotUrlMatches = description.match(SNAPSHOT_URL_REGEX);
     if (snapshotUrlMatches && snapshotUrlMatches.length > 0) {
-      // Filter for Aave Snapshot space links (preferred)
-      const aaveSnapshotMatch = snapshotUrlMatches.find(url => 
-        url.includes('aave.eth') || url.includes('aavedao.eth')
-      );
-      if (aaveSnapshotMatch) {
-        console.log(`✅ [CASCADE] Found Aave Snapshot URL: ${aaveSnapshotMatch}`);
-        return aaveSnapshotMatch;
+      // Filter for Aave Snapshot space links or testnet URLs (preferred)
+      const preferredMatch = snapshotUrlMatches.find(url => {
+        const isAave = url.includes('aave.eth') || url.includes('aavedao.eth');
+        const isTestnet = url.includes('testnet.snapshot.box');
+        return isAave || isTestnet;
+      });
+      if (preferredMatch) {
+        const isTestnet = preferredMatch.includes('testnet.snapshot.box');
+        console.log(`✅ [CASCADE] Found Snapshot URL: ${preferredMatch}`, isTestnet ? "(testnet)" : "(production)");
+        return preferredMatch;
       }
-      // If no Aave-specific link, return first match anyway
+      // If no preferred link, return first match anyway
       console.log(`✅ [CASCADE] Found Snapshot URL: ${snapshotUrlMatches[0]}`);
       return snapshotUrlMatches[0];
     }
