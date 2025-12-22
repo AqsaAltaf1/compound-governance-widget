@@ -18,7 +18,7 @@
     margin-right: 0 !important;
     box-sizing: border-box !important;
   }
-  
+
   // Ensure parent containers don't constrain button width
   .governance-stage,
   .stage-collapsed-content,
@@ -94,6 +94,7 @@
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;
+
     // Ensure testnet widgets have same layout and responsiveness as production
     position: relative !important;
     width: 100% !important;
@@ -106,6 +107,7 @@
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;
+
     // Same classes, same layout, same responsiveness as production
     position: relative !important;
     width: 100% !important;
@@ -616,7 +618,7 @@
         max-width: 100% !important;
         box-sizing: border-box !important;
       }
-      
+
       .stage-collapsed-content {
         // Ensure collapsed content is full width on mobile
         @media (width <= 768px) {
@@ -625,14 +627,14 @@
           box-sizing: border-box !important;
         }
       }
-      
+
       .vote-button {
         // Ensure 100% width and centered text for governance stage buttons
         width: 100% !important;
         max-width: 100% !important;
         text-align: center !important;
         box-sizing: border-box !important;
-        
+
         // Ensure full width on ALL mobile screens (phones and tablets)
         @media (width <= 1024px) {
           width: 100% !important;
@@ -647,7 +649,10 @@
         }
 
         &:hover {
-          background-color: var(--d-button-primary-bg-color, #2563eb) !important;
+          background-color: var(
+            --d-button-primary-bg-color,
+            #2563eb
+          ) !important;
           color: var(--d-button-primary-text-color, white) !important;
         }
       }
