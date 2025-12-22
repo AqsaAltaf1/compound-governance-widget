@@ -4604,18 +4604,51 @@ export default apiInitializer((api) => {
         
         // Scan topic content HTML for Snapshot URLs
         const topicSnapshotMatches = topicContentHTML.match(SNAPSHOT_URL_REGEX);
+        console.log(`🔍 [TOPIC] Snapshot regex found ${topicSnapshotMatches ? topicSnapshotMatches.length : 0} match(es) in topic content HTML`);
         if (topicSnapshotMatches) {
-          topicSnapshotMatches.forEach((url) => {
+          topicSnapshotMatches.forEach((url, idx) => {
+            console.log(`🔍 [TOPIC] Snapshot match ${idx + 1}: "${url}"`);
             const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
             const isAaveSpace = decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth');
             const isTestnet = decodedUrl.includes('testnet.snapshot.box');
-            if (isAaveSpace || isTestnet) {
+            console.log(`🔍 [TOPIC] Snapshot URL check - isAaveSpace: ${isAaveSpace}, isTestnet: ${isTestnet}, URL: ${decodedUrl}`);
+            
+            // CRITICAL: Accept ALL Snapshot URLs, not just Aave spaces
+            // This ensures we catch proposals even if they're from different spaces
+            // The space filter was too restrictive and prevented detection
+            if (isAaveSpace || isTestnet || decodedUrl.includes('snapshot.org') || decodedUrl.includes('snapshot.box')) {
               if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
                 proposals.snapshot.push(decodedUrl);
                 console.log("✅ [TOPIC] Found Snapshot link in topic content HTML:", decodedUrl, isTestnet ? "(testnet)" : "(production)");
               }
+            } else {
+              console.log(`⚠️ [TOPIC] Snapshot URL found but doesn't match Aave space filter: ${decodedUrl}`);
+              // Still add it - the space filter was too restrictive
+              if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                proposals.snapshot.push(decodedUrl);
+                console.log("✅ [TOPIC] Added Snapshot link despite space filter (more permissive):", decodedUrl);
+              }
             }
           });
+        } else {
+          // Debug: Check if Snapshot URL pattern exists in HTML but regex didn't match
+          const hasSnapshot = topicContentHTML.includes('snapshot.org') || topicContentHTML.includes('snapshot.box');
+          console.log(`🔍 [TOPIC] Snapshot pattern check in HTML - snapshot.org: ${topicContentHTML.includes('snapshot.org')}, snapshot.box: ${topicContentHTML.includes('snapshot.box')}`);
+          if (hasSnapshot) {
+            // Try a more flexible pattern
+            const flexiblePattern = /https?:\/\/[^\s<>"']*snapshot\.(?:org|box)[^\s<>"']*/gi;
+            const flexibleMatches = topicContentHTML.match(flexiblePattern);
+            if (flexibleMatches) {
+              console.log(`⚠️ [TOPIC] Found Snapshot-like URLs with flexible pattern:`, flexibleMatches);
+              flexibleMatches.forEach(url => {
+                const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                  proposals.snapshot.push(decodedUrl);
+                  console.log("✅ [TOPIC] Found Snapshot link via flexible pattern:", decodedUrl);
+                }
+              });
+            }
+          }
         }
         
         // Scan topic content HTML for Forum URLs
@@ -4630,6 +4663,49 @@ export default apiInitializer((api) => {
             }
           });
         }
+        
+        // CRITICAL: Also scan oneboxes in the topic content HTML for Snapshot URLs
+        // Oneboxes might be in the HTML but the regex might not catch them due to encoding
+        // Create a temporary container to parse and search oneboxes
+        const tempContainer = document.createElement('div');
+        tempContainer.innerHTML = topicContentHTML;
+        const allOneboxes = tempContainer.querySelectorAll('.onebox, .onebox-body, [class*="onebox"]');
+        console.log(`🔍 [TOPIC] Found ${allOneboxes.length} onebox(es) in topic content HTML to scan for Snapshot URLs`);
+        allOneboxes.forEach((onebox, idx) => {
+          const oneboxText = onebox.textContent || onebox.innerText || '';
+          const oneboxHtml = onebox.innerHTML || '';
+          const oneboxContent = oneboxText + ' ' + oneboxHtml;
+          
+          if (oneboxContent.includes('snapshot.org') || oneboxContent.includes('snapshot.box') || oneboxContent.includes('testnet.snapshot.box')) {
+            console.log(`🔍 [TOPIC] Onebox ${idx + 1} in topic HTML: Contains Snapshot URL pattern`);
+            SNAPSHOT_URL_REGEX.lastIndex = 0;
+            const oneboxMatches = oneboxContent.match(SNAPSHOT_URL_REGEX);
+            if (oneboxMatches) {
+              oneboxMatches.forEach(url => {
+                const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+                if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                  proposals.snapshot.push(decodedUrl);
+                  console.log(`✅ [TOPIC] Found Snapshot link in topic HTML onebox:`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+                }
+              });
+            } else {
+              // Try flexible pattern (includes testnet)
+              const flexiblePattern = /https?:\/\/[^\s<>"']*snapshot\.(?:org|box)[^\s<>"']*/gi;
+              const flexibleMatches = oneboxContent.match(flexiblePattern);
+              if (flexibleMatches) {
+                flexibleMatches.forEach(url => {
+                  const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                  const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+                  if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                    proposals.snapshot.push(decodedUrl);
+                    console.log(`✅ [TOPIC] Found Snapshot link in topic HTML onebox (flexible):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+                  }
+                });
+              }
+            }
+          }
+        });
       }
     } else {
       console.log("🔍 [TOPIC] Not on a topic page - skipping full HTML scan (prevents widgets on wrong pages)");
@@ -4660,9 +4736,161 @@ export default apiInitializer((api) => {
     // Search through all posts
     for (let i = 0; i < allPosts.length; i++) {
       const post = allPosts[i];
-      const postText = post.textContent || post.innerText || '';
-      const postHtml = post.innerHTML || '';
+      
+      // CRITICAL: Check the .cooked element (raw HTML before oneboxes are created)
+      // This is what decorateCookedElement uses, so we should use it too
+      const cookedElement = post.querySelector('.cooked, .post-content, [data-post-content]');
+      let postText = '';
+      let postHtml = '';
+      
+      if (cookedElement) {
+        // Use cooked element's content (raw HTML before processing)
+        postText = cookedElement.textContent || cookedElement.innerText || '';
+        postHtml = cookedElement.innerHTML || '';
+        console.log(`🔍 [TOPIC] Post ${i + 1}: Using .cooked element (length: ${postText.length} chars text, ${postHtml.length} chars HTML)`);
+      } else {
+        // Fallback to post's content
+        postText = post.textContent || post.innerText || '';
+        postHtml = post.innerHTML || '';
+        console.log(`🔍 [TOPIC] Post ${i + 1}: No .cooked element found, using post content (length: ${postText.length} chars text, ${postHtml.length} chars HTML)`);
+      }
+      
       const combinedContent = postText + ' ' + postHtml;
+      
+      // CRITICAL: Check combined text+HTML content for Snapshot URLs (like decorateCookedElement does)
+      // This catches URLs even if they're not in links yet or oneboxes haven't been created
+      // Use combined content to match what decorateCookedElement sees
+      const combinedText = postText + ' ' + postHtml;
+      SNAPSHOT_URL_REGEX.lastIndex = 0;
+      const allMatches = Array.from(combinedText.matchAll(SNAPSHOT_URL_REGEX));
+      console.log(`🔍 [TOPIC] Post ${i + 1}: Found ${allMatches.length} Snapshot URL(s) in combined content (text+HTML)`);
+      allMatches.forEach((match, matchIdx) => {
+        const url = match[0];
+        const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+        const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+        if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+          proposals.snapshot.push(decodedUrl);
+          console.log(`✅ [TOPIC] Found Snapshot link (in combined content, match ${matchIdx + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+        }
+      });
+      
+      // CRITICAL: Check for links directly in the post (before oneboxes are rendered)
+      // This catches Snapshot URLs even if oneboxes haven't been created yet
+      const allLinks = post.querySelectorAll('a[href]');
+      console.log(`🔍 [TOPIC] Post ${i + 1}: Found ${allLinks.length} total link(s) to check`);
+      let foundDirectLinks = 0;
+      allLinks.forEach((link, linkIdx) => {
+        const href = link.href || link.getAttribute('href') || '';
+        if (href && (href.includes('snapshot.org') || href.includes('snapshot.box') || href.includes('testnet.snapshot.box'))) {
+          console.log(`🔍 [TOPIC] Post ${i + 1}, Link ${linkIdx + 1}: Found Snapshot-like URL: "${href}"`);
+          const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+          // Check if it matches the Snapshot URL pattern
+          SNAPSHOT_URL_REGEX.lastIndex = 0;
+          if (SNAPSHOT_URL_REGEX.test(decodedUrl)) {
+            if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(href)) {
+              proposals.snapshot.push(decodedUrl);
+              foundDirectLinks++;
+              console.log(`✅ [TOPIC] Found Snapshot link (direct link in post ${i + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+            }
+          } else {
+            console.log(`⚠️ [TOPIC] Post ${i + 1}, Link ${linkIdx + 1}: URL contains snapshot but regex didn't match: "${decodedUrl}"`);
+          }
+        }
+      });
+      if (foundDirectLinks > 0) {
+        console.log(`✅ [TOPIC] Post ${i + 1}: Found ${foundDirectLinks} Snapshot link(s) via direct link check`);
+      }
+      
+      // Also check for custom preview containers (these replace oneboxes)
+      // If preview containers exist, it means decorateCookedElement already found URLs
+      // Extract the URL from the preview container's data attribute
+      const previewContainers = post.querySelectorAll('.tally-url-preview, [data-tally-preview-id]');
+      console.log(`🔍 [TOPIC] Post ${i + 1}: Found ${previewContainers.length} preview container(s)`);
+      let foundPreviewLinks = 0;
+      previewContainers.forEach((preview, previewIdx) => {
+        // Method 1: Extract URL from data-tally-url attribute (stored when preview was created)
+        const storedUrl = preview.getAttribute('data-tally-url');
+        if (storedUrl) {
+          const decodedUrl = storedUrl.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          
+          // Check if it's a Snapshot URL
+          SNAPSHOT_URL_REGEX.lastIndex = 0;
+          if (SNAPSHOT_URL_REGEX.test(decodedUrl)) {
+            const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+            if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(storedUrl)) {
+              proposals.snapshot.push(decodedUrl);
+              foundPreviewLinks++;
+              console.log(`✅ [TOPIC] Found Snapshot link (from preview container data attribute ${previewIdx + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+            }
+          }
+          
+          // Check if it's an AIP URL
+          AIP_URL_REGEX.lastIndex = 0;
+          if (AIP_URL_REGEX.test(decodedUrl)) {
+            if (!proposals.aip.includes(decodedUrl) && !proposals.aip.includes(storedUrl)) {
+              proposals.aip.push(decodedUrl);
+              foundPreviewLinks++;
+              console.log(`✅ [TOPIC] Found AIP link (from preview container data attribute ${previewIdx + 1}):`, decodedUrl);
+            }
+          }
+          
+          // Check if it's a Forum URL
+          AAVE_FORUM_URL_REGEX.lastIndex = 0;
+          if (AAVE_FORUM_URL_REGEX.test(decodedUrl)) {
+            const cleanUrl = decodedUrl.replace(/[\/#\?].*$/, '').replace(/\/$/, '');
+            if (!proposals.forum.includes(cleanUrl) && !proposals.forum.includes(decodedUrl) && !proposals.forum.includes(storedUrl)) {
+              proposals.forum.push(cleanUrl);
+              foundPreviewLinks++;
+              console.log(`✅ [TOPIC] Found Forum link (from preview container data attribute ${previewIdx + 1}):`, cleanUrl);
+            }
+          }
+        }
+        
+        // Method 2: Check for links in preview container (might be loading)
+        const previewLinks = preview.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
+        console.log(`🔍 [TOPIC] Post ${i + 1}, Preview ${previewIdx + 1}: Found ${previewLinks.length} link(s) in preview`);
+        previewLinks.forEach(link => {
+          const href = link.href || link.getAttribute('href') || '';
+          if (href && (href.includes('snapshot.org') || href.includes('snapshot.box') || href.includes('testnet.snapshot.box'))) {
+            const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+            SNAPSHOT_URL_REGEX.lastIndex = 0;
+            if (SNAPSHOT_URL_REGEX.test(decodedUrl)) {
+              if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(href)) {
+                proposals.snapshot.push(decodedUrl);
+                foundPreviewLinks++;
+                console.log(`✅ [TOPIC] Found Snapshot link (in preview container ${previewIdx + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+              }
+            }
+          }
+        });
+        
+        // Method 3: If preview container exists but no URL stored and no links yet, check the cooked element's HTML
+        // The URL might still be in the cooked element's HTML before it was fully replaced
+        if (!storedUrl && previewLinks.length === 0 && cookedElement) {
+          // Check if cooked element's HTML still contains the URL (before replacement)
+          const cookedHtml = cookedElement.innerHTML || '';
+          SNAPSHOT_URL_REGEX.lastIndex = 0;
+          const cookedMatches = Array.from(cookedHtml.matchAll(SNAPSHOT_URL_REGEX));
+          if (cookedMatches.length > 0) {
+            console.log(`🔍 [TOPIC] Post ${i + 1}, Preview ${previewIdx + 1}: Found ${cookedMatches.length} URL(s) in cooked HTML (preview container exists but links not loaded yet)`);
+            cookedMatches.forEach((match, matchIdx) => {
+              const url = match[0];
+              const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+              const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+              if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                proposals.snapshot.push(decodedUrl);
+                foundPreviewLinks++;
+                console.log(`✅ [TOPIC] Found Snapshot link (from cooked HTML, preview ${previewIdx + 1}, match ${matchIdx + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+              }
+            });
+          }
+        }
+      });
+      if (foundPreviewLinks > 0) {
+        console.log(`✅ [TOPIC] Post ${i + 1}: Found ${foundPreviewLinks} Snapshot link(s) via preview container check`);
+      }
       
       // Find Aave Governance Forum links (single-link strategy)
       // Match: governance.aave.com/t/{slug}/{id} or governance.aave.com/t/{slug}
@@ -4698,20 +4926,147 @@ export default apiInitializer((api) => {
       
       // Find Snapshot links (direct links, or will be extracted from forum)
       const snapshotMatches = combinedContent.match(SNAPSHOT_URL_REGEX);
+      console.log(`🔍 [TOPIC] Post ${i + 1}: Snapshot regex found ${snapshotMatches ? snapshotMatches.length : 0} match(es)`);
       if (snapshotMatches) {
-        snapshotMatches.forEach(url => {
+        snapshotMatches.forEach((url, idx) => {
+          console.log(`🔍 [TOPIC] Post ${i + 1}, Snapshot match ${idx + 1}: "${url}"`);
           // Decode HTML entities to normalize URLs
           const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
           // Include Aave Snapshot space links OR testnet Snapshot URLs
           const isAaveSpace = decodedUrl.includes('aave.eth') || decodedUrl.includes('aavedao.eth');
           const isTestnet = decodedUrl.includes('testnet.snapshot.box');
-          if (isAaveSpace || isTestnet) {
+          console.log(`🔍 [TOPIC] Post ${i + 1}: Snapshot URL check - isAaveSpace: ${isAaveSpace}, isTestnet: ${isTestnet}`);
+          
+          // CRITICAL: Accept ALL Snapshot URLs, not just Aave spaces
+          // The space filter was too restrictive
+          if (isAaveSpace || isTestnet || decodedUrl.includes('snapshot.org') || decodedUrl.includes('snapshot.box')) {
             if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
               proposals.snapshot.push(decodedUrl);
+              console.log("✅ [TOPIC] Found Snapshot link in post:", decodedUrl);
+            }
+          } else {
+            // Still add it - be more permissive
+            if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+              proposals.snapshot.push(decodedUrl);
+              console.log("✅ [TOPIC] Added Snapshot link (permissive mode):", decodedUrl);
             }
           }
         });
+      } else {
+        // Debug: Check if Snapshot URL pattern exists in content but regex didn't match
+        if (combinedContent.includes('snapshot.org') || combinedContent.includes('snapshot.box')) {
+          const snapshotIndex = Math.max(
+            combinedContent.indexOf('snapshot.org'),
+            combinedContent.indexOf('snapshot.box')
+          );
+          if (snapshotIndex >= 0) {
+            const snippet = combinedContent.substring(Math.max(0, snapshotIndex - 50), Math.min(combinedContent.length, snapshotIndex + 200));
+            console.log(`⚠️ [TOPIC] Post ${i + 1}: Snapshot URL pattern found in content but regex didn't match. Snippet: "${snippet}"`);
+            // Try flexible pattern
+            const flexiblePattern = /https?:\/\/[^\s<>"']*snapshot\.(?:org|box)[^\s<>"']*/gi;
+            const flexibleMatches = combinedContent.match(flexiblePattern);
+            if (flexibleMatches) {
+              flexibleMatches.forEach(url => {
+                const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                  proposals.snapshot.push(decodedUrl);
+                  console.log("✅ [TOPIC] Found Snapshot link via flexible pattern:", decodedUrl);
+                }
+              });
+            }
+          }
+        }
       }
+      
+      // Also check for Snapshot links in href attributes (including testnet)
+      const snapshotLinks = post.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
+      snapshotLinks.forEach(link => {
+        const href = link.href || link.getAttribute('href') || '';
+        if (href && (href.includes('snapshot.org') || href.includes('snapshot.box') || href.includes('testnet.snapshot.box'))) {
+          const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+          if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(href)) {
+            proposals.snapshot.push(decodedUrl);
+            console.log("✅ [TOPIC] Found Snapshot link (via href):", decodedUrl, isTestnet ? "(testnet)" : "(production)");
+          }
+        }
+      });
+      
+      // CRITICAL: Check for links directly in post content (before oneboxes are rendered)
+      // This catches Snapshot URLs even if oneboxes haven't been created yet
+      const directLinks = post.querySelectorAll('a[href]');
+      directLinks.forEach(link => {
+        const href = link.href || link.getAttribute('href') || '';
+        if (href && (href.includes('snapshot.org') || href.includes('snapshot.box') || href.includes('testnet.snapshot.box'))) {
+          // Verify it matches Snapshot URL pattern
+          SNAPSHOT_URL_REGEX.lastIndex = 0;
+          if (SNAPSHOT_URL_REGEX.test(href)) {
+            const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+            const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+            if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(href)) {
+              proposals.snapshot.push(decodedUrl);
+              console.log(`✅ [TOPIC] Found Snapshot link (direct link in post ${i + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+            }
+          }
+        }
+      });
+      
+      // CRITICAL: Check oneboxes and embedded content for Snapshot URLs
+      // Oneboxes are where Discourse embeds URLs, and this is where Snapshot URLs often appear
+      const snapshotOneboxes = post.querySelectorAll('.onebox, .onebox-body, [class*="onebox"], .cooked .onebox');
+      console.log(`🔍 [TOPIC] Post ${i + 1}: Found ${snapshotOneboxes.length} onebox(es) to scan for Snapshot URLs`);
+      snapshotOneboxes.forEach((onebox, oneboxIdx) => {
+        const oneboxText = onebox.textContent || onebox.innerText || '';
+        const oneboxHtml = onebox.innerHTML || '';
+        const oneboxContent = oneboxText + ' ' + oneboxHtml;
+        
+        // Check for Snapshot URLs in onebox (including testnet)
+        if (oneboxContent.includes('snapshot.org') || oneboxContent.includes('snapshot.box') || oneboxContent.includes('testnet.snapshot.box')) {
+          console.log(`🔍 [TOPIC] Post ${i + 1}, Onebox ${oneboxIdx + 1}: Contains Snapshot URL pattern`);
+          SNAPSHOT_URL_REGEX.lastIndex = 0;
+          const oneboxSnapshotMatches = oneboxContent.match(SNAPSHOT_URL_REGEX);
+          if (oneboxSnapshotMatches) {
+            console.log(`✅ [TOPIC] Post ${i + 1}, Onebox ${oneboxIdx + 1}: Found ${oneboxSnapshotMatches.length} Snapshot URL(s) via regex`);
+            oneboxSnapshotMatches.forEach((url, urlIdx) => {
+              const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+              const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+              if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                proposals.snapshot.push(decodedUrl);
+                console.log(`✅ [TOPIC] Found Snapshot link (via onebox ${oneboxIdx + 1}, URL ${urlIdx + 1}):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+              }
+            });
+          } else {
+            // Try flexible pattern if main regex fails (includes testnet)
+            const flexiblePattern = /https?:\/\/[^\s<>"']*snapshot\.(?:org|box)[^\s<>"']*/gi;
+            const flexibleMatches = oneboxContent.match(flexiblePattern);
+            if (flexibleMatches) {
+              console.log(`✅ [TOPIC] Post ${i + 1}, Onebox ${oneboxIdx + 1}: Found ${flexibleMatches.length} Snapshot URL(s) via flexible pattern`);
+              flexibleMatches.forEach(url => {
+                const decodedUrl = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+                if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(url)) {
+                  proposals.snapshot.push(decodedUrl);
+                  console.log(`✅ [TOPIC] Found Snapshot link (via onebox flexible pattern):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+                }
+              });
+            } else {
+              // Also check href attributes in onebox links (including testnet)
+              const oneboxLinks = onebox.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
+              oneboxLinks.forEach(link => {
+                const href = link.href || link.getAttribute('href') || '';
+                if (href && (href.includes('snapshot.org') || href.includes('snapshot.box') || href.includes('testnet.snapshot.box'))) {
+                  const decodedUrl = href.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+                  const isTestnet = decodedUrl.includes('testnet.snapshot.box');
+                  if (!proposals.snapshot.includes(decodedUrl) && !proposals.snapshot.includes(href)) {
+                    proposals.snapshot.push(decodedUrl);
+                    console.log(`✅ [TOPIC] Found Snapshot link (via onebox link href):`, decodedUrl, isTestnet ? "(testnet)" : "(production)");
+                  }
+                }
+              });
+            }
+          }
+        }
+      });
       
       // Find AIP links (direct links, or will be extracted from forum)
       // Method 1: Check href attributes in links (more reliable for HTML)
@@ -4825,11 +5180,12 @@ export default apiInitializer((api) => {
       }
     }
     
-    console.log("✅ [TOPIC] Found proposals:", {
-      forum: proposals.forum.length,
-      snapshot: proposals.snapshot.length,
-      aip: proposals.aip.length
-    });
+    // Final summary with detailed logging
+    console.log("✅ [TOPIC] ========== PROPOSAL DETECTION SUMMARY ==========");
+    console.log(`✅ [TOPIC] Found ${proposals.snapshot.length} Snapshot proposal(s):`, proposals.snapshot);
+    console.log(`✅ [TOPIC] Found ${proposals.aip.length} AIP proposal(s):`, proposals.aip);
+    console.log(`✅ [TOPIC] Found ${proposals.forum.length} Forum link(s):`, proposals.forum);
+    console.log("✅ [TOPIC] ================================================");
     
     // Log all found URLs for debugging
     if (proposals.forum.length > 0) {
@@ -4849,6 +5205,18 @@ export default apiInitializer((api) => {
       proposals.aip.forEach((url, idx) => {
         console.log(`  [${idx + 1}] ${url}`);
       });
+    }
+    
+    // If no proposals found, provide helpful debugging info
+    if (proposals.snapshot.length === 0 && proposals.aip.length === 0 && proposals.forum.length === 0) {
+      console.warn("⚠️ [TOPIC] No proposals found! This might mean:");
+      console.warn("   1. The post doesn't contain any proposal URLs");
+      console.warn("   2. The URLs are in a format not recognized by the regex patterns");
+      console.warn("   3. The content is lazy-loaded and not yet in the DOM");
+      console.warn("   Check the console logs above for detailed detection attempts");
+    } else if (proposals.snapshot.length === 0 && proposals.aip.length === 0) {
+      console.warn("⚠️ [TOPIC] Found forum links but no Snapshot or AIP proposals.");
+      console.warn("   If the forum link contains proposals, they should be extracted from the forum thread.");
     }
     
     return proposals;
@@ -4886,9 +5254,13 @@ export default apiInitializer((api) => {
     console.log(`⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`);
   }
 
-  // Ensure AIP widgets remain visible after scroll events
-  // CRITICAL: AIP widgets are topic-level and should ALWAYS be visible once found
-  // This function should be called frequently to prevent AIP widgets from being hidden
+  // Ensure ALL widgets remain visible after scroll events
+  // CRITICAL: ALL widget types should ALWAYS be visible once found:
+  // - AIP widgets (Aave Improvement Proposals)
+  // - Snapshot widgets (Temp Check, ARFC, and generic Snapshot)
+  // - Testnet Snapshot widgets (testnet.snapshot.box)
+  // This function should be called frequently to prevent widgets from being hidden
+  // UPDATED: Now ensures ALL widgets (AIP, Snapshot, Temp Check, ARFC, and Testnet) stay visible
   function ensureAIPWidgetsVisible() {
     // Only run on topic pages - don't process widgets on other pages
     const isTopicPage = window.location.pathname.match(/^\/t\//);
@@ -4897,125 +5269,120 @@ export default apiInitializer((api) => {
     }
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     let aipWidgetCount = 0;
+    let snapshotWidgetCount = 0;
+    let testnetWidgetCount = 0;
+    let tempCheckWidgetCount = 0;
+    let arfcWidgetCount = 0;
     let hiddenAIPCount = 0;
+    let hiddenSnapshotCount = 0;
     
     allWidgets.forEach(widget => {
       const widgetType = widget.getAttribute('data-proposal-type');
       const widgetTypeAttr = widget.getAttribute('data-widget-type');
       const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+      const hasTempCheck = widget.querySelector('.governance-stage[data-stage="temp-check"]') !== null;
+      const hasARFC = widget.querySelector('.governance-stage[data-stage="arfc"]') !== null;
       const url = widget.getAttribute('data-tally-url') || '';
+      const isTestnet = widget.getAttribute('data-is-testnet') === 'true' || url.includes('testnet.snapshot.box');
       const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+      const isAIPWidget = widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl;
       
-      // If this is an AIP widget, ALWAYS force it to be visible
-      if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
+      // Count widget types for logging
+      if (isAIPWidget) {
         aipWidgetCount++;
-        
-        // Always force visibility for AIP widgets (don't check if hidden first)
-        // This ensures they stay visible even if other code tries to hide them
-        widget.style.setProperty('display', 'block', 'important');
-        widget.style.setProperty('visibility', 'visible', 'important');
-        widget.style.setProperty('opacity', '1', 'important');
-        widget.classList.remove('hidden', 'd-none', 'is-hidden');
-        
-        // Force reflow to ensure styles are applied
-        void widget.offsetHeight;
-        
-        // Check if it's actually visible now
-        const computedStyle = window.getComputedStyle(widget);
-        if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+      } else {
+        snapshotWidgetCount++;
+        if (isTestnet) {
+          testnetWidgetCount++;
+        }
+        if (hasTempCheck) {
+          tempCheckWidgetCount++;
+        }
+        if (hasARFC) {
+          arfcWidgetCount++;
+        }
+      }
+      
+      // CRITICAL: ALL widgets (AIP, Snapshot, Temp Check, ARFC, Testnet) should ALWAYS be visible
+      // This ensures widgets appear on page load and stay visible, not just when scrolling
+      // Always force visibility for ALL widgets (don't check if hidden first)
+      // This ensures they stay visible even if other code tries to hide them
+      widget.style.setProperty('display', 'block', 'important');
+      widget.style.setProperty('visibility', 'visible', 'important');
+      widget.style.setProperty('opacity', '1', 'important');
+      widget.classList.remove('hidden', 'd-none', 'is-hidden');
+      
+      // Force reflow to ensure styles are applied
+      void widget.offsetHeight;
+      
+      // Check if it's actually visible now
+      const computedStyle = window.getComputedStyle(widget);
+      if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+        if (isAIPWidget) {
           hiddenAIPCount++;
           console.warn(`⚠️ [AIP] AIP widget still hidden after force visibility attempt - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+        } else {
+          hiddenSnapshotCount++;
+          const widgetTypeLabel = isTestnet ? 'Testnet Snapshot' : (hasTempCheck ? 'Temp Check' : (hasARFC ? 'ARFC' : 'Snapshot'));
+          console.warn(`⚠️ [${widgetTypeLabel}] ${widgetTypeLabel} widget still hidden after force visibility attempt - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
         }
       }
     });
     
+    // Log summary of widget types found
+    if (aipWidgetCount > 0 || snapshotWidgetCount > 0) {
+      const widgetTypes = [];
+      if (aipWidgetCount > 0) {
+        widgetTypes.push(`${aipWidgetCount} AIP`);
+      }
+      if (tempCheckWidgetCount > 0) {
+        widgetTypes.push(`${tempCheckWidgetCount} Temp Check`);
+      }
+      if (arfcWidgetCount > 0) {
+        widgetTypes.push(`${arfcWidgetCount} ARFC`);
+      }
+      if (testnetWidgetCount > 0) {
+        widgetTypes.push(`${testnetWidgetCount} Testnet`);
+      }
+      if (snapshotWidgetCount > tempCheckWidgetCount + arfcWidgetCount + testnetWidgetCount) {
+        widgetTypes.push(`${snapshotWidgetCount - tempCheckWidgetCount - arfcWidgetCount - testnetWidgetCount} Snapshot`);
+      }
+      if (widgetTypes.length > 0) {
+        console.log(`✅ [WIDGET] Ensured visibility for ${widgetTypes.join(', ')} widget(s)`);
+      }
+    }
+    
     if (aipWidgetCount > 0) {
       if (hiddenAIPCount > 0) {
         console.warn(`⚠️ [AIP] ${hiddenAIPCount} of ${aipWidgetCount} AIP widget(s) are still hidden after force visibility`);
-      } else {
-        // Only log if all AIP widgets are visible (reduces console noise)
-        // console.log(`✅ [AIP] Ensured ${aipWidgetCount} AIP widget(s) are visible`);
+      }
+    }
+    if (snapshotWidgetCount > 0) {
+      if (hiddenSnapshotCount > 0) {
+        console.warn(`⚠️ [SNAPSHOT] ${hiddenSnapshotCount} of ${snapshotWidgetCount} Snapshot widget(s) are still hidden after force visibility`);
       }
     }
   }
 
   function hideWidgetIfNoProposal() {
-    // CRITICAL: Only hide Snapshot widgets, NEVER AIP widgets
-    // AIP widgets are topic-level and should ALWAYS remain visible regardless of scroll position
-    // This function is called when no proposal is visible in viewport, but AIP widgets should persist
-    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-    let removedCount = 0;
-    let aipWidgetCount = 0;
+    // CRITICAL: This function is now DISABLED - widgets should ALWAYS remain visible once created
+    // All widgets (both Snapshot and AIP) are topic-level and should persist regardless of scroll position
+    // This ensures widgets appear on page load and stay visible, matching user expectations
+    console.log("🔵 [WIDGET] hideWidgetIfNoProposal called - but widgets are now always visible (not hiding)");
     
+    // Instead of hiding widgets, just ensure all widgets are visible
+    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     allWidgets.forEach(widget => {
-      // Check widget type - only remove Snapshot widgets, keep AIP widgets
-      const widgetType = widget.getAttribute('data-proposal-type');
-      const widgetTypeAttr = widget.getAttribute('data-widget-type');
-      const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
-      const url = widget.getAttribute('data-tally-url') || '';
-      const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
-      
-      // CRITICAL: Skip AIP widgets - they should ALWAYS be visible (topic-level, not viewport-dependent)
-      // Check multiple ways to identify AIP widgets
-      if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
-        aipWidgetCount++;
-        // Force visibility for AIP widgets (in case something tried to hide them)
-        widget.style.setProperty('display', 'block', 'important');
-        widget.style.setProperty('visibility', 'visible', 'important');
-        widget.style.setProperty('opacity', '1', 'important');
-        widget.classList.remove('hidden', 'd-none', 'is-hidden');
-        console.log("✅ [WIDGET] Preserving AIP widget (topic-level, always visible) - type:", widgetType, "widgetType:", widgetTypeAttr, "hasAIP:", hasAIP, "isAIPUrl:", isAIPUrl);
-        return; // Skip this widget - NEVER remove AIP widgets
-      }
-      
-      // Remove only Snapshot widgets
-      console.log("🔵 [WIDGET] Removing Snapshot widget - type:", widgetType, "widgetType:", widgetTypeAttr);
-      widget.remove();
-      removedCount++;
-      
-      // Clean up stored data
-      const widgetId = widget.getAttribute('data-tally-status-id');
-      if (widgetId) {
-        delete window[`tallyWidget_${widgetId}`];
-        // Clear any auto-refresh intervals
-        const refreshKey = `tally_refresh_${widgetId}`;
-        if (window[refreshKey]) {
-          clearInterval(window[refreshKey]);
-          delete window[refreshKey];
-        }
-      }
+      widget.style.setProperty('display', 'block', 'important');
+      widget.style.setProperty('visibility', 'visible', 'important');
+      widget.style.setProperty('opacity', '1', 'important');
+      widget.classList.remove('hidden', 'd-none', 'is-hidden');
     });
     
-    // Clean up empty container (only if no widgets remain)
-    // CRITICAL: Check for AIP widgets before removing container
-    const container = document.getElementById('governance-widgets-wrapper');
-    if (container) {
-      // Check if there are any AIP widgets in the container
-      const aipWidgetsInContainer = container.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
-      const allWidgetsInContainer = container.querySelectorAll('.tally-status-widget-container');
-      
-      // Only remove container if it's empty AND there are no AIP widgets anywhere
-      if (container.children.length === 0 || (allWidgetsInContainer.length === 0 && aipWidgetsInContainer.length === 0)) {
-        // Double check: make sure no AIP widgets exist anywhere before removing container
-        const allAIPWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
-        if (allAIPWidgets.length === 0) {
-          container.remove();
-          console.log("🔵 [CONTAINER] Removed empty widgets container (no AIP widgets present)");
-        } else {
-          console.log(`🔵 [CONTAINER] Keeping container because ${allAIPWidgets.length} AIP widget(s) exist`);
-        }
-      }
-    }
+    // Ensure AIP widgets are visible (this also helps with Snapshot widgets)
+    ensureAIPWidgetsVisible();
     
-    if (removedCount > 0) {
-      console.log("🔵 [WIDGET] Removed", removedCount, "Snapshot widget(s) - no Snapshot proposal in current post (AIP widgets kept visible)");
-    }
-    if (aipWidgetCount > 0) {
-      console.log(`✅ [WIDGET] Preserved ${aipWidgetCount} AIP widget(s) - they are topic-level and always visible`);
-      // Force visibility for all AIP widgets after removing Snapshot widgets
-      ensureAIPWidgetsVisible();
-    }
-    // Reset current visible proposal (but this doesn't affect AIP widgets)
+    // Reset current visible proposal (but widgets remain visible)
     currentVisibleProposal = null;
   }
 
@@ -5371,43 +5738,60 @@ export default apiInitializer((api) => {
     
     console.log(`🔵 [TOPIC] Found ${allProposals.snapshot.length} Snapshot URL(s) and ${allProposals.aip.length} AIP URL(s) directly in post`);
     
-    // Render widgets - one per URL
-    setupTopicWidgetWithProposals(allProposals);
-    
-    // If no AIP URLs found initially, retry multiple times to catch lazy-loaded content
-    // This is critical because AIP URLs might be in posts that aren't rendered until scrolled into view
-    if (allProposals.aip.length === 0) {
-      console.log("🔵 [TOPIC] No AIP URLs found initially - will retry multiple times to catch lazy-loaded posts");
-      
-      // Multiple retries with increasing delays to catch lazy-loaded content
-      const retryDelays = [1000, 2000, 3000, 5000, 8000]; // 1s, 2s, 3s, 5s, 8s
-      let retryCount = 0;
-      
-      retryDelays.forEach((delay) => {
-        setTimeout(() => {
-          retryCount++;
-          console.log(`🔵 [TOPIC] Retry ${retryCount}/${retryDelays.length}: Searching for AIP URLs after ${delay}ms...`);
-          
-          const retryProposals = findAllProposalsInTopic();
-          if (retryProposals.aip.length > 0) {
-            console.log(`✅ [TOPIC] Found ${retryProposals.aip.length} AIP URL(s) on retry ${retryCount} - updating widgets`);
-            // Merge with existing proposals
-            const mergedProposals = {
-              snapshot: [...new Set([...allProposals.snapshot, ...retryProposals.snapshot])],
-              aip: [...new Set([...allProposals.aip, ...retryProposals.aip])],
-              forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
-            };
-            setupTopicWidgetWithProposals(mergedProposals);
-            // Update allProposals so subsequent retries don't duplicate
-            allProposals.aip = mergedProposals.aip;
-            allProposals.snapshot = mergedProposals.snapshot;
-            allProposals.forum = mergedProposals.forum;
-          } else {
-            console.log(`🔵 [TOPIC] Retry ${retryCount}: Still no AIP URLs found`);
-          }
-        }, delay);
-      });
+    // Render widgets immediately if proposals found
+    if (allProposals.snapshot.length > 0 || allProposals.aip.length > 0) {
+      setupTopicWidgetWithProposals(allProposals);
     }
+    
+    // CRITICAL: Retry multiple times to catch lazy-loaded content for BOTH Snapshot and AIP proposals
+    // This ensures proposals are detected on page load, not just when scrolling
+    // Retry even if some proposals were found, in case there are more in lazy-loaded posts
+    const retryDelays = [500, 1000, 2000, 3000, 5000]; // 0.5s, 1s, 2s, 3s, 5s
+    let retryCount = 0;
+    const foundUrls = new Set([...allProposals.snapshot, ...allProposals.aip]);
+    
+    retryDelays.forEach((delay) => {
+      setTimeout(() => {
+        retryCount++;
+        console.log(`🔵 [TOPIC] Retry ${retryCount}/${retryDelays.length}: Searching for proposals after ${delay}ms...`);
+        
+        const retryProposals = findAllProposalsInTopic();
+        const retrySnapshotUrls = new Set(retryProposals.snapshot);
+        const retryAipUrls = new Set(retryProposals.aip);
+        
+        // Check if we found any new proposals
+        let hasNewProposals = false;
+        for (const url of retrySnapshotUrls) {
+          if (!foundUrls.has(url)) {
+            hasNewProposals = true;
+            foundUrls.add(url);
+          }
+        }
+        for (const url of retryAipUrls) {
+          if (!foundUrls.has(url)) {
+            hasNewProposals = true;
+            foundUrls.add(url);
+          }
+        }
+        
+        if (hasNewProposals) {
+          console.log(`✅ [TOPIC] Found new proposals on retry ${retryCount} - ${retryProposals.snapshot.length} Snapshot, ${retryProposals.aip.length} AIP - updating widgets`);
+          // Merge with existing proposals
+          const mergedProposals = {
+            snapshot: [...new Set([...allProposals.snapshot, ...retryProposals.snapshot])],
+            aip: [...new Set([...allProposals.aip, ...retryProposals.aip])],
+            forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
+          };
+          setupTopicWidgetWithProposals(mergedProposals);
+          // Update allProposals so subsequent retries don't duplicate
+          allProposals.snapshot = mergedProposals.snapshot;
+          allProposals.aip = mergedProposals.aip;
+          allProposals.forum = mergedProposals.forum;
+        } else {
+          console.log(`🔵 [TOPIC] Retry ${retryCount}: No new proposals found (total: ${foundUrls.size})`);
+        }
+      }, delay);
+    });
     
     return Promise.resolve();
   }
@@ -6896,6 +7280,11 @@ export default apiInitializer((api) => {
             }, widgetId, proposalOrder, validation.discussionLink, validation.isRelated);
             
             console.log(`✅ [RENDER] Snapshot widget ${index + 1} rendered`);
+            
+            // CRITICAL: Ensure widget is visible immediately after rendering
+            setTimeout(() => {
+              ensureAIPWidgetsVisible();
+            }, 100);
           });
         })
         .catch(error => {
@@ -7179,6 +7568,18 @@ export default apiInitializer((api) => {
           console.error("❌ [TOPIC] Error processing AIP proposals:", error);
         });
     }
+    
+    // CRITICAL: Ensure all widgets are visible after all proposals are processed
+    // This ensures widgets appear on page load and stay visible, not just when scrolling
+    setTimeout(() => {
+      ensureAIPWidgetsVisible();
+      console.log("✅ [TOPIC] Ensured all widgets are visible after processing all proposals");
+    }, 500);
+    
+    // Also ensure visibility after a longer delay to catch any lazy-loaded widgets
+    setTimeout(() => {
+      ensureAIPWidgetsVisible();
+    }, 1500);
   }
   
   // Debounce widget setup to prevent duplicate widgets
@@ -7299,80 +7700,226 @@ export default apiInitializer((api) => {
       }
     });
     
+    // CRITICAL: Also watch for oneboxes and preview containers being added
+    // When oneboxes/preview containers are added, extract URLs from them
+    const previewObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1) { // Element node
+            // Check if this is a onebox (before it's replaced)
+            const onebox = node.classList?.contains('onebox') || node.classList?.contains('onebox-body')
+              ? node
+              : node.querySelector?.('.onebox, .onebox-body');
+            
+            if (onebox) {
+              const oneboxText = onebox.textContent || onebox.innerHTML || '';
+              const oneboxLinks = onebox.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
+              
+              // Check text content
+              SNAPSHOT_URL_REGEX.lastIndex = 0;
+              const textMatches = Array.from(oneboxText.matchAll(SNAPSHOT_URL_REGEX));
+              if (textMatches.length > 0 || oneboxLinks.length > 0) {
+                console.log(`✅ [TOPIC] Onebox added with ${textMatches.length} Snapshot URL(s) in text, ${oneboxLinks.length} in links`);
+                // Re-scan to add these URLs to proposals
+                setTimeout(() => {
+                  debouncedSetupTopicWidget();
+                }, 200);
+              }
+            }
+            
+            // Check if this is a preview container or contains one
+            const preview = node.classList?.contains('tally-url-preview') || node.classList?.contains('tally-preview-content')
+              ? node
+              : node.querySelector?.('.tally-url-preview, [data-tally-preview-id]');
+            
+            if (preview) {
+              // Check for URL in data attribute first (fastest method)
+              const storedUrl = preview.getAttribute('data-tally-url');
+              if (storedUrl && (storedUrl.includes('snapshot.org') || storedUrl.includes('snapshot.box'))) {
+                console.log(`✅ [TOPIC] Preview container added with Snapshot URL in data attribute: ${storedUrl}`);
+                // Re-scan to add this URL to proposals
+                setTimeout(() => {
+                  debouncedSetupTopicWidget();
+                }, 200);
+              } else {
+                // Wait a bit for links to be added to preview container
+                setTimeout(() => {
+                  const previewLinks = preview.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
+                  if (previewLinks.length > 0) {
+                    console.log(`✅ [TOPIC] Preview container added with ${previewLinks.length} Snapshot URL(s)`);
+                    // Re-scan to add these URLs to proposals
+                    debouncedSetupTopicWidget();
+                  }
+                }, 500);
+              }
+            }
+          }
+        });
+      });
+    });
+    
+    // Watch for oneboxes and preview containers being added to the topic
+    topicContentSelectors.forEach(selector => {
+      const element = document.querySelector(selector);
+      if (element) {
+        previewObserver.observe(element, { childList: true, subtree: true });
+        console.log(`✅ [TOPIC] Watching ${selector} for oneboxes and preview containers`);
+      }
+    });
+    
     // Detect mobile for faster initial load
     const isMobile = window.innerWidth <= 1024 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
-    // CRITICAL: Run immediate scan first (before debounce) to find AIP URLs on page load
-    // This ensures AIP widgets appear immediately, not just when scrolling
-    console.log("🔍 [TOPIC] Running immediate scan for AIP URLs on page load...");
-    setupTopicWidget(); // Run immediately without debounce for initial load
+    // CRITICAL: Run immediate scan first (before debounce) to find proposals on page load
+    // This ensures widgets appear immediately, not just when scrolling
+    // Run multiple times with delays to catch lazy-loaded content
+    console.log("🔍 [TOPIC] Running immediate scan for proposals on page load...");
+    
+    // Run immediately
+    setupTopicWidget();
+    
+    // Run again after short delays to catch lazy-loaded content
+    // These retries ensure proposals are detected on page load, not just when scrolling
+    const initialRetryDelays = [100, 300, 500, 1000, 2000];
+    initialRetryDelays.forEach((delay) => {
+      setTimeout(() => {
+        console.log(`🔍 [TOPIC] Initial retry scan after ${delay}ms...`);
+        setupTopicWidget();
+        ensureAllWidgetsVisible();
+      }, delay);
+    });
     
     // Then also set up debounced version for subsequent changes
     debouncedSetupTopicWidget();
     
     // CRITICAL: Also scan when user scrolls - this catches lazy-loaded posts
     // Use a debounced scroll handler to avoid too many scans
+    // IMPORTANT: This ONLY adds new proposals found on scroll, it NEVER hides existing widgets
+    // Widgets are detected on page load and remain visible regardless of scroll position
     let scrollScanTimeout = null;
     const handleScroll = () => {
       if (scrollScanTimeout) {
         clearTimeout(scrollScanTimeout);
       }
       scrollScanTimeout = setTimeout(() => {
-        // Check if we've found AIP URLs yet
-        const existingAIPWidgets = document.querySelectorAll('.tally-status-widget-container[data-proposal-type="aip"], .tally-status-widget-container[data-widget-type="aip"]');
-        if (existingAIPWidgets.length === 0) {
-          console.log("🔍 [TOPIC] Scrolling detected - re-scanning for AIP URLs in case posts were lazy-loaded");
-          debouncedSetupTopicWidget();
-        } else {
-          // AIP widgets exist - just ensure they're visible
-          ensureAIPWidgetsVisible();
+        // CRITICAL: Always ensure all existing widgets are visible (never hide them on scroll)
+        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+        allWidgets.forEach(widget => {
+          widget.style.setProperty('display', 'block', 'important');
+          widget.style.setProperty('visibility', 'visible', 'important');
+          widget.style.setProperty('opacity', '1', 'important');
+          widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        });
+        
+        // Check if we've found all proposals yet - if not, scan for new ones
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        const existingUrls = new Set();
+        existingWidgets.forEach(widget => {
+          const url = widget.getAttribute('data-tally-url');
+          if (url) {
+            existingUrls.add(url);
+          }
+        });
+        
+        // Re-scan to find any new proposals that might have been lazy-loaded
+        const currentProposals = findAllProposalsInTopic();
+        const allCurrentUrls = new Set([...currentProposals.snapshot, ...currentProposals.aip]);
+        
+        // Only re-scan if we found new proposals that aren't already rendered
+        let hasNewProposals = false;
+        for (const url of allCurrentUrls) {
+          if (!existingUrls.has(url)) {
+            hasNewProposals = true;
+            break;
+          }
         }
-      }, 500); // Debounce scroll events
+        
+        if (hasNewProposals) {
+          console.log("🔍 [SCROLL] Found new proposals while scrolling - adding widgets (existing widgets remain visible)");
+          debouncedSetupTopicWidget();
+        }
+        // If no new proposals, do nothing - widgets stay visible as they are
+      }, 1000); // Debounce scroll events (longer delay to reduce unnecessary scans)
     };
     
+    // Only add scroll listener for detecting new lazy-loaded proposals
+    // This does NOT hide/show widgets based on scroll position
     window.addEventListener('scroll', handleScroll, { passive: true });
+    
+    // CRITICAL: Ensure all widgets are visible immediately after creation
+    // This function ensures widgets appear on page load and stay visible
+    // This is called after widgets are created and periodically to prevent them from being hidden
+    const ensureAllWidgetsVisible = () => {
+      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+      if (allWidgets.length === 0) {
+        return; // No widgets yet
+      }
+      
+      allWidgets.forEach(widget => {
+        const computedStyle = window.getComputedStyle(widget);
+        if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+          console.log(`🔵 [WIDGET] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+          widget.style.setProperty('display', 'block', 'important');
+          widget.style.setProperty('visibility', 'visible', 'important');
+          widget.style.setProperty('opacity', '1', 'important');
+          widget.classList.remove('hidden', 'd-none', 'is-hidden');
+          console.log(`✅ [WIDGET] Forced visibility for widget`);
+        } else {
+          // Even if visible, ensure it stays visible with important flags
+          // This prevents widgets from being hidden by scroll events or other code
+          widget.style.setProperty('display', 'block', 'important');
+          widget.style.setProperty('visibility', 'visible', 'important');
+          widget.style.setProperty('opacity', '1', 'important');
+          widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        }
+      });
+      // Also ensure AIP widgets specifically
+      ensureAIPWidgetsVisible();
+    };
+    
+    // CRITICAL: Periodically ensure widgets stay visible (prevents them from being hidden by scroll or other events)
+    // This runs every 2 seconds to catch any cases where widgets might be hidden
+    setInterval(() => {
+      ensureAllWidgetsVisible();
+    }, 2000);
     
     // On mobile, use shorter delays for faster widget display
     // On desktop, use longer delays to catch late-loading content
     if (isMobile) {
-      setTimeout(() => debouncedSetupTopicWidget(), 100);
-      setTimeout(() => debouncedSetupTopicWidget(), 500);
+      setTimeout(() => {
+        debouncedSetupTopicWidget();
+        ensureAllWidgetsVisible();
+      }, 100);
+      setTimeout(() => {
+        debouncedSetupTopicWidget();
+        ensureAllWidgetsVisible();
+      }, 500);
       
       // On mobile, ensure all widgets are visible after initial setup
-      // This fixes the issue where AIP widgets don't appear until scroll
+      // This fixes the issue where widgets don't appear until scroll
       setTimeout(() => {
-        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-        allWidgets.forEach(widget => {
-          const computedStyle = window.getComputedStyle(widget);
-          if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-            console.log(`🔵 [MOBILE] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
-            widget.style.setProperty('display', 'block', 'important');
-            widget.style.setProperty('visibility', 'visible', 'important');
-            widget.style.setProperty('opacity', '1', 'important');
-            widget.classList.remove('hidden', 'd-none', 'is-hidden');
-            console.log(`✅ [MOBILE] Forced visibility for widget on initial load`);
-          }
-        });
+        ensureAllWidgetsVisible();
       }, 600);
       
       // Additional check after even longer delay to catch any lazy loading
       setTimeout(() => {
-        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-        allWidgets.forEach(widget => {
-          const computedStyle = window.getComputedStyle(widget);
-          if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-            console.log(`🔵 [MOBILE] Widget still hidden after delay, forcing visibility again`);
-            widget.style.setProperty('display', 'block', 'important');
-            widget.style.setProperty('visibility', 'visible', 'important');
-            widget.style.setProperty('opacity', '1', 'important');
-            widget.classList.remove('hidden', 'd-none', 'is-hidden');
-          }
-        });
+        ensureAllWidgetsVisible();
       }, 1000);
     } else {
-      setTimeout(() => debouncedSetupTopicWidget(), 500);
-      setTimeout(() => debouncedSetupTopicWidget(), 1500);
+      setTimeout(() => {
+        debouncedSetupTopicWidget();
+        ensureAllWidgetsVisible();
+      }, 500);
+      setTimeout(() => {
+        debouncedSetupTopicWidget();
+        ensureAllWidgetsVisible();
+      }, 1500);
+      
+      // Desktop: also ensure widgets are visible after delays
+      setTimeout(() => {
+        ensureAllWidgetsVisible();
+      }, 2000);
     }
     
     console.log("✅ [TOPIC] Topic widget setup complete");
@@ -7739,8 +8286,11 @@ export default apiInitializer((api) => {
 
   // Handle posts (saved content) - Show simple link preview (not full widget)
   api.decorateCookedElement((element) => {
-    const text = element.textContent || element.innerHTML || '';
-    const matches = Array.from(text.matchAll(SNAPSHOT_URL_REGEX));
+    // Use both textContent and innerHTML to catch URLs in all formats
+    const text = element.textContent || element.innerText || '';
+    const html = element.innerHTML || '';
+    const combinedText = text + ' ' + html;
+    const matches = Array.from(combinedText.matchAll(SNAPSHOT_URL_REGEX));
     if (matches.length === 0) {
       console.log("🔵 [POST] No Snapshot URLs found in post");
       return;
@@ -7871,6 +8421,7 @@ export default apiInitializer((api) => {
       const previewContainer = document.createElement("div");
       previewContainer.className = "tally-url-preview";
       previewContainer.setAttribute("data-tally-preview-id", widgetId);
+      previewContainer.setAttribute("data-tally-url", url); // Store URL for topic scanner
       
       // Show loading state
       previewContainer.innerHTML = `
