@@ -2499,10 +2499,20 @@ export default apiInitializer((api) => {
     // Add URL attribute for duplicate detection
     if (proposalUrl) {
       statusWidget.setAttribute("data-tally-url", proposalUrl);
+      // Mark testnet widgets explicitly to ensure same treatment as production
+      if (proposalUrl.includes('testnet.snapshot.box')) {
+        statusWidget.setAttribute("data-is-testnet", "true");
+      }
     }
     // Add proposal type for filtering
     const proposalType = stages.aip ? 'aip' : 'snapshot';
     statusWidget.setAttribute("data-proposal-type", proposalType);
+    
+    // CRITICAL: Force immediate visibility for all widgets (including testnet)
+    // Same behavior as production - no scroll-based lazy loading
+    statusWidget.style.display = 'block';
+    statusWidget.style.visibility = 'visible';
+    statusWidget.style.opacity = '1';
     
     // Use proposal order (order in content) for positioning, fallback to stage order
     // Proposal order takes precedence - widgets appear in the order proposals appear in content
@@ -2789,7 +2799,7 @@ export default apiInitializer((api) => {
               Voting Starting Soon
             </div>
           ` : ''}
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
             View on Snapshot
           </a>
         </div>
@@ -2806,7 +2816,7 @@ export default apiInitializer((api) => {
             Voting Starting Soon
           </div>
         ` : ''}
-        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
           ${isPending || isCreated ? 'View on Snapshot' : 'Vote on Snapshot'}
         </a>
       `;
@@ -3042,7 +3052,7 @@ export default apiInitializer((api) => {
             </div>
           `}
           ${quorumHtml}
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
             View on Aave
           </a>
         </div>
@@ -3071,7 +3081,7 @@ export default apiInitializer((api) => {
           </div>
         `}
         ${quorumHtml}
-        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
           ${isActive && !isPending && !isCreated ? 'Vote on Aave' : 'View on Aave'}
         </a>
       `;
@@ -6859,12 +6869,19 @@ export default apiInitializer((api) => {
             
             // CRITICAL: Only show proposals that have a forum link matching the current forum topic
             // This prevents false positives when other proposal links are mentioned in discussions
+            // Also filter out proposals without any discourse URL
             if (!validation.isRelated) {
               if (validation.discussionLink) {
                 console.log(`⚠️ [RENDER] Skipping ${stageName} widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
               } else {
                 console.log(`⚠️ [RENDER] Skipping ${stageName} widget - no forum discussion link found in proposal (preventing false positives)`);
               }
+              return;
+            }
+            
+            // Filter out proposals that don't have any discourse URL
+            if (!validation.discussionLink) {
+              console.log(`⚠️ [RENDER] Skipping ${stageName} widget - proposal has no discourse URL`);
               return;
             }
             
@@ -7032,12 +7049,19 @@ export default apiInitializer((api) => {
             
             // CRITICAL: Only show proposals that have a forum link matching the current forum topic
             // This prevents false positives when other proposal links are mentioned in discussions
+            // Also filter out proposals without any discourse URL
             if (!validation.isRelated) {
               if (validation.discussionLink) {
                 console.log(`⚠️ [RENDER] Skipping AIP widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
               } else {
                 console.log(`⚠️ [RENDER] Skipping AIP widget - no forum discussion link found in proposal (preventing false positives)`);
               }
+              return;
+            }
+            
+            // Filter out proposals that don't have any discourse URL
+            if (!validation.discussionLink) {
+              console.log(`⚠️ [RENDER] Skipping AIP widget - proposal has no discourse URL`);
               return;
             }
             

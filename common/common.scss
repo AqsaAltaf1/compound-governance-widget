@@ -8,6 +8,33 @@
   max-width: 1400px !important; // Adjust this value to control content width
 }
 
+// Global rule: Ensure all vote buttons are full width on mobile screens
+@media (width <= 1024px) {
+  .vote-button {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+  
+  // Ensure parent containers don't constrain button width
+  .governance-stage,
+  .stage-collapsed-content,
+  .tally-status-widget,
+  .arbitrium-proposal-widget {
+    .vote-button {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 100% !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      box-sizing: border-box !important;
+    }
+  }
+}
+
 //
 // Widgets container wrapper for column layout
 // Holds multiple widgets stacked vertically
@@ -58,6 +85,31 @@
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;
+  }
+
+  // CRITICAL: Force Snapshot widgets (including testnet) to always be visible immediately
+  // Same behavior as production - no scroll-based lazy loading
+  .tally-status-widget-container[data-proposal-type="snapshot"],
+  .tally-status-widget-container[data-widget-type="snapshot"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    // Ensure testnet widgets have same layout and responsiveness as production
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  // CRITICAL: Ensure testnet widgets are always visible (same as production)
+  // No lazy loading or scroll-based visibility for testnet widgets
+  .tally-status-widget-container[data-is-testnet="true"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    // Same classes, same layout, same responsiveness as production
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   // Tablet: Show widgets inline in topic (same as mobile)
@@ -500,8 +552,9 @@
     }
 
     .vote-button {
-      display: block;
-      width: 100%;
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
       padding: 8px 12px;
       background-color: var(--d-button-primary-bg-color, #2563eb) !important;
       color: var(--d-button-primary-text-color, white) !important;
@@ -509,26 +562,28 @@
       border-radius: 4px;
       font-size: 0.85em;
       font-weight: 600;
-      text-align: center;
+      text-align: center !important;
       text-decoration: none;
       transition: background-color 0.2s;
       margin-top: 10px;
       box-sizing: border-box;
 
-      // Mobile: Larger touch target (minimum 44x44px)
-      @media (width <= 768px) {
+      // Mobile: Larger touch target (minimum 44x44px) and 100% width with centered text
+      // Ensure full width on ALL mobile screens (phones and tablets)
+      @media (width <= 1024px) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 100% !important;
         padding: 12px 16px !important;
         font-size: 0.9em !important;
         min-height: 44px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-      }
-
-      // Tablet: Medium size
-      @media (width > 768px) and (width <= 1024px) {
-        padding: 10px 14px !important;
-        font-size: 0.875em !important;
+        text-align: center !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
       }
 
       &:hover {
@@ -554,10 +609,47 @@
     }
 
     // Prevent hover color change for buttons in governance stages
-    .governance-stage .vote-button {
-      &:hover {
-        background-color: var(--d-button-primary-bg-color, #2563eb) !important;
-        color: var(--d-button-primary-text-color, white) !important;
+    .governance-stage {
+      // Ensure full width on mobile
+      @media (width <= 768px) {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      
+      .stage-collapsed-content {
+        // Ensure collapsed content is full width on mobile
+        @media (width <= 768px) {
+          width: 100% !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+      }
+      
+      .vote-button {
+        // Ensure 100% width and centered text for governance stage buttons
+        width: 100% !important;
+        max-width: 100% !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+        
+        // Ensure full width on ALL mobile screens (phones and tablets)
+        @media (width <= 1024px) {
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 100% !important;
+          text-align: center !important;
+          box-sizing: border-box !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          padding-left: 12px !important;
+          padding-right: 12px !important;
+        }
+
+        &:hover {
+          background-color: var(--d-button-primary-bg-color, #2563eb) !important;
+          color: var(--d-button-primary-text-color, white) !important;
+        }
       }
     }
   }
@@ -968,14 +1060,20 @@
       text-align: center;
       transition: background 0.2s;
 
-      // Mobile: Larger touch target
-      @media (width <= 768px) {
+      // Mobile: Larger touch target and 100% width on ALL mobile screens
+      @media (width <= 1024px) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 100% !important;
         padding: 14px 20px !important;
         font-size: 1em !important;
         min-height: 48px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
       }
 
       @media (width <= 480px) {
