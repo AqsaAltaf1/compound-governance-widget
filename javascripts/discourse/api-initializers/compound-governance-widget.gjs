@@ -6675,9 +6675,14 @@ export default apiInitializer((api) => {
               hasValidation: !!snapshot._validation
             });
             
-            // Skip rendering if proposal has a discussion URL that doesn't match current forum
-            if (validation.discussionLink && !validation.isRelated) {
-              console.log(`⚠️ [RENDER] Skipping ${stageName} widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
+            // CRITICAL: Only show proposals that have a forum link matching the current forum topic
+            // This prevents false positives when other proposal links are mentioned in discussions
+            if (!validation.isRelated) {
+              if (validation.discussionLink) {
+                console.log(`⚠️ [RENDER] Skipping ${stageName} widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
+              } else {
+                console.log(`⚠️ [RENDER] Skipping ${stageName} widget - no forum discussion link found in proposal (preventing false positives)`);
+              }
               return;
             }
             
@@ -6843,9 +6848,14 @@ export default apiInitializer((api) => {
               hasValidation: !!bestAIP._validation
             });
             
-            // Skip rendering if proposal has a discussion URL that doesn't match current forum
-            if (validation.discussionLink && !validation.isRelated) {
-              console.log(`⚠️ [RENDER] Skipping AIP widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
+            // CRITICAL: Only show proposals that have a forum link matching the current forum topic
+            // This prevents false positives when other proposal links are mentioned in discussions
+            if (!validation.isRelated) {
+              if (validation.discussionLink) {
+                console.log(`⚠️ [RENDER] Skipping AIP widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
+              } else {
+                console.log(`⚠️ [RENDER] Skipping AIP widget - no forum discussion link found in proposal (preventing false positives)`);
+              }
               return;
             }
             
