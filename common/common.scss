@@ -1137,6 +1137,161 @@
   }
 }
 
+// Loading placeholder styles - shows skeleton/blur while widget is loading
+.loading-placeholder {
+  .loading-widget {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    min-height: 200px;
+
+    // Blur overlay effect
+    &::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.6) 50%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      animation: shimmer 1.5s infinite;
+      z-index: 1;
+    }
+
+    .loading-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 2;
+
+      .loading-title {
+        height: 20px;
+        background: linear-gradient(
+          90deg,
+          #f3f4f6 25%,
+          #e5e7eb 50%,
+          #f3f4f6 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 4px;
+        width: 70%;
+      }
+
+      .loading-badge {
+        height: 24px;
+        width: 80px;
+        background: linear-gradient(
+          90deg,
+          #f3f4f6 25%,
+          #e5e7eb 50%,
+          #f3f4f6 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 4px;
+      }
+    }
+
+    .loading-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 2;
+
+      .loading-bar {
+        height: 12px;
+        background: linear-gradient(
+          90deg,
+          #f3f4f6 25%,
+          #e5e7eb 50%,
+          #f3f4f6 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 4px;
+      }
+    }
+
+    .loading-footer {
+      position: relative;
+      z-index: 2;
+
+      .loading-button {
+        height: 40px;
+        width: 100%;
+        background: linear-gradient(
+          90deg,
+          #e5e7eb 25%,
+          #d1d5db 50%,
+          #e5e7eb 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 6px;
+      }
+    }
+
+    .loading-spinner-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 3;
+
+      .loading-spinner {
+        width: 32px;
+        height: 32px;
+        border: 4px solid #f3f4f6;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+// Mobile: Adjust loading placeholder for smaller screens
+@media (width <= 768px) {
+  .loading-placeholder .loading-widget {
+    padding: 12px;
+    min-height: 180px;
+
+    .loading-header .loading-title {
+      height: 18px;
+    }
+
+    .loading-content .loading-bar {
+      height: 10px;
+    }
+
+    .loading-footer .loading-button {
+      height: 44px; // Larger touch target
+    }
+  }
+}
+
 // Clear float after widget
 .arbitrium-proposal-widget-container::after {
   content: "";

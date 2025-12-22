@@ -2274,6 +2274,100 @@ export default apiInitializer((api) => {
     `;
   }
 
+  // Create loading placeholder/skeleton for widgets
+  // Shows immediately when proposal is detected, before data is fetched
+  function createLoadingPlaceholder(url, widgetId, proposalOrder = null) {
+    const isMobile = window.innerWidth <= 1024 || 
+                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    // Check if placeholder already exists for this URL
+    const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${url}"]`);
+    if (existingPlaceholder) {
+      return existingPlaceholder; // Already exists
+    }
+    
+    // Generate widget ID if not provided
+    if (!widgetId) {
+      const urlHash = url.split('').reduce((acc, char) => {
+        return ((acc << 5) - acc) + char.charCodeAt(0);
+      }, 0);
+      widgetId = `widget_${Math.abs(urlHash)}`;
+    }
+    
+    const placeholderId = `loading-placeholder-${widgetId}`;
+    
+    const placeholder = document.createElement('div');
+    placeholder.id = placeholderId;
+    placeholder.className = 'tally-status-widget-container loading-placeholder';
+    placeholder.setAttribute('data-tally-url', url);
+    placeholder.setAttribute('data-widget-id', widgetId);
+    if (proposalOrder !== null) {
+      placeholder.setAttribute('data-proposal-order', proposalOrder.toString());
+      placeholder.style.setProperty('order', proposalOrder.toString(), 'important');
+    }
+    
+    // Apply same positioning as regular widgets
+    if (isMobile) {
+      placeholder.style.position = 'relative';
+      placeholder.style.width = '100%';
+      placeholder.style.maxWidth = '100%';
+      placeholder.style.marginBottom = '20px';
+    } else {
+      placeholder.style.position = 'fixed';
+      placeholder.style.width = '320px';
+      placeholder.style.maxWidth = '320px';
+    }
+    
+    placeholder.innerHTML = `
+      <div class="tally-status-widget loading-widget">
+        <div class="loading-header">
+          <div class="loading-title"></div>
+          <div class="loading-badge"></div>
+        </div>
+        <div class="loading-content">
+          <div class="loading-bar" style="width: 70%"></div>
+          <div class="loading-bar" style="width: 50%"></div>
+          <div class="loading-bar" style="width: 60%"></div>
+        </div>
+        <div class="loading-footer">
+          <div class="loading-button"></div>
+        </div>
+        <div class="loading-spinner-overlay">
+          <div class="loading-spinner"></div>
+        </div>
+      </div>
+    `;
+    
+    // Insert placeholder in the DOM immediately
+    const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+    const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
+    
+    if (isMobile && firstPost && firstPost.parentNode) {
+      firstPost.parentNode.insertBefore(placeholder, firstPost);
+      console.log(`✅ [LOADING] Created loading placeholder for ${url} (mobile)`);
+    } else {
+      // For desktop, add to container
+      const container = getOrCreateWidgetsContainer();
+      if (container) {
+        container.appendChild(placeholder);
+        console.log(`✅ [LOADING] Created loading placeholder for ${url} (desktop)`);
+      } else {
+        // Fallback: add to topic body
+        if (topicBody) {
+          topicBody.insertBefore(placeholder, topicBody.firstChild);
+          console.log(`✅ [LOADING] Created loading placeholder for ${url} (fallback)`);
+        }
+      }
+    }
+    
+    // Force visibility
+    placeholder.style.setProperty('display', 'block', 'important');
+    placeholder.style.setProperty('visibility', 'visible', 'important');
+    placeholder.style.setProperty('opacity', '1', 'important');
+    
+    return placeholder;
+  }
+
   // Render status widget on the right side (outside post box) - like the image
   // Render multi-stage widget showing Temp Check, ARFC, and AIP all together
   // Get or create the widgets container for column layout
@@ -2413,11 +2507,27 @@ export default apiInitializer((api) => {
     // Get the URL from stages to check for duplicates by URL (more reliable than ID)
     const proposalUrl = stages.aipUrl || stages.arfcUrl || stages.tempCheckUrl || null;
     
+    // CRITICAL: Remove loading placeholder if it exists (replace with actual widget)
+    // Remove by URL (more reliable than ID since widgetId might differ)
+    if (proposalUrl) {
+      const placeholder = document.querySelector(`.loading-placeholder[data-tally-url="${proposalUrl}"]`);
+      if (placeholder) {
+        console.log(`✅ [LOADING] Removing loading placeholder for ${proposalUrl}, replacing with actual widget`);
+        placeholder.remove();
+      }
+      // Also try removing by widgetId as fallback
+      const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
+      if (placeholderById) {
+        console.log(`✅ [LOADING] Removing loading placeholder by ID for ${widgetId}`);
+        placeholderById.remove();
+      }
+    }
+    
     // Check for existing widgets with the same URL to prevent duplicates
     // This allows multiple proposals of the same type (e.g., 2 AIP proposals) to be shown separately
     // Only widgets with the same URL are considered duplicates, not all widgets of the same type
     if (proposalUrl) {
-      const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${proposalUrl}"]`);
+      const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${proposalUrl}"]:not(.loading-placeholder)`);
       if (existingWidgetsByUrl.length > 0) {
         console.log(`🔵 [RENDER] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, skipping duplicate render`);
         // Clean up tracking for these widgets
@@ -7159,6 +7269,20 @@ export default apiInitializer((api) => {
         }
         fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(url); // Also add original for backward compatibility
+        
+        // CRITICAL: Create loading placeholder IMMEDIATELY when URL is detected
+        // This shows user that widget is loading instead of showing nothing
+        try {
+          const urlHash = url.split('').reduce((acc, char) => {
+            return ((acc << 5) - acc) + char.charCodeAt(0);
+          }, 0);
+          const widgetId = `snapshot_${Math.abs(urlHash)}`;
+          createLoadingPlaceholder(url, widgetId, orderedProposals.findIndex(p => p.url === url && p.type === 'snapshot'));
+          console.log(`✅ [LOADING] Created loading placeholder for Snapshot URL: ${url}`);
+        } catch (err) {
+          console.warn(`⚠️ [LOADING] Failed to create loading placeholder for ${url}:`, err);
+        }
+        
         return true;
       });
       
@@ -7420,6 +7544,19 @@ export default apiInitializer((api) => {
         // Mark URL as being fetched (both normalized and original)
         fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(aipUrl);
+        
+        // CRITICAL: Create loading placeholder IMMEDIATELY when AIP URL is detected
+        try {
+          const urlHash = aipUrl.split('').reduce((acc, char) => {
+            return ((acc << 5) - acc) + char.charCodeAt(0);
+          }, 0);
+          const widgetId = `aip_${Math.abs(urlHash)}`;
+          const proposalOrderIndex = orderedProposals.findIndex(p => p.url === aipUrl && p.type === 'aip');
+          createLoadingPlaceholder(aipUrl, widgetId, proposalOrderIndex >= 0 ? proposalOrderIndex : null);
+          console.log(`✅ [LOADING] Created loading placeholder for AIP URL: ${aipUrl}`);
+        } catch (err) {
+          console.warn(`⚠️ [LOADING] Failed to create loading placeholder for ${aipUrl}:`, err);
+        }
         
         console.log(`🔵 [TOPIC] Fetching AIP proposal ${aipIndex + 1} from: ${aipUrl}`);
         return fetchProposalDataByType(aipUrl, 'aip')
@@ -8111,25 +8248,25 @@ export default apiInitializer((api) => {
     // On mobile, use shorter delays for faster widget display
     // On desktop, use longer delays to catch late-loading content
     if (isMobile) {
+      // Reduced delays for faster mobile display - show loading immediately, then check quickly
       setTimeout(() => {
         debouncedSetupTopicWidget();
         ensureAllWidgetsVisible();
-      }, 100);
+      }, 0); // Immediate check
       setTimeout(() => {
         debouncedSetupTopicWidget();
         ensureAllWidgetsVisible();
-      }, 500);
+      }, 200); // Quick follow-up
       
       // On mobile, ensure all widgets are visible after initial setup
-      // This fixes the issue where widgets don't appear until scroll
       setTimeout(() => {
         ensureAllWidgetsVisible();
-      }, 600);
+      }, 300);
       
-      // Additional check after even longer delay to catch any lazy loading
+      // Final check for any lazy-loaded content (reduced from 1000ms)
       setTimeout(() => {
         ensureAllWidgetsVisible();
-      }, 1000);
+      }, 500);
     } else {
       setTimeout(() => {
         debouncedSetupTopicWidget();
