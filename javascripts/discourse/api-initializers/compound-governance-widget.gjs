@@ -429,6 +429,14 @@ export default apiInitializer((api) => {
       return false;
     }
     
+    // Clean space for logging (used later)
+    let cleanSpace = space;
+    if (space.startsWith('s:')) {
+      cleanSpace = space.substring(2);
+    } else if (space.startsWith('s-tn:')) {
+      cleanSpace = space.substring(5);
+    }
+    
     // Handle testnet spaces differently - allow testnet spaces for testing
     if (isTestnet) {
       console.log("🔵 [VALIDATE] Testnet proposal detected - allowing testnet space:", space);
@@ -436,7 +444,6 @@ export default apiInitializer((api) => {
       // Still check proposal type (AIP, Temp Check, ARFC) below
     } else {
       // Verify space is from Aave (aave.eth or aavedao.eth) for production
-      const cleanSpace = space.startsWith('s:') ? space.substring(2) : space;
       const isAaveSpace = cleanSpace === 'aave.eth' || 
                          cleanSpace === 'aavedao.eth' ||
                          cleanSpace === 's:aave.eth' ||
@@ -497,9 +504,10 @@ export default apiInitializer((api) => {
 
   // Fetch Snapshot proposal data
   async function fetchSnapshotProposal(space, proposalId, cacheKey, isTestnet = false) {
+    // Use testnet endpoint if isTestnet is true (defined outside try block for error handling)
+    const graphqlEndpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
+    
     try {
-      // Use testnet endpoint if isTestnet is true
-      const graphqlEndpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
       console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId, "isTestnet:", isTestnet);
 
       // Query by full ID
