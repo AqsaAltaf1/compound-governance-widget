@@ -2280,7 +2280,7 @@ export default apiInitializer((api) => {
   // Returns container for large screens (fixed positioning), null for mobile (inline positioning)
   function getOrCreateWidgetsContainer() {
     // Don't create container on mobile - widgets should be inline
-    const isMobile = window.innerWidth <= 1024;
+    const isMobile = window.innerWidth <= 1400;
     if (isMobile) {
       console.log("🔵 [CONTAINER] Mobile detected - skipping container creation");
       return null;
@@ -2356,7 +2356,7 @@ export default apiInitializer((api) => {
       return;
     }
     
-    const isMobile = window.innerWidth <= 1024;
+    const isMobile = window.innerWidth <= 1400;
     
     // Always ensure visibility FIRST (before positioning)
     container.style.setProperty('display', 'flex', 'important');
@@ -3230,9 +3230,9 @@ export default apiInitializer((api) => {
     statusWidget.style.marginBottom = '0';
     
     // Position widget - use fixed positioning on right for large screens, inline (top) for smaller screens
-    const isMobile = window.innerWidth <= 1024 || 
+    const isMobile = window.innerWidth <= 1400 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isLargeScreen = window.innerWidth > 1024;
+    const isLargeScreen = window.innerWidth > 1400;
     
     console.log(`🔵 [WIDGET] Detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}, isLargeScreen: ${isLargeScreen}`);
     
@@ -3763,7 +3763,7 @@ export default apiInitializer((api) => {
     const proposalType = proposalData.type || 'snapshot'; // 'snapshot' or 'aip'
     
     // Check if mobile to determine update strategy
-    const isMobile = window.innerWidth <= 1024 || 
+    const isMobile = window.innerWidth <= 1400 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
     // Check if widget with same ID already exists (for in-place updates during auto-refresh)
@@ -5843,7 +5843,8 @@ export default apiInitializer((api) => {
     // CRITICAL: Retry multiple times to catch lazy-loaded content for BOTH Snapshot and AIP proposals
     // This ensures proposals are detected on page load, not just when scrolling
     // Retry even if some proposals were found, in case there are more in lazy-loaded posts
-    const retryDelays = [500, 1000, 2000, 3000, 5000]; // 0.5s, 1s, 2s, 3s, 5s
+    // Reduced delays for faster widget appearance: 50ms, 150ms, 300ms, 600ms, 1.2s, 2.5s
+    const retryDelays = [50, 150, 300, 600, 1200, 2500];
     let retryCount = 0;
     const foundUrls = new Set([...allProposals.snapshot, ...allProposals.aip]);
     
@@ -7666,17 +7667,19 @@ export default apiInitializer((api) => {
         });
     }
     
-    // CRITICAL: Ensure all widgets are visible after all proposals are processed
+    // CRITICAL: Ensure all widgets are visible immediately after proposals are processed
     // This ensures widgets appear on page load and stay visible, not just when scrolling
+    // Reduced delays for faster visibility: immediate, 100ms, 300ms
+    ensureAIPWidgetsVisible(); // Immediate
     setTimeout(() => {
       ensureAIPWidgetsVisible();
       console.log("✅ [TOPIC] Ensured all widgets are visible after processing all proposals");
-    }, 500);
+    }, 100);
     
-    // Also ensure visibility after a longer delay to catch any lazy-loaded widgets
+    // Also ensure visibility after a short delay to catch any lazy-loaded widgets
     setTimeout(() => {
       ensureAIPWidgetsVisible();
-    }, 1500);
+    }, 300);
   }
   
   // Debounce widget setup to prevent duplicate widgets
@@ -7695,11 +7698,12 @@ export default apiInitializer((api) => {
     }
     
     // Detect mobile for faster rendering
-    const isMobile = window.innerWidth <= 1024 || 
+    const isMobile = window.innerWidth <= 1400 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
-    // Use shorter debounce on mobile for faster initial load, longer on desktop to prevent flickering
-    const debounceDelay = isMobile ? 100 : 500;
+    // Use shorter debounce for faster initial load on all devices
+    // Reduced from 100/500ms to 50/200ms for faster widget appearance
+    const debounceDelay = isMobile ? 50 : 200;
     
     widgetSetupTimeout = setTimeout(() => {
       if (!isWidgetSetupRunning) {
@@ -7834,12 +7838,10 @@ export default apiInitializer((api) => {
               const storedUrl = preview.getAttribute('data-tally-url');
               if (storedUrl && (storedUrl.includes('snapshot.org') || storedUrl.includes('snapshot.box'))) {
                 console.log(`✅ [TOPIC] Preview container added with Snapshot URL in data attribute: ${storedUrl}`);
-                // Re-scan to add this URL to proposals
-                setTimeout(() => {
-                  debouncedSetupTopicWidget();
-                }, 200);
+                // Re-scan immediately for faster detection
+                debouncedSetupTopicWidget();
               } else {
-                // Wait a bit for links to be added to preview container
+                // Wait a short time for links to be added to preview container (reduced from 500ms to 100ms)
                 setTimeout(() => {
                   const previewLinks = preview.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
                   if (previewLinks.length > 0) {
@@ -7847,7 +7849,7 @@ export default apiInitializer((api) => {
                     // Re-scan to add these URLs to proposals
                     debouncedSetupTopicWidget();
                   }
-                }, 500);
+                }, 100);
               }
             }
           }
@@ -7865,7 +7867,7 @@ export default apiInitializer((api) => {
     });
     
     // Detect mobile for faster initial load
-    const isMobile = window.innerWidth <= 1024 || 
+    const isMobile = window.innerWidth <= 1400 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
     // CRITICAL: Run immediate scan first (before debounce) to find proposals on page load
@@ -7878,7 +7880,8 @@ export default apiInitializer((api) => {
     
     // Run again after short delays to catch lazy-loaded content
     // These retries ensure proposals are detected on page load, not just when scrolling
-    const initialRetryDelays = [100, 300, 500, 1000, 2000];
+    // Reduced delays for faster detection: 0ms (immediate), 50ms, 150ms, 300ms, 600ms, 1200ms
+    const initialRetryDelays = [0, 50, 150, 300, 600, 1200];
     initialRetryDelays.forEach((delay) => {
       setTimeout(() => {
         console.log(`🔍 [TOPIC] Initial retry scan after ${delay}ms...`);
@@ -7909,7 +7912,7 @@ export default apiInitializer((api) => {
       // CRITICAL: Ensure the container wrapper stays visible on ALL screen sizes during scroll
       const container = document.querySelector('.governance-widgets-wrapper');
       if (container) {
-        const isMobileCheck = window.innerWidth <= 1024;
+        const isMobileCheck = window.innerWidth <= 1400;
         
         // Always ensure visibility
         container.style.setProperty('display', 'flex', 'important');
@@ -8011,7 +8014,7 @@ export default apiInitializer((api) => {
         if (mutation.type === 'attributes' && 
             (mutation.attributeName === 'style' || mutation.attributeName === 'class')) {
           const target = mutation.target;
-          const isMobileCheck = window.innerWidth <= 1024;
+          const isMobileCheck = window.innerWidth <= 1400;
           
           // Check if target is a widget or container
           if (target.classList?.contains('tally-status-widget-container') || 

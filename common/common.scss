@@ -9,7 +9,8 @@
 }
 
 // Global rule: Ensure all vote buttons are full width on mobile screens
-@media (width <= 1024px) {
+// Increased breakpoint from 1024px to 1400px for earlier mobile behavior
+@media (width <= 1400px) {
   .vote-button {
     width: 100% !important;
     max-width: 100% !important;
@@ -121,7 +122,7 @@
   }
 
   // Tablet: Show widgets inline in topic (same as mobile)
-  @media (width > 768px) and (width <= 1024px) {
+  @media (width > 768px) and (width <= 1400px) {
     position: relative !important;
     left: auto !important;
     right: auto !important;
@@ -213,7 +214,8 @@
     }
 
     // Mobile: Override fixed positioning to show inline
-    @media (width <= 1024px) {
+    // Increased breakpoint from 1024px to 1400px for earlier mobile behavior
+    @media (width <= 1400px) {
       position: relative !important;
       left: auto !important;
       right: auto !important;
@@ -249,7 +251,7 @@
       border-radius: 12px !important;
     }
 
-    @media (width > 768px) and (width <= 1024px) {
+    @media (width > 768px) and (width <= 1400px) {
       padding: 14px !important;
     }
 
@@ -578,7 +580,7 @@
 
       // Mobile: Larger touch target (minimum 44x44px) and 100% width with centered text
       // Ensure full width on ALL mobile screens (phones and tablets)
-      @media (width <= 1024px) {
+      @media (width <= 1400px) {
         width: 100% !important;
         max-width: 100% !important;
         min-width: 100% !important;
@@ -642,7 +644,7 @@
         box-sizing: border-box !important;
 
         // Ensure full width on ALL mobile screens (phones and tablets)
-        @media (width <= 1024px) {
+        @media (width <= 1400px) {
           width: 100% !important;
           max-width: 100% !important;
           min-width: 100% !important;
@@ -782,7 +784,7 @@
   }
 
   // Tablet: Adjust width
-  @media (width > 768px) and (width <= 1024px) {
+  @media (width > 768px) and (width <= 1400px) {
     width: 100% !important;
     max-width: 100% !important;
     margin-left: 0 !important;
@@ -1072,7 +1074,7 @@
       transition: background 0.2s;
 
       // Mobile: Larger touch target and 100% width on ALL mobile screens
-      @media (width <= 1024px) {
+      @media (width <= 1400px) {
         width: 100% !important;
         max-width: 100% !important;
         min-width: 100% !important;
