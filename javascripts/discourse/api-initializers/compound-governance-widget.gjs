@@ -2294,12 +2294,20 @@ export default apiInitializer((api) => {
       container.style.display = 'flex';
       container.style.flexDirection = 'column';
       container.style.gap = '16px';
-      container.style.position = 'fixed';
-      container.style.zIndex = '500';
-      container.style.width = '320px';
-      container.style.maxWidth = '320px';
-      container.style.maxHeight = 'calc(100vh - 100px)';
-      container.style.overflowY = 'auto';
+      container.style.setProperty('position', 'fixed', 'important');
+      container.style.setProperty('z-index', '500', 'important');
+      container.style.setProperty('width', '320px', 'important');
+      container.style.setProperty('max-width', '320px', 'important');
+      container.style.setProperty('max-height', 'calc(100vh - 100px)', 'important');
+      container.style.setProperty('overflow-y', 'auto', 'important');
+      // Ensure container stays visible and fixed during scroll
+      container.style.setProperty('visibility', 'visible', 'important');
+      container.style.setProperty('opacity', '1', 'important');
+      container.style.setProperty('display', 'flex', 'important');
+      // Optimize for fixed positioning
+      container.style.setProperty('will-change', 'transform', 'important');
+      container.style.setProperty('backface-visibility', 'hidden', 'important');
+      container.style.setProperty('transform', 'translateZ(0)', 'important');
       
       // Position container like tally widget - fixed on right side
       updateContainerPosition(container);
@@ -2307,22 +2315,32 @@ export default apiInitializer((api) => {
       document.body.appendChild(container);
       console.log("✅ [CONTAINER] Created widgets container for column layout");
       
-      // Update position on resize only (not scroll) to keep widgets fixed
+      // Update position on resize - handles desktop to mobile transitions
       let updateTimeout;
       const updatePosition = () => {
         clearTimeout(updateTimeout);
         updateTimeout = setTimeout(() => {
-          if (container && container.parentNode) {
-            // Re-check if mobile after resize
-            const stillMobile = window.innerWidth <= 1024;
-            if (!stillMobile) {
-              updateContainerPosition(container);
+          if (container) {
+            // Ensure container is still in DOM (re-append if needed)
+            if (!container.parentNode) {
+              console.log("🔵 [RESIZE] Container removed from DOM, re-appending...");
+              document.body.appendChild(container);
             }
+            
+            // Always update position on resize (handles desktop ↔ mobile transitions)
+            // This ensures widget stays visible when switching between screen sizes
+            updateContainerPosition(container);
+            
+            // Also force visibility to prevent disappearing
+            // Use a small delay to ensure DOM is ready after resize
+            setTimeout(() => {
+              ensureAllWidgetsVisible();
+            }, 50);
           }
         }, 100);
       };
       
-      // Only update on resize, not scroll - keeps widgets fixed during scroll
+      // Update on resize to handle screen size changes (desktop ↔ mobile)
       window.addEventListener('resize', updatePosition);
       
       // Initial position update after a short delay to ensure DOM is ready
@@ -2331,20 +2349,46 @@ export default apiInitializer((api) => {
     return container;
   }
   
-  // Update container position - keep fixed on right side like tally widget
+  // Update container position - fixed on desktop, relative on mobile/tablet
   function updateContainerPosition(container) {
-    // Position like tally widget - fixed on right side, same position
-    container.style.right = '50px';
-    container.style.left = 'auto';
-    container.style.top = '180px';
-    // Ensure container is always visible
-    container.style.display = 'flex';
-    container.style.visibility = 'visible';
+    if (!container || !container.parentNode) {
+      console.warn("⚠️ [POSITION] Container not in DOM, skipping position update");
+      return;
+    }
+    
+    const isMobile = window.innerWidth <= 1024;
+    
+    // Always ensure visibility FIRST (before positioning)
+    container.style.setProperty('display', 'flex', 'important');
+    container.style.setProperty('visibility', 'visible', 'important');
+    container.style.setProperty('opacity', '1', 'important');
+    container.classList.remove('hidden', 'd-none', 'is-hidden');
+    
+    if (isMobile) {
+      // Mobile/Tablet: Use relative positioning (inline in topic) - respect CSS
+      container.style.setProperty('position', 'relative', 'important');
+      container.style.setProperty('left', 'auto', 'important');
+      container.style.setProperty('right', 'auto', 'important');
+      container.style.setProperty('top', 'auto', 'important');
+      container.style.setProperty('width', '100%', 'important');
+      container.style.setProperty('max-width', '100%', 'important');
+    } else {
+      // Desktop: Use fixed positioning (right side)
+      container.style.setProperty('position', 'fixed', 'important');
+      container.style.setProperty('z-index', '500', 'important');
+      container.style.setProperty('right', '5px', 'important');
+      container.style.setProperty('left', 'auto', 'important');
+      container.style.setProperty('top', '180px', 'important');
+      // Optimize for fixed positioning (prevent flickering during scroll)
+      container.style.setProperty('will-change', 'transform', 'important');
+      container.style.setProperty('backface-visibility', 'hidden', 'important');
+      container.style.setProperty('transform', 'translateZ(0)', 'important');
+    }
     
     // Log position data for debugging
     const rect = container.getBoundingClientRect();
     console.log("📍 [POSITION DATA] Container position:", {
-      right: '50px',
+      right: '5px',
       top: '180px',
       actualLeft: `${rect.left}px`,
       actualTop: `${rect.top}px`,
@@ -5254,6 +5298,59 @@ export default apiInitializer((api) => {
     console.log(`⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`);
   }
 
+  // CRITICAL: Ensure all widgets are visible immediately after creation
+  // This function ensures widgets appear on page load and stay visible on ALL screen sizes
+  // This is called after widgets are created and periodically to prevent them from being hidden
+  function ensureAllWidgetsVisible() {
+    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+    if (allWidgets.length === 0) {
+      return; // No widgets yet
+    }
+    
+    const isMobileCheck = window.innerWidth <= 1024;
+    
+    allWidgets.forEach(widget => {
+      const computedStyle = window.getComputedStyle(widget);
+      if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+        console.log(`🔵 [WIDGET] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+        widget.style.setProperty('display', 'block', 'important');
+        widget.style.setProperty('visibility', 'visible', 'important');
+        widget.style.setProperty('opacity', '1', 'important');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        console.log(`✅ [WIDGET] Forced visibility for widget`);
+      } else {
+        // Even if visible, ensure it stays visible with important flags
+        // This prevents widgets from being hidden by scroll events or other code
+        widget.style.setProperty('display', 'block', 'important');
+        widget.style.setProperty('visibility', 'visible', 'important');
+        widget.style.setProperty('opacity', '1', 'important');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+      }
+    });
+    
+    // Also ensure container wrapper is visible and positioned correctly
+    const container = document.querySelector('.governance-widgets-wrapper');
+    if (container) {
+      container.style.setProperty('display', 'flex', 'important');
+      container.style.setProperty('visibility', 'visible', 'important');
+      container.style.setProperty('opacity', '1', 'important');
+      
+      if (isMobileCheck) {
+        // Mobile/Tablet: Relative positioning (inline)
+        container.style.setProperty('position', 'relative', 'important');
+        container.style.setProperty('width', '100%', 'important');
+        container.style.setProperty('max-width', '100%', 'important');
+      } else {
+        // Desktop: Fixed positioning (right side)
+        container.style.setProperty('position', 'fixed', 'important');
+        container.style.setProperty('z-index', '500', 'important');
+      }
+    }
+    
+    // Also ensure AIP widgets specifically
+    ensureAIPWidgetsVisible();
+  }
+
   // Ensure ALL widgets remain visible after scroll events
   // CRITICAL: ALL widget types should ALWAYS be visible once found:
   // - AIP widgets (Aave Improvement Proposals)
@@ -7799,19 +7896,53 @@ export default apiInitializer((api) => {
     // Widgets are detected on page load and remain visible regardless of scroll position
     let scrollScanTimeout = null;
     const handleScroll = () => {
+      // CRITICAL: Force visibility IMMEDIATELY on every scroll event (no debounce for visibility)
+      // This prevents widgets from disappearing when scrolling on ALL screen sizes
+      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+      allWidgets.forEach(widget => {
+        widget.style.setProperty('display', 'block', 'important');
+        widget.style.setProperty('visibility', 'visible', 'important');
+        widget.style.setProperty('opacity', '1', 'important');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+      });
+      
+      // CRITICAL: Ensure the container wrapper stays visible on ALL screen sizes during scroll
+      const container = document.querySelector('.governance-widgets-wrapper');
+      if (container) {
+        const isMobileCheck = window.innerWidth <= 1024;
+        
+        // Always ensure visibility
+        container.style.setProperty('display', 'flex', 'important');
+        container.style.setProperty('visibility', 'visible', 'important');
+        container.style.setProperty('opacity', '1', 'important');
+        
+        if (isMobileCheck) {
+          // Mobile/Tablet: Use relative positioning (inline in topic) - respect CSS
+          container.style.setProperty('position', 'relative', 'important');
+          container.style.setProperty('left', 'auto', 'important');
+          container.style.setProperty('right', 'auto', 'important');
+          container.style.setProperty('top', 'auto', 'important');
+          container.style.setProperty('width', '100%', 'important');
+          container.style.setProperty('max-width', '100%', 'important');
+        } else {
+          // Desktop: Use fixed positioning (right side)
+          container.style.setProperty('position', 'fixed', 'important');
+          container.style.setProperty('z-index', '500', 'important');
+          container.style.setProperty('right', '5px', 'important');
+          container.style.setProperty('top', '180px', 'important');
+          container.style.setProperty('left', 'auto', 'important');
+          // Optimize for fixed positioning
+          container.style.setProperty('will-change', 'transform', 'important');
+          container.style.setProperty('backface-visibility', 'hidden', 'important');
+          container.style.setProperty('transform', 'translateZ(0)', 'important');
+        }
+      }
+      
+      // Debounce the expensive scanning operation (but visibility is enforced immediately above)
       if (scrollScanTimeout) {
         clearTimeout(scrollScanTimeout);
       }
       scrollScanTimeout = setTimeout(() => {
-        // CRITICAL: Always ensure all existing widgets are visible (never hide them on scroll)
-        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-        allWidgets.forEach(widget => {
-          widget.style.setProperty('display', 'block', 'important');
-          widget.style.setProperty('visibility', 'visible', 'important');
-          widget.style.setProperty('opacity', '1', 'important');
-          widget.classList.remove('hidden', 'd-none', 'is-hidden');
-        });
-        
         // Check if we've found all proposals yet - if not, scan for new ones
         const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
         const existingUrls = new Set();
@@ -7845,44 +7976,134 @@ export default apiInitializer((api) => {
     
     // Only add scroll listener for detecting new lazy-loaded proposals
     // This does NOT hide/show widgets based on scroll position
+    // Visibility is enforced immediately on every scroll to prevent disappearing
     window.addEventListener('scroll', handleScroll, { passive: true });
     
-    // CRITICAL: Ensure all widgets are visible immediately after creation
-    // This function ensures widgets appear on page load and stay visible
-    // This is called after widgets are created and periodically to prevent them from being hidden
-    const ensureAllWidgetsVisible = () => {
-      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-      if (allWidgets.length === 0) {
-        return; // No widgets yet
-      }
-      
-      allWidgets.forEach(widget => {
-        const computedStyle = window.getComputedStyle(widget);
-        if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-          console.log(`🔵 [WIDGET] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
-          widget.style.setProperty('display', 'block', 'important');
-          widget.style.setProperty('visibility', 'visible', 'important');
-          widget.style.setProperty('opacity', '1', 'important');
-          widget.classList.remove('hidden', 'd-none', 'is-hidden');
-          console.log(`✅ [WIDGET] Forced visibility for widget`);
-        } else {
-          // Even if visible, ensure it stays visible with important flags
-          // This prevents widgets from being hidden by scroll events or other code
-          widget.style.setProperty('display', 'block', 'important');
-          widget.style.setProperty('visibility', 'visible', 'important');
-          widget.style.setProperty('opacity', '1', 'important');
-          widget.classList.remove('hidden', 'd-none', 'is-hidden');
+    // CRITICAL: Also handle resize events to ensure widget stays visible when switching screen sizes
+    // This prevents widget from disappearing when going from desktop to mobile or vice versa
+    let resizeTimeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        // Force visibility and correct positioning on resize
+        ensureAllWidgetsVisible();
+        
+        // Also update container position for screen size changes
+        const container = document.querySelector('.governance-widgets-wrapper');
+        if (container) {
+          updateContainerPosition(container);
         }
-      });
-      // Also ensure AIP widgets specifically
-      ensureAIPWidgetsVisible();
+      }, 150);
     };
+    window.addEventListener('resize', handleResize);
     
     // CRITICAL: Periodically ensure widgets stay visible (prevents them from being hidden by scroll or other events)
-    // This runs every 2 seconds to catch any cases where widgets might be hidden
+    // This runs every 500ms to catch any cases where widgets might be hidden (more frequent for better reliability)
     setInterval(() => {
       ensureAllWidgetsVisible();
-    }, 2000);
+    }, 500);
+    
+    // CRITICAL: Use MutationObserver to watch for any changes to widget visibility
+    // This immediately restores visibility if Discourse or other code tries to hide widgets
+    // Works on ALL screen sizes (desktop, tablet, mobile)
+    const widgetVisibilityObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'attributes' && 
+            (mutation.attributeName === 'style' || mutation.attributeName === 'class')) {
+          const target = mutation.target;
+          const isMobileCheck = window.innerWidth <= 1024;
+          
+          // Check if target is a widget or container
+          if (target.classList?.contains('tally-status-widget-container') || 
+              target.closest?.('.tally-status-widget-container')) {
+            const widget = target.classList?.contains('tally-status-widget-container') 
+              ? target 
+              : target.closest('.tally-status-widget-container');
+            if (widget) {
+              const computedStyle = window.getComputedStyle(widget);
+              if (computedStyle.display === 'none' || 
+                  computedStyle.visibility === 'hidden' || 
+                  computedStyle.opacity === '0') {
+                console.log(`🔵 [OBSERVER] Widget visibility changed to hidden, forcing visible immediately`);
+                widget.style.setProperty('display', 'block', 'important');
+                widget.style.setProperty('visibility', 'visible', 'important');
+                widget.style.setProperty('opacity', '1', 'important');
+                widget.classList.remove('hidden', 'd-none', 'is-hidden');
+              }
+            }
+          }
+          
+          // Also watch for container visibility changes
+          if (target.classList?.contains('governance-widgets-wrapper')) {
+            const container = target;
+            const computedStyle = window.getComputedStyle(container);
+            if (computedStyle.display === 'none' || 
+                computedStyle.visibility === 'hidden' || 
+                computedStyle.opacity === '0') {
+              console.log(`🔵 [OBSERVER] Container visibility changed to hidden, forcing visible immediately`);
+              container.style.setProperty('display', 'flex', 'important');
+              container.style.setProperty('visibility', 'visible', 'important');
+              container.style.setProperty('opacity', '1', 'important');
+              
+              // Re-apply correct positioning based on screen size
+              if (isMobileCheck) {
+                container.style.setProperty('position', 'relative', 'important');
+                container.style.setProperty('width', '100%', 'important');
+                container.style.setProperty('max-width', '100%', 'important');
+              } else {
+                container.style.setProperty('position', 'fixed', 'important');
+                container.style.setProperty('z-index', '500', 'important');
+              }
+            }
+          }
+        }
+      });
+    });
+    
+    // Observe all existing widgets, container, and any new ones that get added
+    const observeWidgets = () => {
+      // Observe all widgets
+      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+      allWidgets.forEach(widget => {
+        widgetVisibilityObserver.observe(widget, {
+          attributes: true,
+          attributeFilter: ['style', 'class']
+        });
+      });
+      
+      // Also observe the container wrapper
+      const container = document.querySelector('.governance-widgets-wrapper');
+      if (container) {
+        widgetVisibilityObserver.observe(container, {
+          attributes: true,
+          attributeFilter: ['style', 'class']
+        });
+      }
+    };
+    
+    // Initial observation
+    observeWidgets();
+    
+    // Also observe the document for new widgets being added
+    const widgetContainerObserver = new MutationObserver(() => {
+      observeWidgets();
+    });
+    
+    const topicBody = document.querySelector('.topic-body, .post-stream, .topic-post');
+    if (topicBody) {
+      widgetContainerObserver.observe(topicBody, {
+        childList: true,
+        subtree: true
+      });
+    }
+    
+    // Also observe document body for container changes
+    if (document.body) {
+      widgetContainerObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
     
     // On mobile, use shorter delays for faster widget display
     // On desktop, use longer delays to catch late-loading content

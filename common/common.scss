@@ -54,8 +54,14 @@
   opacity: 1 !important;
   pointer-events: auto !important;
 
+  // CRITICAL: Ensure widget stays fixed and visible during scroll
+  // Use !important to override any Discourse styles that might hide it
+  will-change: transform !important; // Optimize for fixed positioning
+  backface-visibility: hidden !important; // Prevent flickering
+  transform: translateZ(0) !important; // Force GPU acceleration
+
   // Position like tally widget - fixed on right side (large screens only)
-  right: 10px !important;
+  right: 5px !important;
   top: 180px !important;
   left: auto !important;
 
