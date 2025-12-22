@@ -2220,7 +2220,9 @@ export default apiInitializer((api) => {
           ${(() => {
             const statusLower = (proposalData.status || '').toLowerCase();
             const isPending = statusLower === 'pending';
-            const showVoteButton = totalVotes > 0 && !isPending;
+            const isCreated = statusLower === 'created';
+            const showVoteButton = totalVotes > 0 && !isPending && !isCreated;
+            const buttonText = (isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
             
             if (showVoteButton) {
               return `
@@ -2255,7 +2257,7 @@ export default apiInitializer((api) => {
                     </div>
                   </div>
                   <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
-                    Vote on Snapshot
+                    ${buttonText}
                   </a>
                 </div>
               `;
@@ -2805,7 +2807,7 @@ export default apiInitializer((api) => {
           </div>
         ` : ''}
         <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
-          Vote on Snapshot
+          ${isPending || isCreated ? 'View on Snapshot' : 'Vote on Snapshot'}
         </a>
       `;
       
@@ -5023,7 +5025,7 @@ export default apiInitializer((api) => {
     
     // Determine type from URL
     let type = null;
-    if (url.includes('snapshot.org')) {
+    if (url.includes('snapshot.org') || url.includes('testnet.snapshot.box')) {
       type = 'snapshot';
     } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
       type = 'aip';
