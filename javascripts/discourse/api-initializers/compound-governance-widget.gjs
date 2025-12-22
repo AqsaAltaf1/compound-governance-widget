@@ -703,11 +703,28 @@ export default apiInitializer((api) => {
       if (errorName === 'AbortError' || errorMessage.includes('aborted')) {
         console.error("❌ [SNAPSHOT] Request timed out after 10 seconds. The Snapshot API may be slow or unavailable.");
       } else if (errorName === 'TypeError' || errorMessage.includes('Failed to fetch')) {
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const isCorsError = errorMessage.includes('CORS') || errorMessage.includes('preflight') || 
+                           (errorMessage.includes('blocked') && isLocalhost);
+        
         console.error("❌ [SNAPSHOT] Network error - possible causes:");
-        console.error("   - CORS policy blocking the request");
-        console.error("   - Network connectivity issues");
-        console.error("   - Snapshot API is temporarily unavailable");
-        console.error("   - Browser security restrictions");
+        if (isLocalhost && (isCorsError || isTestnet)) {
+          console.error("   🔴 CORS policy blocking request from localhost (common in local development)");
+          console.error("   📝 This happens because:");
+          console.error("      - Browser blocks cross-origin requests from localhost");
+          console.error("      - testnet.snapshot.org doesn't allow requests from localhost");
+          console.error("      - This is a browser security feature, not a code bug");
+          console.error("   💡 Solutions for local development:");
+          console.error("      1. Use a CORS browser extension (e.g., 'CORS Unblock' for Chrome)");
+          console.error("      2. Launch Chrome with: --disable-web-security --user-data-dir=/tmp/chrome_dev");
+          console.error("      3. Test with production Snapshot proposals (snapshot.org) instead of testnet");
+          console.error("      4. Set up a local CORS proxy server");
+        } else {
+          console.error("   - CORS policy blocking the request");
+          console.error("   - Network connectivity issues");
+          console.error("   - Snapshot API is temporarily unavailable");
+          console.error("   - Browser security restrictions");
+        }
         if (error.cause) {
           console.error("   - Original error:", error.cause);
         }
@@ -6120,6 +6137,10 @@ export default apiInitializer((api) => {
     const discussionLinks = extractDiscussionLinksFromSnapshot(snapshotProposal);
     for (const link of discussionLinks) {
       const normalizedLink = normalizeForumUrl(link);
+      console.log(`   🔍 [VALIDATE] Comparing discussion link: ${link}`);
+      console.log(`   🔍 [VALIDATE] Normalized discussion link: ${normalizedLink}`);
+      console.log(`   🔍 [VALIDATE] Normalized current URL: ${normalizedCurrentUrl}`);
+      console.log(`   🔍 [VALIDATE] Match: ${normalizedLink === normalizedCurrentUrl ? 'YES ✅' : 'NO ❌'}`);
       if (normalizedLink && normalizedLink === normalizedCurrentUrl) {
         console.log(`✅ [VALIDATE] Snapshot proposal is related to forum topic (found matching discussion link: ${link})`);
         return { isRelated: true, discussionLink: link };
