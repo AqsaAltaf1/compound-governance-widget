@@ -221,7 +221,7 @@ export default apiInitializer((api) => {
               localStorage.removeItem(key);
               cleared++;
             }
-          } catch (e) {
+          } catch {
             // Invalid entry, remove it
             localStorage.removeItem(key);
             cleared++;
@@ -251,7 +251,7 @@ export default apiInitializer((api) => {
       const topicKey = getTopicKey();
       const shownKey = STORAGE_PREFIX + 'shown_' + topicKey;
       return localStorage.getItem(shownKey) === 'true';
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -2465,162 +2465,6 @@ export default apiInitializer((api) => {
       console.log(`✅ [LOADING] Removing global loading placeholder`);
       globalLoader.remove();
     }
-  }
-  
-  // Create loading placeholder/skeleton for widgets (DEPRECATED - use createGlobalLoadingPlaceholder instead)
-  // Shows a loading indicator while widget data is being fetched
-  function createLoadingPlaceholder(url, widgetId, proposalOrder = null) {
-    const isMobile = window.innerWidth <= 1024 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    // Helper function to normalize URLs for comparison (removes trailing slashes, query params, normalizes)
-    const normalizeUrlForComparison = (urlToNormalize) => {
-      if (!urlToNormalize) {
-        return '';
-      }
-      // Remove trailing slash, query parameters, and fragments
-      let normalized = urlToNormalize.trim()
-        .replace(/\/+$/, '') // Remove trailing slashes
-        .split('?')[0] // Remove query parameters
-        .split('#')[0]; // Remove fragments
-      return normalized.toLowerCase();
-    };
-    
-    const normalizedUrl = normalizeUrlForComparison(url);
-    
-    // CRITICAL: Check DOM FIRST before doing anything else to prevent duplicates
-    // Check by widget ID if provided (fastest check)
-    if (widgetId) {
-      const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
-      if (placeholderById && placeholderById.classList.contains('loading-placeholder')) {
-        console.log(`🔵 [LOADING] Placeholder already exists with ID ${widgetId}, not creating duplicate`);
-        return placeholderById;
-      }
-    }
-    
-    // Check ALL existing placeholders and widgets by URL (exact and normalized match)
-    const allContainers = document.querySelectorAll('.tally-status-widget-container[data-tally-url]');
-    for (const container of allContainers) {
-      const containerUrl = container.getAttribute('data-tally-url');
-      if (!containerUrl) continue;
-      
-      const containerNormalizedUrl = normalizeUrlForComparison(containerUrl);
-      
-      // Check if URLs match (exact match or normalized match)
-      if (containerUrl === url || containerNormalizedUrl === normalizedUrl) {
-        // If it's already a placeholder, return it (don't create duplicate)
-        if (container.classList.contains('loading-placeholder')) {
-          console.log(`🔵 [LOADING] Placeholder already exists for ${url} (found: ${containerUrl}), not creating duplicate`);
-          return container;
-        } else {
-          // If it's a real widget, don't replace it with a placeholder (widget is already loaded)
-          console.log(`🔵 [LOADING] Found existing widget for ${url} (found: ${containerUrl}), skipping placeholder creation`);
-          return null; // Don't create placeholder if widget already exists
-        }
-      }
-    }
-    
-    // CRITICAL: Check if placeholder is already being created (race condition prevention)
-    // Only check this AFTER we've verified it doesn't exist in DOM
-    if (creatingPlaceholders.has(normalizedUrl) || creatingPlaceholders.has(url)) {
-      console.log(`🔵 [LOADING] Placeholder creation already in progress for ${url}, skipping duplicate`);
-      // Wait a bit and check if placeholder was created
-      const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${url}"], .loading-placeholder[data-tally-url*="${normalizedUrl}"]`);
-      if (existingPlaceholder) {
-        return existingPlaceholder;
-      }
-      // If still not found after a moment, it might be a race condition - skip to prevent duplicate
-      return null;
-    }
-    
-    // Mark as being created (only if we're actually going to create it)
-    creatingPlaceholders.add(normalizedUrl);
-    creatingPlaceholders.add(url);
-    
-    // Generate widget ID if not provided
-    if (!widgetId) {
-      const urlHash = url.split('').reduce((acc, char) => {
-        return ((acc << 5) - acc) + char.charCodeAt(0);
-      }, 0);
-      widgetId = `widget_${Math.abs(urlHash)}`;
-    }
-    
-    const placeholderId = `loading-placeholder-${widgetId}`;
-    
-    const placeholder = document.createElement('div');
-    placeholder.id = placeholderId;
-    placeholder.className = 'tally-status-widget-container loading-placeholder';
-    placeholder.setAttribute('data-tally-url', url);
-    placeholder.setAttribute('data-widget-id', widgetId);
-    if (proposalOrder !== null) {
-      placeholder.setAttribute('data-proposal-order', proposalOrder.toString());
-      placeholder.style.setProperty('order', proposalOrder.toString(), 'important');
-    }
-    
-    // Apply same positioning as regular widgets
-    if (isMobile) {
-      placeholder.style.position = 'relative';
-      placeholder.style.width = '100%';
-      placeholder.style.maxWidth = '100%';
-      placeholder.style.marginBottom = '20px';
-    } else {
-      placeholder.style.position = 'fixed';
-      placeholder.style.width = '320px';
-      placeholder.style.maxWidth = '320px';
-    }
-    
-    placeholder.innerHTML = `
-      <div class="tally-status-widget loading-widget">
-        <div class="loading-header">
-          <div class="loading-title"></div>
-          <div class="loading-badge"></div>
-        </div>
-        <div class="loading-content">
-          <div class="loading-bar" style="width: 70%"></div>
-          <div class="loading-bar" style="width: 50%"></div>
-          <div class="loading-bar" style="width: 60%"></div>
-        </div>
-        <div class="loading-footer">
-          <div class="loading-button"></div>
-        </div>
-        <div class="loading-spinner-overlay">
-          <div class="loading-spinner"></div>
-        </div>
-      </div>
-    `;
-    
-    // Insert placeholder in the DOM immediately
-    const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
-    const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
-    
-    if (isMobile && firstPost && firstPost.parentNode) {
-      firstPost.parentNode.insertBefore(placeholder, firstPost);
-      console.log(`✅ [LOADING] Created loading placeholder for ${url} (mobile)`);
-    } else {
-      // For desktop, add to container
-      const container = getOrCreateWidgetsContainer();
-      if (container) {
-        container.appendChild(placeholder);
-        console.log(`✅ [LOADING] Created loading placeholder for ${url} (desktop)`);
-      } else {
-        // Fallback: add to topic body
-        if (topicBody) {
-          topicBody.insertBefore(placeholder, topicBody.firstChild);
-          console.log(`✅ [LOADING] Created loading placeholder for ${url} (fallback)`);
-        }
-      }
-    }
-    
-    // Force visibility
-    placeholder.style.setProperty('display', 'block', 'important');
-    placeholder.style.setProperty('visibility', 'visible', 'important');
-    placeholder.style.setProperty('opacity', '1', 'important');
-    
-    // Clean up tracking (placeholder is now in DOM)
-    creatingPlaceholders.delete(normalizedUrl);
-    creatingPlaceholders.delete(url);
-    
-    return placeholder;
   }
 
   // Render status widget on the right side (outside post box) - like the image
@@ -6005,12 +5849,6 @@ export default apiInitializer((api) => {
       
       // Check cache to see if we've already applied these styles (prevents blinking)
       const cachedState = widgetVisibilityCache.get(widget);
-      const currentState = {
-        display: computedStyle.display,
-        visibility: computedStyle.visibility,
-        opacity: computedStyle.opacity,
-        isHidden: isHidden
-      };
       
       // Only update if widget is hidden OR if state changed (prevents unnecessary updates)
       if (isHidden || !cachedState || cachedState.isHidden !== isHidden) {
@@ -8483,9 +8321,6 @@ export default apiInitializer((api) => {
   const renderingUrls = new Set();
   // Track URLs currently being fetched to prevent duplicate fetches
   const fetchingUrls = new Set();
-  // Track URLs for which loading placeholders are being created (prevents duplicates)
-  // eslint-disable-next-line no-unused-vars
-  const creatingPlaceholders = new Set();
   
   function debouncedSetupTopicWidget() {
     // Clear any pending setup
@@ -9272,7 +9107,6 @@ export default apiInitializer((api) => {
     // CRITICAL: Continuous visibility check ALWAYS (not just during scroll)
     // This ensures widgets stay visible even if Discourse's viewport tracker tries to hide them
     // Run continuously using requestAnimationFrame to catch any hiding immediately
-    let visibilityCheckFrame = null;
     let lastVisibilityCheckTime = 0;
     const VISIBILITY_CHECK_INTERVAL = 16; // Check every ~16ms (60fps)
     
@@ -9281,7 +9115,7 @@ export default apiInitializer((api) => {
       
       // Only check if enough time has passed (throttle to ~60fps)
       if (now - lastVisibilityCheckTime < VISIBILITY_CHECK_INTERVAL) {
-        visibilityCheckFrame = requestAnimationFrame(continuousVisibilityCheck);
+        requestAnimationFrame(continuousVisibilityCheck);
         return;
       }
       
@@ -9349,11 +9183,11 @@ export default apiInitializer((api) => {
       }
       
       // Continue checking ALWAYS (not just during scroll)
-      visibilityCheckFrame = requestAnimationFrame(continuousVisibilityCheck);
+      requestAnimationFrame(continuousVisibilityCheck);
     };
     
     // Start continuous visibility check immediately
-    visibilityCheckFrame = requestAnimationFrame(continuousVisibilityCheck);
+    requestAnimationFrame(continuousVisibilityCheck);
     
     // Enhanced scroll handler - continuous visibility check is already running
     const originalHandleScroll = handleScroll;
