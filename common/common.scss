@@ -131,8 +131,28 @@
     max-width: 100% !important;
   }
 
-  // Tablet: Show widgets inline in topic (same as mobile)
-  @media (width > 768px) and (width <= 1400px) {
+  // Tablet/Mid-range: Show widgets inline in topic (JavaScript will override for 1480-1780px if sidebar collapsed)
+  // Less than 1480px: always inline
+  @media (width > 768px) and (width < 1480px) {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    gap: 12px !important;
+  }
+
+  // 1480-1780px: JavaScript will handle based on sidebar state
+  // If sidebar collapsed: fixed on right (handled by JS)
+  // If sidebar expanded: inline on top (handled by JS)
+  @media (width >= 1480px) and (width <= 1780px) {
+    // Default to inline, JavaScript will override if sidebar is collapsed
     position: relative !important;
     left: auto !important;
     right: auto !important;

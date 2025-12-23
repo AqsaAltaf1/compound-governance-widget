@@ -2490,12 +2490,60 @@ export default apiInitializer((api) => {
   // Render status widget on the right side (outside post box) - like the image
   // Render multi-stage widget showing Temp Check, ARFC, and AIP all together
   // Get or create the widgets container for column layout
+  // Detect if Discourse sidebar is collapsed
+  function isSidebarCollapsed() {
+    // Check common Discourse sidebar indicators
+    const sidebar = document.querySelector('.sidebar-wrapper, .d-sidebar, .sidebar, nav.sidebar, .navigation-container');
+    if (sidebar) {
+      const computedStyle = window.getComputedStyle(sidebar);
+      // Check if sidebar is hidden or collapsed
+      if (computedStyle.display === 'none' || 
+          computedStyle.visibility === 'hidden' ||
+          computedStyle.width === '0px' ||
+          sidebar.classList.contains('collapsed') ||
+          sidebar.classList.contains('hidden') ||
+          sidebar.hasAttribute('hidden')) {
+        return true;
+      }
+      // Check body classes
+      if (document.body.classList.contains('sidebar-collapsed') ||
+          document.body.classList.contains('no-sidebar')) {
+        return true;
+      }
+    } else {
+      // No sidebar element found - assume collapsed
+      return true;
+    }
+    return false;
+  }
+
+  // Determine if widget should be inline (top) or fixed (right side)
+  function shouldShowWidgetInline() {
+    const width = window.innerWidth;
+    
+    // Less than 1480px: always inline (top)
+    if (width < 1480) {
+      return true;
+    }
+    
+    // Greater than 1780px: always fixed (right side)
+    if (width > 1780) {
+      return false;
+    }
+    
+    // Between 1480px and 1780px: check sidebar state
+    // If sidebar is collapsed: show on right side (fixed)
+    // If sidebar is expanded: show on top (inline)
+    const sidebarCollapsed = isSidebarCollapsed();
+    return !sidebarCollapsed; // If sidebar is expanded, show inline; if collapsed, show fixed
+  }
+
   // Returns container for large screens (fixed positioning), null for mobile (inline positioning)
   function getOrCreateWidgetsContainer() {
-    // Don't create container on mobile - widgets should be inline
-    const isMobile = window.innerWidth <= 1400;
-    if (isMobile) {
-      console.log("🔵 [CONTAINER] Mobile detected - skipping container creation");
+    // Check if widget should be inline or fixed based on screen width and sidebar state
+    const shouldInline = shouldShowWidgetInline();
+    if (shouldInline) {
+      console.log("🔵 [CONTAINER] Inline positioning detected - skipping container creation");
       return null;
     }
     
@@ -2566,8 +2614,9 @@ export default apiInitializer((api) => {
   }
   
   // Update container position - fixed on desktop, relative on mobile/tablet
-  // CRITICAL: Only updates position/width when screen size changes, not on every call
+  // CRITICAL: Only updates position/width when screen size or sidebar state changes, not on every call
   let lastScreenWidth = window.innerWidth;
+  let lastSidebarCollapsed = null;
   function updateContainerPosition(container) {
     if (!container || !container.parentNode) {
       console.warn("⚠️ [POSITION] Container not in DOM, skipping position update");
@@ -2575,21 +2624,23 @@ export default apiInitializer((api) => {
     }
     
     const currentScreenWidth = window.innerWidth;
-    const isMobile = currentScreenWidth <= 1400;
-    const wasMobile = lastScreenWidth <= 1400;
+    const shouldInline = shouldShowWidgetInline();
+    const currentSidebarCollapsed = isSidebarCollapsed();
     
-    // Only update if screen size category changed (mobile ↔ desktop) to prevent width flickering
-    if (isMobile === wasMobile && currentScreenWidth === lastScreenWidth) {
-      // Screen size hasn't changed, skip position update to prevent width changes
+    // Only update if screen size category or sidebar state changed to prevent width flickering
+    const wasInline = lastScreenWidth < 1480 || (lastScreenWidth <= 1780 && lastSidebarCollapsed === false);
+    if (shouldInline === wasInline && currentScreenWidth === lastScreenWidth && currentSidebarCollapsed === lastSidebarCollapsed) {
+      // Screen size and sidebar state haven't changed, skip position update to prevent width changes
       return;
     }
     
     lastScreenWidth = currentScreenWidth;
+    lastSidebarCollapsed = currentSidebarCollapsed;
     
     // Get all widgets from the container
     const widgets = Array.from(container.querySelectorAll('.tally-status-widget-container'));
     
-    if (isMobile) {
+    if (shouldInline) {
       // Mobile/Tablet: Move widgets from container to topic body (inline before first post)
       if (widgets.length > 0) {
         console.log(`🔵 [RESIZE] Moving ${widgets.length} widget(s) from container to topic body (mobile)`);
@@ -2737,7 +2788,7 @@ export default apiInitializer((api) => {
     // Log position data for debugging
     const rect = container.getBoundingClientRect();
     console.log("📍 [POSITION DATA] Container position:", {
-      isMobile,
+      shouldInline,
       widgetsInContainer: container.querySelectorAll('.tally-status-widget-container').length,
       actualLeft: `${rect.left}px`,
       actualTop: `${rect.top}px`,
@@ -3644,13 +3695,12 @@ export default apiInitializer((api) => {
     statusWidget.style.marginBottom = '0';
     
     // Position widget - use fixed positioning on right for large screens, inline (top) for smaller screens
-    const isMobile = window.innerWidth <= 1400 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isLargeScreen = window.innerWidth > 1400;
+    // Check screen width and sidebar state to determine positioning
+    const shouldInline = shouldShowWidgetInline();
     
-    console.log(`🔵 [WIDGET] Detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}, isLargeScreen: ${isLargeScreen}`);
+    console.log(`🔵 [WIDGET] Detection - window.innerWidth: ${window.innerWidth}, shouldInline: ${shouldInline}, sidebarCollapsed: ${isSidebarCollapsed()}`);
     
-    if (isMobile) {
+    if (shouldInline) {
       // Mobile/small screens: inline positioning at top of proposal
       // CRITICAL: Set visibility immediately, not in requestAnimationFrame (causes delay)
       statusWidget.style.display = 'block';
@@ -3668,7 +3718,7 @@ export default apiInitializer((api) => {
     }
     
     // Use inline positioning for mobile/small screens (insert before first post)
-    if (isMobile) {
+    if (shouldInline) {
       // On mobile, check if widget is already in the correct position to prevent re-insertion
       // But allow re-rendering if content needs to be updated
       if (statusWidget.parentNode) {
@@ -4081,8 +4131,8 @@ export default apiInitializer((api) => {
     // CRITICAL FIX FOR MOBILE: AIP widgets render asynchronously (in Promise callback) 
     // while Snapshot widgets render synchronously. This causes AIP widgets to be inserted
     // later, after Discourse may have applied lazy loading CSS. Force immediate visibility.
-    // Note: isMobile is already declared above, so we reuse it here
-    if (isMobile && widgetType === 'aip' && statusWidget && statusWidget.parentNode) {
+    const shouldInlineMobile = shouldShowWidgetInline();
+    if (shouldInlineMobile && widgetType === 'aip' && statusWidget && statusWidget.parentNode) {
       // AIP widget was just inserted - force visibility immediately
       console.log(`🔵 [MOBILE] AIP widget just rendered, forcing immediate visibility`);
       statusWidget.style.setProperty('display', 'block', 'important');
@@ -4186,8 +4236,8 @@ export default apiInitializer((api) => {
     const proposalType = proposalData.type || 'snapshot'; // 'snapshot' or 'aip'
     
     // Check if mobile to determine update strategy
-    const isMobile = window.innerWidth <= 1400 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+    const isMobile = window.innerWidth <= 1400;
     
     // CRITICAL: Check if data is incomplete - show loader instead of empty widget
     // On mobile, if time data (daysLeft/hoursLeft) is missing, show loader
@@ -8291,8 +8341,8 @@ export default apiInitializer((api) => {
                   
                   // Verify it's visible
                   const computedStyle = window.getComputedStyle(aipWidget);
-                  const isMobile = window.innerWidth <= 1024 || 
-                                   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                  // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+                  const isMobile = window.innerWidth <= 1400;
                   const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
                   console.log(`🔵 [${deviceType}] AIP widget after insertion - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
                   
@@ -8313,8 +8363,8 @@ export default apiInitializer((api) => {
                   
                   console.log(`✅ [${deviceType}] AIP widget visibility forced immediately after render`);
                 } else {
-                  const isMobile = window.innerWidth <= 1024 || 
-                                   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                  // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+                  const isMobile = window.innerWidth <= 1400;
                   const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
                   console.warn(`⚠️ [${deviceType}] AIP widget not found in DOM yet: aave-governance-widget-${aipWidgetId}`);
                 }
@@ -8334,8 +8384,8 @@ export default apiInitializer((api) => {
                 const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
                 if (aipWidget && aipWidget.parentNode) {
                   const computedStyle = window.getComputedStyle(aipWidget);
-                  const isMobile = window.innerWidth <= 1024 || 
-                                   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                  // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+                  const isMobile = window.innerWidth <= 1400;
                   const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
                   
                   // Only force visibility if actually hidden (don't repeatedly check visible widgets)
@@ -8740,8 +8790,8 @@ export default apiInitializer((api) => {
     });
     
     // Detect mobile for faster initial load
-    const isMobile = window.innerWidth <= 1400 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+    const isMobile = window.innerWidth <= 1400;
     
     // CRITICAL: Run immediate scan first (before debounce) to find proposals on page load
     // This ensures widgets appear immediately, not just when scrolling
@@ -8826,13 +8876,13 @@ export default apiInitializer((api) => {
         const containerIsHidden = containerStyle.display === 'none' || containerStyle.visibility === 'hidden' || containerStyle.opacity === '0';
         
         if (containerIsHidden) {
-          const isMobileCheck = window.innerWidth <= 1400;
+          const shouldInline = shouldShowWidgetInline();
           
           container.style.setProperty('display', 'flex', 'important');
           container.style.setProperty('visibility', 'visible', 'important');
           container.style.setProperty('opacity', '1', 'important');
           
-          if (isMobileCheck) {
+          if (shouldInline) {
             // Mobile/Tablet: Use relative positioning (inline in topic) - respect CSS
             container.style.setProperty('position', 'relative', 'important');
             container.style.setProperty('left', 'auto', 'important');
@@ -8904,6 +8954,45 @@ export default apiInitializer((api) => {
     };
     window.addEventListener('resize', handleResize);
     
+    // Listen for sidebar toggle events to update widget position
+    // Watch for sidebar toggle buttons and sidebar state changes
+    const sidebarToggleObserver = new MutationObserver(() => {
+      const container = document.getElementById('governance-widgets-wrapper');
+      if (container) {
+        const shouldInline = shouldShowWidgetInline();
+        const currentInline = container.style.position === 'relative' || 
+                              window.getComputedStyle(container).position === 'relative';
+        
+        // Only update if position needs to change
+        if (shouldInline !== currentInline) {
+          console.log(`🔵 [SIDEBAR] Sidebar state changed, updating widget position (shouldInline: ${shouldInline})`);
+          handleResize();
+        }
+      }
+    });
+    
+    // Observe sidebar elements and body for class changes
+    const sidebar = document.querySelector('.sidebar-wrapper, .d-sidebar, .sidebar, nav.sidebar, .navigation-container');
+    if (sidebar) {
+      sidebarToggleObserver.observe(sidebar, { attributes: true, attributeFilter: ['class', 'style'] });
+    }
+    sidebarToggleObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    
+    // Also listen for click events on sidebar toggle buttons
+    document.addEventListener('click', (e) => {
+      const target = e.target;
+      if (target.closest('.sidebar-toggle, .toggle-sidebar, [data-toggle-sidebar], button[aria-label*="sidebar" i], button[aria-label*="menu" i]')) {
+        // Wait a bit for sidebar state to update
+        setTimeout(() => {
+          const container = document.getElementById('governance-widgets-wrapper');
+          if (container) {
+            console.log(`🔵 [SIDEBAR] Sidebar toggle detected, updating widget position`);
+            handleResize();
+          }
+        }, 100);
+      }
+    });
+    
     // CRITICAL: Periodically ensure widgets stay visible (prevents them from being hidden by scroll or other events)
     // Only check visibility periodically, and only if cache indicates widgets might be hidden
     // This prevents unnecessary getComputedStyle calls that cause flickering
@@ -8937,7 +9026,7 @@ export default apiInitializer((api) => {
       // Process mutations immediately without delay
       mutations.forEach((mutation) => {
         const target = mutation.target;
-        const isMobileCheck = window.innerWidth <= 1400;
+        const shouldInline = shouldShowWidgetInline();
         
         // Check if target is a widget or container (check both attributes and childList)
         let widget = null;
@@ -9045,8 +9134,9 @@ export default apiInitializer((api) => {
             containerEl.style.setProperty('visibility', 'visible', 'important');
             containerEl.style.setProperty('opacity', '1', 'important');
             
-            // Re-apply correct positioning based on screen size
-            if (isMobileCheck) {
+            // Re-apply correct positioning based on screen size and sidebar state
+            // Reuse shouldInline from outer scope (already declared at line 9031)
+            if (shouldInline) {
               containerEl.style.setProperty('position', 'relative', 'important');
               containerEl.style.setProperty('width', '100%', 'important');
               containerEl.style.setProperty('max-width', '100%', 'important');
@@ -9060,7 +9150,7 @@ export default apiInitializer((api) => {
           }
           
           // CRITICAL: Prevent width changes on desktop (keep fixed at 320px)
-          if (!isMobileCheck) {
+          if (!shouldInline) {
             const currentWidth = computedStyle.width;
             // If width is not 320px, restore it (prevents width flickering on scroll)
             if (currentWidth && currentWidth !== '320px' && !currentWidth.includes('320')) {
@@ -10519,6 +10609,11 @@ export default apiInitializer((api) => {
     // Watch for widgets being added to DOM and immediately force visibility (works on all devices)
     // CRITICAL: Only process widgets on topic pages - remove widgets on non-topic pages
     // Also watch for widgets being REMOVED and prevent removal if on topic page
+    let isRestoring = false; // Flag to prevent infinite loops
+    let lastRestoreTime = 0; // Track last restore time for debouncing
+    const RESTORE_DEBOUNCE_MS = 500; // Minimum time between restorations
+    const restoredNodes = new WeakSet(); // Track nodes we've restored to prevent loops
+    
     const widgetObserver = new MutationObserver((mutations) => {
       const isCurrentTopicPage = window.location.pathname.match(/^\/t\//);
       
@@ -10549,32 +10644,116 @@ export default apiInitializer((api) => {
       }
       
       // On topic page: watch for widgets being removed and prevent it
+      // CRITICAL: Prevent infinite loops by checking if we're already restoring
+      if (isRestoring) {
+        return; // Skip processing if we're currently restoring
+      }
+      
       mutations.forEach((mutation) => {
         // CRITICAL: Watch for widgets being removed from DOM and prevent it if on topic page
         if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
           mutation.removedNodes.forEach((node) => {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              if (node.classList?.contains('tally-status-widget-container') || 
-                  node.classList?.contains('governance-widgets-wrapper')) {
+              // Check if this is a widget or container
+              const isWidget = node.classList?.contains('tally-status-widget-container');
+              const isContainer = node.classList?.contains('governance-widgets-wrapper');
+              
+              if (isWidget || isContainer) {
+                // Check if node is already in DOM (might have been moved, not removed)
+                if (node.parentNode) {
+                  return; // Node is still in DOM, skip
+                }
+                
+                // Check if we've already restored this node recently
+                if (restoredNodes.has(node)) {
+                  const now = Date.now();
+                  if (now - lastRestoreTime < RESTORE_DEBOUNCE_MS) {
+                    return; // Too soon since last restore, skip
+                  }
+                }
+                
+                // Debounce: only restore if enough time has passed
+                const now = Date.now();
+                if (now - lastRestoreTime < RESTORE_DEBOUNCE_MS) {
+                  return; // Debounce restorations
+                }
+                
+                // Check if this is a legitimate removal (e.g., during resize/position update)
+                // If the node is being moved to a different parent, that's legitimate
+                const shouldInline = shouldShowWidgetInline();
+                const wasInContainer = node.parentNode?.id === 'governance-widgets-wrapper';
+                const shouldBeInContainer = !shouldInline && isWidget;
+                
+                // If widget should be moved between container and topic body, allow it
+                if (isWidget && wasInContainer !== shouldBeInContainer) {
+                  return; // This is a legitimate move, don't restore
+                }
+                
                 console.warn(`⚠️ [OBSERVER] Widget/container was removed from DOM! Attempting to restore...`);
-                // Try to restore the widget - insert it back where it was
-                if (mutation.target && mutation.target.parentNode) {
-                  try {
-                    mutation.target.insertBefore(node, mutation.nextSibling);
+                isRestoring = true;
+                lastRestoreTime = now;
+                restoredNodes.add(node);
+                
+                // Temporarily disconnect observer to prevent recursive calls
+                widgetObserver.disconnect();
+                
+                try {
+                  // Try to restore the widget - find appropriate location
+                  let restoreTarget = null;
+                  let restoreBefore = null;
+                  
+                  if (isWidget) {
+                    // For widgets, try to restore before first post or in container
+                    const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
+                    const container = document.getElementById('governance-widgets-wrapper');
+                    
+                    if (shouldInline) {
+                      // Should be inline - restore before first post
+                      if (firstPost && firstPost.parentNode) {
+                        restoreTarget = firstPost.parentNode;
+                        restoreBefore = firstPost;
+                      }
+                    } else if (container) {
+                      // Should be in container
+                      restoreTarget = container;
+                    }
+                  } else if (isContainer) {
+                    // For container, restore to body
+                    restoreTarget = document.body;
+                  }
+                  
+                  if (restoreTarget) {
+                    if (restoreBefore) {
+                      restoreTarget.insertBefore(node, restoreBefore);
+                    } else {
+                      restoreTarget.appendChild(node);
+                    }
+                    
                     console.log(`✅ [OBSERVER] Restored widget/container to DOM`);
+                    
                     // Force visibility immediately
-                    if (node.classList?.contains('tally-status-widget-container')) {
+                    if (isWidget) {
                       node.style.setProperty('display', 'block', 'important');
                       node.style.setProperty('visibility', 'visible', 'important');
                       node.style.setProperty('opacity', '1', 'important');
-                    } else if (node.classList?.contains('governance-widgets-wrapper')) {
+                    } else if (isContainer) {
                       node.style.setProperty('display', 'flex', 'important');
                       node.style.setProperty('visibility', 'visible', 'important');
                       node.style.setProperty('opacity', '1', 'important');
                     }
-                  } catch (e) {
-                    console.error(`❌ [OBSERVER] Failed to restore widget:`, e);
                   }
+                } catch (e) {
+                  console.error(`❌ [OBSERVER] Failed to restore widget:`, e);
+                } finally {
+                  // Reconnect observer after a short delay
+                  setTimeout(() => {
+                    isRestoring = false;
+                    // Re-observe the document with same config as initial setup
+                    widgetObserver.observe(document.body, {
+                      childList: true,
+                      subtree: true
+                    });
+                  }, 100);
                 }
               }
             }
