@@ -166,6 +166,106 @@ export default apiInitializer((api) => {
   const AIP_URL_REGEX = /https?:\/\/(?:www\.)?(?:governance\.aave\.com\/(?!t\/)[^\s<>"']+|app\.aave\.com\/governance[^\s<>"']+|vote\.onaave\.com[^\s<>"']+)/gi;
   
   const proposalCache = new Map();
+  
+  // localStorage-based persistent cache for proposal data
+  const STORAGE_PREFIX = 'compound_gov_widget_';
+  const CACHE_EXPIRY = 1 * 60 * 60 * 1000; // 1 hour (allows fresh data while still caching)
+  
+  // Helper functions for localStorage caching
+  function getCachedProposalData(url) {
+    try {
+      const cacheKey = STORAGE_PREFIX + btoa(url).replace(/[+/=]/g, '');
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const data = JSON.parse(cached);
+        const cacheAge = Date.now() - (data._cachedAt || 0);
+        if (cacheAge < CACHE_EXPIRY) {
+          console.log("💾 [STORAGE] Returning cached data from localStorage (age:", Math.round(cacheAge / 1000 / 60), "minutes)");
+          return data;
+        } else {
+          // Expired, remove it
+          localStorage.removeItem(cacheKey);
+        }
+      }
+    } catch (error) {
+      console.warn("⚠️ [STORAGE] Error reading from localStorage:", error);
+    }
+    return null;
+  }
+  
+  function setCachedProposalData(url, data) {
+    try {
+      const cacheKey = STORAGE_PREFIX + btoa(url).replace(/[+/=]/g, '');
+      const dataToStore = { ...data, _cachedAt: Date.now() };
+      localStorage.setItem(cacheKey, JSON.stringify(dataToStore));
+      console.log("💾 [STORAGE] Cached proposal data to localStorage");
+    } catch (error) {
+      console.warn("⚠️ [STORAGE] Error writing to localStorage:", error);
+      // If quota exceeded, try to clear old entries
+      if (error.name === 'QuotaExceededError') {
+        clearOldCacheEntries();
+      }
+    }
+  }
+  
+  function clearOldCacheEntries() {
+    try {
+      const keys = Object.keys(localStorage);
+      const now = Date.now();
+      let cleared = 0;
+      keys.forEach(key => {
+        if (key.startsWith(STORAGE_PREFIX)) {
+          try {
+            const data = JSON.parse(localStorage.getItem(key));
+            if (data._cachedAt && (now - data._cachedAt) > CACHE_EXPIRY) {
+              localStorage.removeItem(key);
+              cleared++;
+            }
+          } catch (e) {
+            // Invalid entry, remove it
+            localStorage.removeItem(key);
+            cleared++;
+          }
+        }
+      });
+      if (cleared > 0) {
+        console.log(`🧹 [STORAGE] Cleared ${cleared} expired cache entries`);
+      }
+    } catch (error) {
+      console.warn("⚠️ [STORAGE] Error clearing old cache entries:", error);
+    }
+  }
+  
+  // Track which topics have had widgets shown (to prevent disappearing on scroll)
+  function getTopicKey() {
+    const path = window.location.pathname;
+    const topicMatch = path.match(/\/t\/([^\/]+)\/(\d+)/);
+    if (topicMatch) {
+      return `topic_${topicMatch[2]}`; // Use topic ID as key
+    }
+    return `page_${path}`; // Fallback to full path
+  }
+  
+  function hasWidgetBeenShown() {
+    try {
+      const topicKey = getTopicKey();
+      const shownKey = STORAGE_PREFIX + 'shown_' + topicKey;
+      return localStorage.getItem(shownKey) === 'true';
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  function markWidgetAsShown() {
+    try {
+      const topicKey = getTopicKey();
+      const shownKey = STORAGE_PREFIX + 'shown_' + topicKey;
+      localStorage.setItem(shownKey, 'true');
+      console.log("✅ [STORAGE] Marked widget as shown for topic:", topicKey);
+    } catch (error) {
+      console.warn("⚠️ [STORAGE] Error marking widget as shown:", error);
+    }
+  }
 
   // Removed unused truncate function
 
@@ -616,6 +716,7 @@ export default apiInitializer((api) => {
           const transformedProposal = transformSnapshotData(proposal, space);
           transformedProposal._cachedAt = Date.now();
           proposalCache.set(cacheKey, transformedProposal);
+          setCachedProposalData(cacheKey, transformedProposal); // Save to localStorage
           return transformedProposal;
         } else {
           console.warn("⚠️ [SNAPSHOT] Format 1 failed, trying format 2 (proposal hash only)...");
@@ -766,6 +867,7 @@ export default apiInitializer((api) => {
         result.chain = 'thegraph';
         result.urlSource = urlSource; // Store URL source for state mapping
         proposalCache.set(cacheKey, result);
+        setCachedProposalData(cacheKey, result); // Save to localStorage
         return result;
       }
       
@@ -777,6 +879,7 @@ export default apiInitializer((api) => {
         onChainResult.chain = 'onchain';
         onChainResult.urlSource = urlSource; // Store URL source for state mapping
         proposalCache.set(cacheKey, onChainResult);
+        setCachedProposalData(cacheKey, onChainResult); // Save to localStorage
         return onChainResult;
       }
       
@@ -1599,6 +1702,7 @@ export default apiInitializer((api) => {
           transformedProposal._cachedAt = Date.now();
           transformedProposal.chain = chain; // Store which chain it came from
           proposalCache.set(cacheKey, transformedProposal);
+          setCachedProposalData(cacheKey, transformedProposal); // Save to localStorage
           return transformedProposal;
         } else {
           console.warn("⚠️ [AIP] No proposal data in response from", chain);
@@ -2274,13 +2378,98 @@ export default apiInitializer((api) => {
     `;
   }
 
-  // Create loading placeholder/skeleton for widgets
-  // DISABLED: Loaders are not shown - widgets appear directly when ready
-  // eslint-disable-next-line no-unused-vars
+  // Create a SINGLE global loading placeholder for all widgets
+  // Shows one loading indicator while any widgets are being fetched
+  function createGlobalLoadingPlaceholder() {
+    // Check if global placeholder already exists
+    const existingGlobalPlaceholder = document.getElementById('global-governance-widgets-loader');
+    if (existingGlobalPlaceholder) {
+      console.log(`🔵 [LOADING] Global loading placeholder already exists, skipping duplicate`);
+      return existingGlobalPlaceholder;
+    }
+    
+    const isMobile = window.innerWidth <= 1400 || 
+                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    const placeholder = document.createElement('div');
+    placeholder.id = 'global-governance-widgets-loader';
+    placeholder.className = 'tally-status-widget-container loading-placeholder global-loader';
+    placeholder.setAttribute('data-global-loader', 'true');
+    
+    // Apply same positioning as regular widgets
+    if (isMobile) {
+      placeholder.style.position = 'relative';
+      placeholder.style.width = '100%';
+      placeholder.style.maxWidth = '100%';
+      placeholder.style.marginBottom = '20px';
+    } else {
+      placeholder.style.position = 'fixed';
+      placeholder.style.width = '320px';
+      placeholder.style.maxWidth = '320px';
+    }
+    
+    placeholder.innerHTML = `
+      <div class="tally-status-widget loading-widget">
+        <div class="loading-header">
+          <div class="loading-title"></div>
+          <div class="loading-badge"></div>
+        </div>
+        <div class="loading-content">
+          <div class="loading-bar" style="width: 70%"></div>
+          <div class="loading-bar" style="width: 50%"></div>
+          <div class="loading-bar" style="width: 60%"></div>
+        </div>
+        <div class="loading-footer">
+          <div class="loading-button"></div>
+        </div>
+        <div class="loading-spinner-overlay">
+          <div class="loading-spinner"></div>
+        </div>
+      </div>
+    `;
+    
+    // Insert placeholder in the DOM immediately
+    const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+    const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
+    
+    if (isMobile && firstPost && firstPost.parentNode) {
+      firstPost.parentNode.insertBefore(placeholder, firstPost);
+      console.log(`✅ [LOADING] Created global loading placeholder (mobile)`);
+    } else {
+      // For desktop, add to container
+      const container = getOrCreateWidgetsContainer();
+      if (container) {
+        container.appendChild(placeholder);
+        console.log(`✅ [LOADING] Created global loading placeholder (desktop)`);
+      } else {
+        // Fallback: add to topic body
+        if (topicBody) {
+          topicBody.insertBefore(placeholder, topicBody.firstChild);
+          console.log(`✅ [LOADING] Created global loading placeholder (fallback)`);
+        }
+      }
+    }
+    
+    // Force visibility
+    placeholder.style.setProperty('display', 'block', 'important');
+    placeholder.style.setProperty('visibility', 'visible', 'important');
+    placeholder.style.setProperty('opacity', '1', 'important');
+    
+    return placeholder;
+  }
+  
+  // Remove the global loading placeholder once widgets are loaded
+  function removeGlobalLoadingPlaceholder() {
+    const globalLoader = document.getElementById('global-governance-widgets-loader');
+    if (globalLoader) {
+      console.log(`✅ [LOADING] Removing global loading placeholder`);
+      globalLoader.remove();
+    }
+  }
+  
+  // Create loading placeholder/skeleton for widgets (DEPRECATED - use createGlobalLoadingPlaceholder instead)
+  // Shows a loading indicator while widget data is being fetched
   function createLoadingPlaceholder(url, widgetId, proposalOrder = null) {
-    // Loaders disabled - return immediately without creating anything
-    return null;
-    /* DISABLED CODE - Unreachable due to early return above
     const isMobile = window.innerWidth <= 1024 || 
                      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
@@ -2299,23 +2488,17 @@ export default apiInitializer((api) => {
     
     const normalizedUrl = normalizeUrlForComparison(url);
     
-    // CRITICAL: Check if placeholder is already being created (race condition prevention)
-    if (creatingPlaceholders.has(normalizedUrl) || creatingPlaceholders.has(url)) {
-      console.log(`🔵 [LOADING] Placeholder creation already in progress for ${url}, skipping duplicate`);
-      // Wait a bit and check if placeholder was created
-      const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${url}"]`);
-      if (existingPlaceholder) {
-        return existingPlaceholder;
+    // CRITICAL: Check DOM FIRST before doing anything else to prevent duplicates
+    // Check by widget ID if provided (fastest check)
+    if (widgetId) {
+      const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
+      if (placeholderById && placeholderById.classList.contains('loading-placeholder')) {
+        console.log(`🔵 [LOADING] Placeholder already exists with ID ${widgetId}, not creating duplicate`);
+        return placeholderById;
       }
-      // If not found, continue (might be a race condition)
     }
     
-    // Mark as being created
-    creatingPlaceholders.add(normalizedUrl);
-    creatingPlaceholders.add(url);
-    
-    // CRITICAL: Check ALL existing placeholders and widgets to prevent duplicates
-    // Check both by exact URL match and normalized URL match
+    // Check ALL existing placeholders and widgets by URL (exact and normalized match)
     const allContainers = document.querySelectorAll('.tally-status-widget-container[data-tally-url]');
     for (const container of allContainers) {
       const containerUrl = container.getAttribute('data-tally-url');
@@ -2328,28 +2511,31 @@ export default apiInitializer((api) => {
         // If it's already a placeholder, return it (don't create duplicate)
         if (container.classList.contains('loading-placeholder')) {
           console.log(`🔵 [LOADING] Placeholder already exists for ${url} (found: ${containerUrl}), not creating duplicate`);
-          creatingPlaceholders.delete(normalizedUrl);
-          creatingPlaceholders.delete(url);
           return container;
         } else {
-          // If it's a real widget, remove it before creating placeholder (data is incomplete)
-          console.log(`🔵 [LOADING] Found existing widget for ${url} (found: ${containerUrl}), removing it before creating placeholder`);
-          container.remove();
-          break; // Only remove one
+          // If it's a real widget, don't replace it with a placeholder (widget is already loaded)
+          console.log(`🔵 [LOADING] Found existing widget for ${url} (found: ${containerUrl}), skipping placeholder creation`);
+          return null; // Don't create placeholder if widget already exists
         }
       }
     }
     
-    // Also check by widget ID if provided (additional safeguard)
-    if (widgetId) {
-      const placeholderById = document.getElementById(`loading-placeholder-${widgetId}`);
-      if (placeholderById && placeholderById.classList.contains('loading-placeholder')) {
-        console.log(`🔵 [LOADING] Placeholder already exists with ID ${widgetId}, not creating duplicate`);
-        creatingPlaceholders.delete(normalizedUrl);
-        creatingPlaceholders.delete(url);
-        return placeholderById;
+    // CRITICAL: Check if placeholder is already being created (race condition prevention)
+    // Only check this AFTER we've verified it doesn't exist in DOM
+    if (creatingPlaceholders.has(normalizedUrl) || creatingPlaceholders.has(url)) {
+      console.log(`🔵 [LOADING] Placeholder creation already in progress for ${url}, skipping duplicate`);
+      // Wait a bit and check if placeholder was created
+      const existingPlaceholder = document.querySelector(`.loading-placeholder[data-tally-url="${url}"], .loading-placeholder[data-tally-url*="${normalizedUrl}"]`);
+      if (existingPlaceholder) {
+        return existingPlaceholder;
       }
+      // If still not found after a moment, it might be a race condition - skip to prevent duplicate
+      return null;
     }
+    
+    // Mark as being created (only if we're actually going to create it)
+    creatingPlaceholders.add(normalizedUrl);
+    creatingPlaceholders.add(url);
     
     // Generate widget ID if not provided
     if (!widgetId) {
@@ -2435,7 +2621,6 @@ export default apiInitializer((api) => {
     creatingPlaceholders.delete(url);
     
     return placeholder;
-    */
   }
 
   // Render status widget on the right side (outside post box) - like the image
@@ -2514,13 +2699,25 @@ export default apiInitializer((api) => {
   }
   
   // Update container position - fixed on desktop, relative on mobile/tablet
+  // CRITICAL: Only updates position/width when screen size changes, not on every call
+  let lastScreenWidth = window.innerWidth;
   function updateContainerPosition(container) {
     if (!container || !container.parentNode) {
       console.warn("⚠️ [POSITION] Container not in DOM, skipping position update");
       return;
     }
     
-    const isMobile = window.innerWidth <= 1400;
+    const currentScreenWidth = window.innerWidth;
+    const isMobile = currentScreenWidth <= 1400;
+    const wasMobile = lastScreenWidth <= 1400;
+    
+    // Only update if screen size category changed (mobile ↔ desktop) to prevent width flickering
+    if (isMobile === wasMobile && currentScreenWidth === lastScreenWidth) {
+      // Screen size hasn't changed, skip position update to prevent width changes
+      return;
+    }
+    
+    lastScreenWidth = currentScreenWidth;
     
     // Get all widgets from the container
     const widgets = Array.from(container.querySelectorAll('.tally-status-widget-container'));
@@ -2656,8 +2853,9 @@ export default apiInitializer((api) => {
       container.style.setProperty('right', '5px', 'important');
       container.style.setProperty('left', 'auto', 'important');
       container.style.setProperty('top', '180px', 'important');
-      container.style.setProperty('width', 'auto', 'important');
-      container.style.setProperty('max-width', 'none', 'important');
+      // CRITICAL: Keep width fixed at 320px to prevent width changes on scroll
+      container.style.setProperty('width', '320px', 'important');
+      container.style.setProperty('max-width', '320px', 'important');
       // Optimize for fixed positioning (prevent flickering during scroll)
       container.style.setProperty('will-change', 'transform', 'important');
       container.style.setProperty('backface-visibility', 'hidden', 'important');
@@ -2873,6 +3071,18 @@ export default apiInitializer((api) => {
     statusWidget.className = "tally-status-widget-container";
     statusWidget.setAttribute("data-widget-id", widgetId);
     statusWidget.setAttribute("data-widget-type", widgetType); // Mark widget type
+    
+    // CRITICAL: Prevent Discourse's viewport tracker from hiding this widget
+    // Discourse uses data-cloak and other attributes to hide elements on scroll
+    // Exclude widget from viewport tracking entirely
+    statusWidget.setAttribute("data-cloak", "false"); // Disable cloaking
+    statusWidget.setAttribute("data-skip-cloak", "true"); // Alternative attribute
+    statusWidget.setAttribute("data-no-cloak", "true"); // Another alternative
+    statusWidget.setAttribute("data-viewport", "false"); // Exclude from viewport tracking
+    statusWidget.setAttribute("data-exclude-viewport", "true"); // Explicit exclusion
+    // Add class to exclude from viewport tracking via CSS
+    statusWidget.classList.add("no-viewport-track");
+    
     // Add URL attribute for duplicate detection
     if (proposalUrl) {
       statusWidget.setAttribute("data-tally-url", proposalUrl);
@@ -2890,6 +3100,10 @@ export default apiInitializer((api) => {
     statusWidget.style.display = 'block';
     statusWidget.style.visibility = 'visible';
     statusWidget.style.opacity = '1';
+    
+    // CRITICAL: Mark widget as visible in cache immediately when created
+    // This prevents unnecessary visibility checks during scroll
+    markWidgetAsVisibleInCache(statusWidget);
     
     // Use proposal order (order in content) for positioning, fallback to stage order
     // Proposal order takes precedence - widgets appear in the order proposals appear in content
@@ -3707,6 +3921,8 @@ export default apiInitializer((api) => {
             statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
             // Force immediate reflow
             void statusWidget.offsetHeight;
+            // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
+            markWidgetAsVisibleInCache(statusWidget);
           }
           
           // Also force visibility in next frame to catch any late-applied CSS
@@ -3878,6 +4094,8 @@ export default apiInitializer((api) => {
           statusWidget.style.setProperty('opacity', '1', 'important');
           statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
           void statusWidget.offsetHeight;
+          // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
+          markWidgetAsVisibleInCache(statusWidget);
         }
         
         // Also force visibility in next frame
@@ -3928,6 +4146,8 @@ export default apiInitializer((api) => {
             statusWidget.style.setProperty('visibility', 'visible', 'important');
             statusWidget.style.setProperty('opacity', '1', 'important');
             void statusWidget.offsetHeight;
+            // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
+            markWidgetAsVisibleInCache(statusWidget);
           }
         });
       }
@@ -4002,6 +4222,9 @@ export default apiInitializer((api) => {
       statusWidget.style.setProperty('visibility', 'visible', 'important');
       statusWidget.style.setProperty('opacity', '1', 'important');
       statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+      
+      // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
+      markWidgetAsVisibleInCache(statusWidget);
       
       // Use double requestAnimationFrame to catch it after DOM insertion
       requestAnimationFrame(() => {
@@ -4255,12 +4478,27 @@ export default apiInitializer((api) => {
       statusWidget.setAttribute("data-tally-status-id", widgetId);
       statusWidget.setAttribute("data-tally-url", originalUrl);
       statusWidget.setAttribute("data-proposal-type", proposalType); // Mark widget type
+      
+      // CRITICAL: Prevent Discourse's viewport tracker from hiding this widget
+      // Completely exclude from viewport tracking
+      statusWidget.setAttribute("data-cloak", "false");
+      statusWidget.setAttribute("data-skip-cloak", "true");
+      statusWidget.setAttribute("data-no-cloak", "true");
+      statusWidget.setAttribute("data-viewport", "false");
+      statusWidget.setAttribute("data-exclude-viewport", "true");
+      statusWidget.setAttribute("data-no-viewport-track", "true");
+      statusWidget.classList.add("no-viewport-track");
+      
+      // CRITICAL: Mark widget as visible in cache immediately when created
+      markWidgetAsVisibleInCache(statusWidget);
     } else {
       // Update existing widget attributes (in case they changed)
       statusWidget.setAttribute("data-tally-status-id", widgetId);
       statusWidget.setAttribute("data-tally-url", originalUrl);
       statusWidget.setAttribute("data-proposal-type", proposalType);
       console.log(`🔵 [WIDGET] Updating widget in place (ID: ${statusWidgetId}) to prevent flickering`);
+      // Ensure existing widget is marked as visible in cache
+      markWidgetAsVisibleInCache(statusWidget);
     }
 
     // Get exact status from API FIRST (before any processing)
@@ -4671,6 +4909,9 @@ export default apiInitializer((api) => {
         // Remove any hidden classes that might prevent display
         statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
         
+        // CRITICAL: Mark widget as visible in cache immediately to prevent scroll flickering
+        markWidgetAsVisibleInCache(statusWidget);
+        
         // Force immediate visibility on mobile - ensure widget appears without scroll
         // Use requestAnimationFrame to ensure DOM is ready
         requestAnimationFrame(() => {
@@ -4679,6 +4920,8 @@ export default apiInitializer((api) => {
           statusWidget.style.opacity = '1';
           // Force a reflow to ensure visibility
           void statusWidget.offsetHeight;
+          // Mark as visible in cache again after DOM update
+          markWidgetAsVisibleInCache(statusWidget);
         });
         
         // Also ensure visibility after a short delay to catch any late DOM updates
@@ -4810,6 +5053,10 @@ export default apiInitializer((api) => {
         });
       }
     }
+    
+    // CRITICAL: Mark widget as shown for this topic (prevents disappearing on scroll)
+    // This ensures widget appears on first visit and stays visible
+    markWidgetAsShown();
   }
 
   // Removed getCurrentPostNumber and scrollUpdateTimeout - no longer needed
@@ -5687,6 +5934,14 @@ export default apiInitializer((api) => {
     errorWidget.className = "tally-status-widget-container";
     errorWidget.setAttribute("data-widget-type", "error");
     
+    // CRITICAL: Prevent Discourse's viewport tracker from hiding this widget
+    errorWidget.setAttribute("data-cloak", "false");
+    errorWidget.setAttribute("data-skip-cloak", "true");
+    errorWidget.setAttribute("data-no-cloak", "true");
+    
+    // CRITICAL: Mark error widget as visible in cache immediately when created
+    markWidgetAsVisibleInCache(errorWidget);
+    
     errorWidget.innerHTML = `
       <div class="tally-status-widget" style="background: #fff; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px;">
         <div style="font-weight: 700; font-size: 1em; margin-bottom: 12px; color: #dc2626;">⚠️ Network Error</div>
@@ -5703,11 +5958,30 @@ export default apiInitializer((api) => {
     const container = getOrCreateWidgetsContainer();
     container.appendChild(errorWidget);
     console.log(`⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`);
+    
+    // Ensure error widget stays visible after insertion
+    markWidgetAsVisibleInCache(errorWidget);
   }
 
   // CRITICAL: Ensure all widgets are visible immediately after creation
   // This function ensures widgets appear on page load and stay visible on ALL screen sizes
   // This is called after widgets are created and periodically to prevent them from being hidden
+  // Uses a cache to prevent unnecessary DOM updates that cause blinking
+  const widgetVisibilityCache = new WeakMap();
+  
+  // Helper function to immediately mark a widget as visible in cache when it's created
+  // This prevents unnecessary visibility checks during scroll
+  function markWidgetAsVisibleInCache(widget) {
+    if (widget && widget.classList && widget.classList.contains('tally-status-widget-container')) {
+      widgetVisibilityCache.set(widget, {
+        display: 'block',
+        visibility: 'visible',
+        opacity: '1',
+        isHidden: false
+      });
+    }
+  }
+  
   function ensureAllWidgetsVisible() {
     const allWidgets = document.querySelectorAll('.tally-status-widget-container');
     if (allWidgets.length === 0) {
@@ -5717,40 +5991,92 @@ export default apiInitializer((api) => {
     const isMobileCheck = window.innerWidth <= 1024;
     
     allWidgets.forEach(widget => {
+      // CRITICAL: Always prevent Discourse cloaking and exclude from viewport tracking
+      widget.setAttribute('data-cloak', 'false');
+      widget.setAttribute('data-skip-cloak', 'true');
+      widget.setAttribute('data-no-cloak', 'true');
+      widget.setAttribute('data-viewport', 'false');
+      widget.setAttribute('data-exclude-viewport', 'true');
+      widget.setAttribute('data-no-viewport-track', 'true');
+      widget.classList.add('no-viewport-track');
+      
       const computedStyle = window.getComputedStyle(widget);
-      if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-        console.log(`🔵 [WIDGET] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+      const isHidden = computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0';
+      
+      // Check cache to see if we've already applied these styles (prevents blinking)
+      const cachedState = widgetVisibilityCache.get(widget);
+      const currentState = {
+        display: computedStyle.display,
+        visibility: computedStyle.visibility,
+        opacity: computedStyle.opacity,
+        isHidden: isHidden
+      };
+      
+      // Only update if widget is hidden OR if state changed (prevents unnecessary updates)
+      if (isHidden || !cachedState || cachedState.isHidden !== isHidden) {
+        if (isHidden) {
+          console.log(`🔵 [WIDGET] Widget was hidden, forcing visibility - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+        }
         widget.style.setProperty('display', 'block', 'important');
         widget.style.setProperty('visibility', 'visible', 'important');
         widget.style.setProperty('opacity', '1', 'important');
-        widget.classList.remove('hidden', 'd-none', 'is-hidden');
-        console.log(`✅ [WIDGET] Forced visibility for widget`);
-      } else {
-        // Even if visible, ensure it stays visible with important flags
-        // This prevents widgets from being hidden by scroll events or other code
-        widget.style.setProperty('display', 'block', 'important');
-        widget.style.setProperty('visibility', 'visible', 'important');
-        widget.style.setProperty('opacity', '1', 'important');
-        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden', 'cloaked');
+        
+        // Ensure cloaking is disabled
+        widget.setAttribute('data-cloak', 'false');
+        widget.setAttribute('data-skip-cloak', 'true');
+        widget.setAttribute('data-no-cloak', 'true');
+        
+        // Update cache - use the helper function for consistency
+        markWidgetAsVisibleInCache(widget);
+        
+        if (isHidden) {
+          console.log(`✅ [WIDGET] Forced visibility for widget`);
+        }
       }
     });
     
     // Also ensure container wrapper is visible and positioned correctly
+    // Use cache to prevent unnecessary updates
     const container = document.querySelector('.governance-widgets-wrapper');
     if (container) {
-      container.style.setProperty('display', 'flex', 'important');
-      container.style.setProperty('visibility', 'visible', 'important');
-      container.style.setProperty('opacity', '1', 'important');
+      const containerStyle = window.getComputedStyle(container);
+      const containerIsHidden = containerStyle.display === 'none' || containerStyle.visibility === 'hidden' || containerStyle.opacity === '0';
       
-      if (isMobileCheck) {
-        // Mobile/Tablet: Relative positioning (inline)
-        container.style.setProperty('position', 'relative', 'important');
-        container.style.setProperty('width', '100%', 'important');
-        container.style.setProperty('max-width', '100%', 'important');
-      } else {
-        // Desktop: Fixed positioning (right side)
-        container.style.setProperty('position', 'fixed', 'important');
-        container.style.setProperty('z-index', '500', 'important');
+      // CRITICAL: Always prevent Discourse cloaking and exclude from viewport tracking
+      container.setAttribute('data-cloak', 'false');
+      container.setAttribute('data-skip-cloak', 'true');
+      container.setAttribute('data-no-cloak', 'true');
+      container.setAttribute('data-viewport', 'false');
+      container.setAttribute('data-exclude-viewport', 'true');
+      container.setAttribute('data-no-viewport-track', 'true');
+      container.classList.add('no-viewport-track');
+      
+      // Only update if container is hidden (prevents blinking)
+      if (containerIsHidden) {
+        container.style.setProperty('display', 'flex', 'important');
+        container.style.setProperty('visibility', 'visible', 'important');
+        container.style.setProperty('opacity', '1', 'important');
+        container.classList.remove('cloaked');
+        
+        // Ensure cloaking is disabled
+        container.setAttribute('data-cloak', 'false');
+        container.setAttribute('data-skip-cloak', 'true');
+        container.setAttribute('data-no-cloak', 'true');
+        
+        if (isMobileCheck) {
+          // Mobile/Tablet: Relative positioning (inline)
+          container.style.setProperty('position', 'relative', 'important');
+          container.style.setProperty('width', '100%', 'important');
+          container.style.setProperty('max-width', '100%', 'important');
+        } else {
+          // Desktop: Fixed positioning (right side)
+          container.style.setProperty('position', 'fixed', 'important');
+          container.style.setProperty('z-index', '500', 'important');
+          // CRITICAL: Keep width fixed at 320px to prevent width changes
+          container.style.setProperty('width', '320px', 'important');
+          container.style.setProperty('max-width', '320px', 'important');
+        }
       }
     }
     
@@ -5809,26 +6135,27 @@ export default apiInitializer((api) => {
       
       // CRITICAL: ALL widgets (AIP, Snapshot, Temp Check, ARFC, Testnet) should ALWAYS be visible
       // This ensures widgets appear on page load and stay visible, not just when scrolling
-      // Always force visibility for ALL widgets (don't check if hidden first)
-      // This ensures they stay visible even if other code tries to hide them
-      widget.style.setProperty('display', 'block', 'important');
-      widget.style.setProperty('visibility', 'visible', 'important');
-      widget.style.setProperty('opacity', '1', 'important');
-      widget.classList.remove('hidden', 'd-none', 'is-hidden');
-      
-      // Force reflow to ensure styles are applied
-      void widget.offsetHeight;
-      
-      // Check if it's actually visible now
+      // Only update if widget is actually hidden (prevents blinking from unnecessary DOM updates)
       const computedStyle = window.getComputedStyle(widget);
-      if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-        if (isAIPWidget) {
-          hiddenAIPCount++;
-          console.warn(`⚠️ [AIP] AIP widget still hidden after force visibility attempt - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
-        } else {
-          hiddenSnapshotCount++;
-          const widgetTypeLabel = isTestnet ? 'Testnet Snapshot' : (hasTempCheck ? 'Temp Check' : (hasARFC ? 'ARFC' : 'Snapshot'));
-          console.warn(`⚠️ [${widgetTypeLabel}] ${widgetTypeLabel} widget still hidden after force visibility attempt - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+      const isHidden = computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0';
+      
+      if (isHidden) {
+        widget.style.setProperty('display', 'block', 'important');
+        widget.style.setProperty('visibility', 'visible', 'important');
+        widget.style.setProperty('opacity', '1', 'important');
+        widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        
+        // Check if it's actually visible now
+        const newComputedStyle = window.getComputedStyle(widget);
+        if (newComputedStyle.display === 'none' || newComputedStyle.visibility === 'hidden' || newComputedStyle.opacity === '0') {
+          if (isAIPWidget) {
+            hiddenAIPCount++;
+            console.warn(`⚠️ [AIP] AIP widget still hidden after force visibility attempt - display: ${newComputedStyle.display}, visibility: ${newComputedStyle.visibility}, opacity: ${newComputedStyle.opacity}`);
+          } else {
+            hiddenSnapshotCount++;
+            const widgetTypeLabel = isTestnet ? 'Testnet Snapshot' : (hasTempCheck ? 'Temp Check' : (hasARFC ? 'ARFC' : 'Snapshot'));
+            console.warn(`⚠️ [${widgetTypeLabel}] ${widgetTypeLabel} widget still hidden after force visibility attempt - display: ${newComputedStyle.display}, visibility: ${newComputedStyle.visibility}, opacity: ${newComputedStyle.opacity}`);
+          }
         }
       }
     });
@@ -5925,7 +6252,17 @@ export default apiInitializer((api) => {
     try {
       const cacheKey = url;
       
-      // Check cache (skip if forceRefresh is true)
+      // First check localStorage cache (persistent across page reloads)
+      if (!forceRefresh) {
+        const localStorageData = getCachedProposalData(url);
+        if (localStorageData) {
+          // Also update in-memory cache for faster access
+          proposalCache.set(cacheKey, localStorageData);
+          return localStorageData;
+        }
+      }
+      
+      // Then check in-memory cache (skip if forceRefresh is true)
       if (!forceRefresh && proposalCache.has(cacheKey)) {
         const cachedData = proposalCache.get(cacheKey);
         const cacheAge = Date.now() - (cachedData._cachedAt || 0);
@@ -6223,6 +6560,15 @@ export default apiInitializer((api) => {
   function setupTopicWidget() {
     console.log("🔵 [TOPIC] Setting up widgets - one per proposal URL...");
     
+    // CRITICAL: Early return if widget setup already completed and widgets exist
+    if (widgetSetupCompleted) {
+      const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+      if (existingWidgets.length > 0) {
+        console.log(`🔵 [TOPIC] Widget setup already completed - skipping (${existingWidgets.length} widget(s) exist)`);
+        return Promise.resolve();
+      }
+    }
+    
     // Category filtering - only run in allowed categories
     const allowedCategories = []; // e.g., ['governance', 'proposals', 'aave-governance']
     
@@ -6245,6 +6591,8 @@ export default apiInitializer((api) => {
     // Render widgets immediately if proposals found
     if (allProposals.snapshot.length > 0 || allProposals.aip.length > 0) {
       setupTopicWidgetWithProposals(allProposals);
+      // Mark as completed after successful widget creation
+      widgetSetupCompleted = true;
     }
     
     // CRITICAL: Retry multiple times to catch lazy-loaded content for BOTH Snapshot and AIP proposals
@@ -6257,6 +6605,15 @@ export default apiInitializer((api) => {
     
     retryDelays.forEach((delay) => {
       setTimeout(() => {
+        // CRITICAL: Skip retry if widget setup already completed (prevents re-scanning on scroll)
+        if (widgetSetupCompleted) {
+          const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+          if (existingWidgets.length > 0) {
+            console.log(`🔵 [TOPIC] Retry ${retryCount + 1} skipped - widget setup already completed`);
+            return;
+          }
+        }
+        
         retryCount++;
         console.log(`🔵 [TOPIC] Retry ${retryCount}/${retryDelays.length}: Searching for proposals after ${delay}ms...`);
         
@@ -6292,8 +6649,14 @@ export default apiInitializer((api) => {
           allProposals.snapshot = mergedProposals.snapshot;
           allProposals.aip = mergedProposals.aip;
           allProposals.forum = mergedProposals.forum;
+          // Mark as completed after successful widget update
+          widgetSetupCompleted = true;
         } else {
           console.log(`🔵 [TOPIC] Retry ${retryCount}: No new proposals found (total: ${foundUrls.size})`);
+          // Mark as completed if no new proposals found (prevents further retries)
+          if (retryCount === retryDelays.length) {
+            widgetSetupCompleted = true;
+          }
         }
       }, delay);
     });
@@ -7449,6 +7812,8 @@ export default apiInitializer((api) => {
       console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s): ${existingSnapshotWidgets.length} Snapshot, ${existingAIPWidgets.length} AIP), skipping re-render`);
       // Still ensure AIP widgets are visible
       ensureAIPWidgetsVisible();
+      // Mark as completed since widgets already exist and match
+      widgetSetupCompleted = true;
       return; // Don't re-render if widgets already match
     }
     
@@ -7543,6 +7908,11 @@ export default apiInitializer((api) => {
     const totalProposals = uniqueSnapshotUrls.length + uniqueAipUrls.length;
     console.log(`🔵 [TOPIC] Rendering ${totalProposals} widget(s) - one per unique proposal URL`);
     
+    // Create a SINGLE global loading placeholder for all widgets
+    if (totalProposals > 0) {
+      createGlobalLoadingPlaceholder();
+    }
+    
     // Create combined ordered list of all proposals (maintain order: snapshot first, then aip)
     // This preserves the order proposals appear in the content
     const orderedProposals = [];
@@ -7567,8 +7937,7 @@ export default apiInitializer((api) => {
         fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(url); // Also add original for backward compatibility
         
-        // Loaders disabled - widgets will appear directly when ready
-        
+        // Global loader is already created above - no need for individual loaders
         return true;
       });
       
@@ -7794,9 +8163,14 @@ export default apiInitializer((api) => {
               ensureAIPWidgetsVisible();
             }, 100);
           });
+          
+          // Remove global loader once all Snapshot widgets are rendered
+          removeGlobalLoadingPlaceholder();
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing Snapshot proposals:", error);
+          // Remove loader even on error
+          removeGlobalLoadingPlaceholder();
         });
     }
     
@@ -7831,8 +8205,7 @@ export default apiInitializer((api) => {
         fetchingUrls.add(normalizedUrl);
         fetchingUrls.add(aipUrl);
         
-        // Loaders disabled - widgets will appear directly when ready
-        
+        // Global loader is already created above - no need for individual loaders
         console.log(`🔵 [TOPIC] Fetching AIP proposal ${aipIndex + 1} from: ${aipUrl}`);
         return fetchProposalDataByType(aipUrl, 'aip')
           .then(aipData => {
@@ -8076,6 +8449,8 @@ export default apiInitializer((api) => {
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing AIP proposals:", error);
+          // Remove global loader even on error
+          removeGlobalLoadingPlaceholder();
         });
     }
     
@@ -8084,16 +8459,12 @@ export default apiInitializer((api) => {
     // Reduced delays for faster visibility: immediate, 100ms, 300ms
     ensureAIPWidgetsVisible(); // Immediate
     
-    // Remove any existing loading placeholders (loaders are disabled)
+    // Remove global loading placeholder after a delay to ensure all widgets are loaded
     setTimeout(() => {
-      const allPlaceholders = document.querySelectorAll('.loading-placeholder');
-      if (allPlaceholders.length > 0) {
-        console.log(`🧹 [CLEANUP] Removing ${allPlaceholders.length} loading placeholder(s) - loaders are disabled`);
-        allPlaceholders.forEach(placeholder => placeholder.remove());
-      }
+      removeGlobalLoadingPlaceholder();
       ensureAIPWidgetsVisible();
       console.log("✅ [TOPIC] Ensured all widgets are visible after processing all proposals");
-    }, 100);
+    }, 500); // Give widgets time to render
     
     // Also ensure visibility after a short delay to catch any lazy-loaded widgets
     setTimeout(() => {
@@ -8104,6 +8475,9 @@ export default apiInitializer((api) => {
   // Debounce widget setup to prevent duplicate widgets
   let widgetSetupTimeout = null;
   let isWidgetSetupRunning = false;
+  // Track if widget setup has completed successfully for current topic (prevents re-initialization on scroll)
+  let widgetSetupCompleted = false;
+  let currentTopicId = null;
   
   // Track URLs currently being rendered to prevent race conditions
   const renderingUrls = new Set();
@@ -8117,6 +8491,34 @@ export default apiInitializer((api) => {
     // Clear any pending setup
     if (widgetSetupTimeout) {
       clearTimeout(widgetSetupTimeout);
+    }
+    
+    // CRITICAL: Check if we're on a different topic - reset completion flag if so
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (isTopicPage) {
+      const topicMatch = window.location.pathname.match(/^\/t\/[^\/]+\/(\d+)/);
+      const topicId = topicMatch ? topicMatch[1] : window.location.pathname;
+      if (currentTopicId !== topicId) {
+        widgetSetupCompleted = false;
+        currentTopicId = topicId;
+        console.log(`🔵 [TOPIC] Topic changed - resetting widget setup flag. New topic: ${topicId}`);
+      }
+    } else {
+      widgetSetupCompleted = false;
+      currentTopicId = null;
+    }
+    
+    // CRITICAL: If widget setup already completed and widgets exist, skip re-initialization
+    if (widgetSetupCompleted) {
+      const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+      if (existingWidgets.length > 0) {
+        console.log(`🔵 [TOPIC] Widget setup already completed for this topic - skipping re-initialization (${existingWidgets.length} widget(s) exist)`);
+        return; // Skip re-initialization
+      } else {
+        // Widgets were removed somehow - allow re-initialization
+        widgetSetupCompleted = false;
+        console.log(`🔵 [TOPIC] Widget setup was completed but widgets are missing - allowing re-initialization`);
+      }
     }
     
     // Detect mobile for faster rendering
@@ -8146,19 +8548,121 @@ export default apiInitializer((api) => {
       return;
     }
     
+    // Helper function to check if mutation is scroll-related (cloaking/uncloaking)
+    function isScrollRelatedMutation(mutation) {
+      // Check if it's an attribute change related to cloaking
+      if (mutation.type === 'attributes') {
+        const attrName = mutation.attributeName;
+        if (attrName === 'class' || attrName === 'data-cloak' || attrName === 'style') {
+          const target = mutation.target;
+          // Check if target or its parent has cloaking-related classes/attributes
+          if (target.classList?.contains('cloaked') || 
+              target.hasAttribute?.('data-cloak') ||
+              target.closest?.('.cloaked, [data-cloak]')) {
+            return true;
+          }
+        }
+        return false;
+      }
+      
+      // Check added/removed nodes for cloaking-related changes
+      for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+        // Check if it's just a text node or whitespace (common in scroll changes)
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (!node.textContent || node.textContent.trim() === '') {
+            return true;
+          }
+          continue;
+        }
+        
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          // Check if it's a cloaking-related element
+          if (node.classList?.contains('cloaked') || 
+              node.hasAttribute?.('data-cloak') ||
+              node.classList?.contains('post-cloak') ||
+              node.classList?.contains('viewport-tracker') ||
+              node.querySelector?.('.cloaked, [data-cloak], .post-cloak')) {
+            return true;
+          }
+        }
+      }
+      
+      return false;
+    }
+    
+    // Helper function to check if mutation is widget-related
+    function isWidgetRelatedMutation(mutation) {
+      for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const isWidget = node.classList?.contains('tally-status-widget-container') ||
+                         node.classList?.contains('governance-widgets-wrapper') ||
+                         node.closest?.('.tally-status-widget-container') ||
+                         node.closest?.('.governance-widgets-wrapper');
+          if (isWidget) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+    
     // Watch for new posts being added
     const postObserver = new MutationObserver((mutations) => {
-      // Ignore mutations that are only widget-related to prevent flickering
+      // CRITICAL: Early return if widgets already exist and setup is completed
+      if (widgetSetupCompleted) {
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (existingWidgets.length > 0) {
+          // Check if ALL mutations are scroll-related or widget-related
+          let allScrollOrWidgetRelated = true;
+          for (const mutation of mutations) {
+            if (!isScrollRelatedMutation(mutation) && !isWidgetRelatedMutation(mutation)) {
+              // Check if it's actually a new post
+              let hasNewPost = false;
+              for (const node of mutation.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                  const isPost = node.classList?.contains('post') || 
+                                node.classList?.contains('topic-post') ||
+                                node.querySelector?.('.post, .topic-post, [data-post-id]');
+                  if (isPost && !isWidgetRelatedMutation(mutation)) {
+                    hasNewPost = true;
+                    break;
+                  }
+                }
+              }
+              if (hasNewPost) {
+                allScrollOrWidgetRelated = false;
+                break;
+              }
+            }
+          }
+          
+          // Skip if all mutations are scroll/widget related
+          if (allScrollOrWidgetRelated) {
+            return; // Skip - no actual new content, just scroll-related changes
+          }
+        }
+      }
+      
+      // Ignore mutations that are only widget-related or scroll-related to prevent flickering
       let hasNonWidgetChanges = false;
       for (const mutation of mutations) {
+        // Skip scroll-related mutations
+        if (isScrollRelatedMutation(mutation)) {
+          continue;
+        }
+        
+        // Skip widget-related mutations
+        if (isWidgetRelatedMutation(mutation)) {
+          continue;
+        }
+        
+        // Check for actual new posts
         for (const node of mutation.addedNodes) {
-          // Check if the added node is a widget or inside a widget
           if (node.nodeType === Node.ELEMENT_NODE) {
-            const isWidget = node.classList?.contains('tally-status-widget-container') ||
-                           node.classList?.contains('governance-widgets-wrapper') ||
-                           node.closest?.('.tally-status-widget-container') ||
-                           node.closest?.('.governance-widgets-wrapper');
-            if (!isWidget) {
+            const isPost = node.classList?.contains('post') || 
+                          node.classList?.contains('topic-post') ||
+                          node.querySelector?.('.post, .topic-post, [data-post-id]');
+            if (isPost) {
               hasNonWidgetChanges = true;
               break;
             }
@@ -8169,7 +8673,7 @@ export default apiInitializer((api) => {
         }
       }
       
-      // Only trigger widget setup if there are actual post changes, not widget changes
+      // Only trigger widget setup if there are actual post changes, not widget changes or scroll-related changes
       if (hasNonWidgetChanges) {
         // Use debounced version to prevent multiple rapid calls
         debouncedSetupTopicWidget();
@@ -8178,25 +8682,68 @@ export default apiInitializer((api) => {
 
     const postStream = document.querySelector('.post-stream, .topic-body, .posts-wrapper');
     if (postStream) {
+      // Only watch childList changes, not attribute changes (reduces scroll-related triggers)
       postObserver.observe(postStream, { childList: true, subtree: true });
-      console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget changes)");
+      console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget and scroll changes)");
     }
     
     // Also watch the entire topic content area for any content changes (catches lazy-loaded posts)
     // This is important because lazy-loaded posts might be added outside the post-stream container
     const topicContentObserver = new MutationObserver((mutations) => {
+      // CRITICAL: Early return if widgets already exist and setup is completed
+      if (widgetSetupCompleted) {
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (existingWidgets.length > 0) {
+          // Check if ALL mutations are scroll-related or widget-related
+          let allScrollOrWidgetRelated = true;
+          for (const mutation of mutations) {
+            if (!isScrollRelatedMutation(mutation) && !isWidgetRelatedMutation(mutation)) {
+              // Check if it's actually a new post
+              let hasNewPost = false;
+              for (const node of mutation.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                  const isPost = node.classList?.contains('post') || 
+                                node.classList?.contains('topic-post') ||
+                                node.querySelector?.('.post, .topic-post, [data-post-id]');
+                  if (isPost && !isWidgetRelatedMutation(mutation)) {
+                    hasNewPost = true;
+                    break;
+                  }
+                }
+              }
+              if (hasNewPost) {
+                allScrollOrWidgetRelated = false;
+                break;
+              }
+            }
+          }
+          
+          // Skip if all mutations are scroll/widget related
+          if (allScrollOrWidgetRelated) {
+            return; // Skip - no actual new content, just scroll-related changes
+          }
+        }
+      }
+      
       let hasNewContent = false;
       for (const mutation of mutations) {
+        // Skip scroll-related mutations
+        if (isScrollRelatedMutation(mutation)) {
+          continue;
+        }
+        
+        // Skip widget-related mutations
+        if (isWidgetRelatedMutation(mutation)) {
+          continue;
+        }
+        
+        // Check for actual new posts
         for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            // Check if it's a post or contains post-like content
             const isPost = node.classList?.contains('post') || 
                           node.classList?.contains('topic-post') ||
                           node.querySelector?.('.post, .topic-post, [data-post-id]');
-            // Check if it's not a widget
-            const isWidget = node.classList?.contains('tally-status-widget-container') ||
-                           node.classList?.contains('governance-widgets-wrapper');
-            if (isPost && !isWidget) {
+            if (isPost) {
               hasNewContent = true;
               break;
             }
@@ -8214,12 +8761,13 @@ export default apiInitializer((api) => {
     });
     
     // Observe topic content containers for lazy-loaded content
+    // Only watch childList changes, not attribute changes (reduces scroll-related triggers)
     const topicContentSelectors = ['.topic-body', '.post-stream', '.posts-wrapper', '.topic-post-stream', 'main'];
     topicContentSelectors.forEach(selector => {
       const element = document.querySelector(selector);
       if (element) {
         topicContentObserver.observe(element, { childList: true, subtree: true });
-        console.log(`✅ [TOPIC] Watching ${selector} for lazy-loaded content`);
+        console.log(`✅ [TOPIC] Watching ${selector} for lazy-loaded content (ignoring scroll changes)`);
       }
     });
     
@@ -8320,46 +8868,107 @@ export default apiInitializer((api) => {
     // IMPORTANT: This ONLY adds new proposals found on scroll, it NEVER hides existing widgets
     // Widgets are detected on page load and remain visible regardless of scroll position
     let scrollScanTimeout = null;
+    let lastVisibilityCheck = 0;
+    const VISIBILITY_CHECK_THROTTLE = 100; // Reduced to 100ms for more aggressive checking during scroll
     const handleScroll = () => {
-      // CRITICAL: Force visibility IMMEDIATELY on every scroll event (no debounce for visibility)
-      // This prevents widgets from disappearing when scrolling on ALL screen sizes
+      const now = Date.now();
+      const shouldCheckVisibility = (now - lastVisibilityCheck) > VISIBILITY_CHECK_THROTTLE;
+      
+      // CRITICAL: Always force visibility immediately on scroll if widgets exist
+      // Discourse's viewport tracker may hide widgets, so we must be aggressive
       const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-      allWidgets.forEach(widget => {
-        widget.style.setProperty('display', 'block', 'important');
-        widget.style.setProperty('visibility', 'visible', 'important');
-        widget.style.setProperty('opacity', '1', 'important');
-        widget.classList.remove('hidden', 'd-none', 'is-hidden');
-      });
+      if (allWidgets.length > 0) {
+        // Use requestAnimationFrame to ensure we run after Discourse's scroll handlers
+        requestAnimationFrame(() => {
+          // Force visibility immediately without checking cache first
+          // This prevents any delay that could cause visible blinking
+          allWidgets.forEach(widget => {
+            widget.style.setProperty('display', 'block', 'important');
+            widget.style.setProperty('visibility', 'visible', 'important');
+            widget.style.setProperty('opacity', '1', 'important');
+            widget.classList.remove('hidden', 'd-none', 'is-hidden');
+            // Update cache to reflect forced visibility
+            markWidgetAsVisibleInCache(widget);
+          });
+          
+          // Also force container visibility
+          const container = document.querySelector('.governance-widgets-wrapper');
+          if (container) {
+            container.style.setProperty('display', 'flex', 'important');
+            container.style.setProperty('visibility', 'visible', 'important');
+            container.style.setProperty('opacity', '1', 'important');
+          }
+        });
+      }
+      
+      // Only do expensive checks if throttled time has passed
+      if (shouldCheckVisibility) {
+        lastVisibilityCheck = now;
+        // Run full visibility check as backup
+        if (allWidgets.length > 0) {
+          ensureAllWidgetsVisible();
+        }
+      }
+      
+      // CRITICAL: If widget has been shown for this topic, skip expensive scanning
+      // This prevents widgets from appearing/disappearing on scroll after first visit
+      if (hasWidgetBeenShown()) {
+        // Skip expensive scanning if widget was already shown (data is cached)
+        // Only scan for new proposals if we haven't found all yet
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (existingWidgets.length > 0) {
+          // Widgets already exist and have been shown - skip scanning
+          return; // Early return to skip scanning
+        }
+      }
       
       // CRITICAL: Ensure the container wrapper stays visible on ALL screen sizes during scroll
+      // Only update if actually hidden (prevents blinking)
       const container = document.querySelector('.governance-widgets-wrapper');
       if (container) {
-        const isMobileCheck = window.innerWidth <= 1400;
+        const containerStyle = window.getComputedStyle(container);
+        const containerIsHidden = containerStyle.display === 'none' || containerStyle.visibility === 'hidden' || containerStyle.opacity === '0';
         
-        // Always ensure visibility
-        container.style.setProperty('display', 'flex', 'important');
-        container.style.setProperty('visibility', 'visible', 'important');
-        container.style.setProperty('opacity', '1', 'important');
-        
-        if (isMobileCheck) {
-          // Mobile/Tablet: Use relative positioning (inline in topic) - respect CSS
-          container.style.setProperty('position', 'relative', 'important');
-          container.style.setProperty('left', 'auto', 'important');
-          container.style.setProperty('right', 'auto', 'important');
-          container.style.setProperty('top', 'auto', 'important');
-          container.style.setProperty('width', '100%', 'important');
-          container.style.setProperty('max-width', '100%', 'important');
-        } else {
-          // Desktop: Use fixed positioning (right side)
-          container.style.setProperty('position', 'fixed', 'important');
-          container.style.setProperty('z-index', '500', 'important');
-          container.style.setProperty('right', '5px', 'important');
-          container.style.setProperty('top', '180px', 'important');
-          container.style.setProperty('left', 'auto', 'important');
-          // Optimize for fixed positioning
-          container.style.setProperty('will-change', 'transform', 'important');
-          container.style.setProperty('backface-visibility', 'hidden', 'important');
-          container.style.setProperty('transform', 'translateZ(0)', 'important');
+        if (containerIsHidden) {
+          const isMobileCheck = window.innerWidth <= 1400;
+          
+          container.style.setProperty('display', 'flex', 'important');
+          container.style.setProperty('visibility', 'visible', 'important');
+          container.style.setProperty('opacity', '1', 'important');
+          
+          if (isMobileCheck) {
+            // Mobile/Tablet: Use relative positioning (inline in topic) - respect CSS
+            container.style.setProperty('position', 'relative', 'important');
+            container.style.setProperty('left', 'auto', 'important');
+            container.style.setProperty('right', 'auto', 'important');
+            container.style.setProperty('top', 'auto', 'important');
+            container.style.setProperty('width', '100%', 'important');
+            container.style.setProperty('max-width', '100%', 'important');
+          } else {
+            // Desktop: Use fixed positioning (right side)
+            container.style.setProperty('position', 'fixed', 'important');
+            container.style.setProperty('z-index', '500', 'important');
+            container.style.setProperty('right', '5px', 'important');
+            container.style.setProperty('top', '180px', 'important');
+            container.style.setProperty('left', 'auto', 'important');
+            // CRITICAL: Keep width fixed at 320px to prevent width changes on scroll
+            container.style.setProperty('width', '320px', 'important');
+            container.style.setProperty('max-width', '320px', 'important');
+            // Optimize for fixed positioning
+            container.style.setProperty('will-change', 'transform', 'important');
+            container.style.setProperty('backface-visibility', 'hidden', 'important');
+            container.style.setProperty('transform', 'translateZ(0)', 'important');
+          }
+        }
+      }
+      
+      // CRITICAL: Skip expensive scanning if widget setup is already completed and widgets exist
+      // This prevents widgets from appearing/disappearing on scroll
+      if (widgetSetupCompleted) {
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (existingWidgets.length > 0) {
+          // Widgets already exist and setup is completed - skip scanning on scroll
+          return; // Early return to prevent unnecessary re-scans
         }
       }
       
@@ -8368,6 +8977,15 @@ export default apiInitializer((api) => {
         clearTimeout(scrollScanTimeout);
       }
       scrollScanTimeout = setTimeout(() => {
+        // CRITICAL: Double-check that widgets don't exist before scanning
+        // This prevents race conditions where widgets were added between scroll events
+        if (widgetSetupCompleted) {
+          const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+          if (existingWidgets.length > 0) {
+            return; // Skip - widgets already exist
+          }
+        }
+        
         // Check if we've found all proposals yet - if not, scan for new ones
         const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
         const existingUrls = new Set();
@@ -8402,7 +9020,8 @@ export default apiInitializer((api) => {
     // Only add scroll listener for detecting new lazy-loaded proposals
     // This does NOT hide/show widgets based on scroll position
     // Visibility is enforced immediately on every scroll to prevent disappearing
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    // Use enhanced scroll handler with continuous visibility checking
+    window.addEventListener('scroll', enhancedHandleScroll, { passive: true });
     
     // CRITICAL: Also handle resize events to ensure widget stays visible when switching screen sizes
     // This prevents widget from disappearing when going from desktop to mobile or vice versa
@@ -8423,62 +9042,167 @@ export default apiInitializer((api) => {
     window.addEventListener('resize', handleResize);
     
     // CRITICAL: Periodically ensure widgets stay visible (prevents them from being hidden by scroll or other events)
-    // This runs every 500ms to catch any cases where widgets might be hidden (more frequent for better reliability)
+    // Only check visibility periodically, and only if cache indicates widgets might be hidden
+    // This prevents unnecessary getComputedStyle calls that cause flickering
     setInterval(() => {
-      ensureAllWidgetsVisible();
-    }, 500);
+      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+      if (allWidgets.length === 0) {
+        return; // No widgets to check
+      }
+      
+      // Quick cache check - only call expensive ensureAllWidgetsVisible if cache indicates issue
+      let needsCheck = false;
+      for (const widget of allWidgets) {
+        const cachedState = widgetVisibilityCache.get(widget);
+        if (!cachedState || cachedState.isHidden) {
+          needsCheck = true;
+          break;
+        }
+      }
+      
+      // Only call expensive visibility check if cache indicates widgets might be hidden
+      if (needsCheck) {
+        ensureAllWidgetsVisible();
+      }
+    }, 3000); // Check every 3 seconds, but only if cache indicates widgets might be hidden
     
     // CRITICAL: Use MutationObserver to watch for any changes to widget visibility
     // This immediately restores visibility if Discourse or other code tries to hide widgets
     // Works on ALL screen sizes (desktop, tablet, mobile)
+    // Made more aggressive to catch all visibility changes including from Discourse viewport tracker
     const widgetVisibilityObserver = new MutationObserver((mutations) => {
+      // Process mutations immediately without delay
       mutations.forEach((mutation) => {
-        if (mutation.type === 'attributes' && 
-            (mutation.attributeName === 'style' || mutation.attributeName === 'class')) {
-          const target = mutation.target;
-          const isMobileCheck = window.innerWidth <= 1400;
-          
-          // Check if target is a widget or container
-          if (target.classList?.contains('tally-status-widget-container') || 
-              target.closest?.('.tally-status-widget-container')) {
-            const widget = target.classList?.contains('tally-status-widget-container') 
-              ? target 
-              : target.closest('.tally-status-widget-container');
-            if (widget) {
-              const computedStyle = window.getComputedStyle(widget);
-              if (computedStyle.display === 'none' || 
-                  computedStyle.visibility === 'hidden' || 
-                  computedStyle.opacity === '0') {
-                console.log(`🔵 [OBSERVER] Widget visibility changed to hidden, forcing visible immediately`);
-                widget.style.setProperty('display', 'block', 'important');
-                widget.style.setProperty('visibility', 'visible', 'important');
-                widget.style.setProperty('opacity', '1', 'important');
-                widget.classList.remove('hidden', 'd-none', 'is-hidden');
+        const target = mutation.target;
+        const isMobileCheck = window.innerWidth <= 1400;
+        
+        // Check if target is a widget or container (check both attributes and childList)
+        let widget = null;
+        let container = null;
+        
+        if (target.classList?.contains('tally-status-widget-container')) {
+          widget = target;
+        } else if (target.closest?.('.tally-status-widget-container')) {
+          widget = target.closest('.tally-status-widget-container');
+        }
+        
+        if (target.classList?.contains('governance-widgets-wrapper') || target.id === 'governance-widgets-wrapper') {
+          container = target;
+        }
+        
+        // CRITICAL: Prevent Discourse from adding cloaking attributes to our widgets
+        if (mutation.type === 'attributes' && widget) {
+          // If Discourse tries to add data-cloak="true" or remove our anti-cloak attributes, stop it
+          if (mutation.attributeName === 'data-cloak') {
+            const cloakValue = widget.getAttribute('data-cloak');
+            if (cloakValue === 'true') {
+              // Discourse tried to enable cloaking - disable it immediately
+              widget.setAttribute('data-cloak', 'false');
+              widget.setAttribute('data-skip-cloak', 'true');
+              widget.setAttribute('data-no-cloak', 'true');
+              console.log(`🔵 [OBSERVER] Prevented Discourse cloaking on widget`);
+            }
+          }
+        }
+        
+        // Also check for widgets in childList changes (Discourse might be moving/hiding them)
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType === 1) { // Element node
+              if (node.classList?.contains('tally-status-widget-container')) {
+                widget = node;
+                // Prevent cloaking on newly added widgets
+                node.setAttribute('data-cloak', 'false');
+                node.setAttribute('data-skip-cloak', 'true');
+                node.setAttribute('data-no-cloak', 'true');
+              } else {
+                const foundWidget = node.querySelector?.('.tally-status-widget-container');
+                if (foundWidget) {
+                  widget = foundWidget;
+                  foundWidget.setAttribute('data-cloak', 'false');
+                  foundWidget.setAttribute('data-skip-cloak', 'true');
+                  foundWidget.setAttribute('data-no-cloak', 'true');
+                }
               }
+            }
+          });
+        }
+        
+        // Force widget visibility immediately if found
+        if (widget) {
+          const computedStyle = window.getComputedStyle(widget);
+          if (computedStyle.display === 'none' || 
+              computedStyle.visibility === 'hidden' || 
+              computedStyle.opacity === '0') {
+            console.log(`🔵 [OBSERVER] Widget visibility changed to hidden, forcing visible immediately`);
+            widget.style.setProperty('display', 'block', 'important');
+            widget.style.setProperty('visibility', 'visible', 'important');
+            widget.style.setProperty('opacity', '1', 'important');
+            widget.classList.remove('hidden', 'd-none', 'is-hidden', 'cloaked');
+            // CRITICAL: Ensure cloaking is disabled
+            widget.setAttribute('data-cloak', 'false');
+            widget.setAttribute('data-skip-cloak', 'true');
+            widget.setAttribute('data-no-cloak', 'true');
+            // CRITICAL: Update cache immediately to prevent further checks
+            markWidgetAsVisibleInCache(widget);
+          } else {
+            // Even if visible, ensure it stays visible by updating cache
+            markWidgetAsVisibleInCache(widget);
+          }
+        }
+        
+        // Also check for attribute changes on widgets
+        if ((mutation.type === 'attributes' && 
+            (mutation.attributeName === 'style' || mutation.attributeName === 'class' || mutation.attributeName === 'data-cloak')) && widget) {
+          const computedStyle = window.getComputedStyle(widget);
+          if (computedStyle.display === 'none' || 
+              computedStyle.visibility === 'hidden' || 
+              computedStyle.opacity === '0') {
+            console.log(`🔵 [OBSERVER] Widget visibility changed to hidden, forcing visible immediately`);
+            widget.style.setProperty('display', 'block', 'important');
+            widget.style.setProperty('visibility', 'visible', 'important');
+            widget.style.setProperty('opacity', '1', 'important');
+            widget.classList.remove('hidden', 'd-none', 'is-hidden', 'cloaked');
+            widget.setAttribute('data-cloak', 'false');
+            widget.setAttribute('data-skip-cloak', 'true');
+            widget.setAttribute('data-no-cloak', 'true');
+            markWidgetAsVisibleInCache(widget);
+          }
+        }
+        
+        // Also watch for container visibility changes and width changes
+        if (container || (target.classList?.contains('governance-widgets-wrapper') || target.id === 'governance-widgets-wrapper')) {
+          const containerEl = container || target;
+          const computedStyle = window.getComputedStyle(containerEl);
+          if (computedStyle.display === 'none' || 
+              computedStyle.visibility === 'hidden' || 
+              computedStyle.opacity === '0') {
+            console.log(`🔵 [OBSERVER] Container visibility changed to hidden, forcing visible immediately`);
+            containerEl.style.setProperty('display', 'flex', 'important');
+            containerEl.style.setProperty('visibility', 'visible', 'important');
+            containerEl.style.setProperty('opacity', '1', 'important');
+            
+            // Re-apply correct positioning based on screen size
+            if (isMobileCheck) {
+              containerEl.style.setProperty('position', 'relative', 'important');
+              containerEl.style.setProperty('width', '100%', 'important');
+              containerEl.style.setProperty('max-width', '100%', 'important');
+            } else {
+              containerEl.style.setProperty('position', 'fixed', 'important');
+              containerEl.style.setProperty('z-index', '500', 'important');
+              // CRITICAL: Keep width fixed at 320px on desktop to prevent width changes on scroll
+              containerEl.style.setProperty('width', '320px', 'important');
+              containerEl.style.setProperty('max-width', '320px', 'important');
             }
           }
           
-          // Also watch for container visibility changes
-          if (target.classList?.contains('governance-widgets-wrapper')) {
-            const container = target;
-            const computedStyle = window.getComputedStyle(container);
-            if (computedStyle.display === 'none' || 
-                computedStyle.visibility === 'hidden' || 
-                computedStyle.opacity === '0') {
-              console.log(`🔵 [OBSERVER] Container visibility changed to hidden, forcing visible immediately`);
-              container.style.setProperty('display', 'flex', 'important');
-              container.style.setProperty('visibility', 'visible', 'important');
-              container.style.setProperty('opacity', '1', 'important');
-              
-              // Re-apply correct positioning based on screen size
-              if (isMobileCheck) {
-                container.style.setProperty('position', 'relative', 'important');
-                container.style.setProperty('width', '100%', 'important');
-                container.style.setProperty('max-width', '100%', 'important');
-              } else {
-                container.style.setProperty('position', 'fixed', 'important');
-                container.style.setProperty('z-index', '500', 'important');
-              }
+          // CRITICAL: Prevent width changes on desktop (keep fixed at 320px)
+          if (!isMobileCheck) {
+            const currentWidth = computedStyle.width;
+            // If width is not 320px, restore it (prevents width flickering on scroll)
+            if (currentWidth && currentWidth !== '320px' && !currentWidth.includes('320')) {
+              containerEl.style.setProperty('width', '320px', 'important');
+              containerEl.style.setProperty('max-width', '320px', 'important');
             }
           }
         }
@@ -8487,21 +9211,52 @@ export default apiInitializer((api) => {
     
     // Observe all existing widgets, container, and any new ones that get added
     const observeWidgets = () => {
-      // Observe all widgets
+      // Observe all widgets with both attributes and childList to catch all changes
       const allWidgets = document.querySelectorAll('.tally-status-widget-container');
       allWidgets.forEach(widget => {
         widgetVisibilityObserver.observe(widget, {
           attributes: true,
-          attributeFilter: ['style', 'class']
+          attributeFilter: ['style', 'class', 'data-cloak', 'data-cloaked'], // Watch for cloaking attributes
+          childList: true,
+          subtree: false
         });
+        
+        // CRITICAL: Ensure cloaking is disabled and exclude from viewport tracking
+        widget.setAttribute('data-cloak', 'false');
+        widget.setAttribute('data-skip-cloak', 'true');
+        widget.setAttribute('data-no-cloak', 'true');
+        widget.setAttribute('data-viewport', 'false');
+        widget.setAttribute('data-exclude-viewport', 'true');
+        widget.setAttribute('data-no-viewport-track', 'true');
+        widget.classList.add('no-viewport-track');
       });
       
-      // Also observe the container wrapper
+      // Also observe the container wrapper with childList to catch widget additions/removals
       const container = document.querySelector('.governance-widgets-wrapper');
       if (container) {
         widgetVisibilityObserver.observe(container, {
           attributes: true,
-          attributeFilter: ['style', 'class']
+          attributeFilter: ['style', 'class', 'data-cloak', 'data-cloaked'], // Watch for cloaking attributes
+          childList: true,
+          subtree: true // Watch for widgets being added/removed inside
+        });
+        
+        // CRITICAL: Ensure cloaking is disabled and exclude from viewport tracking
+        container.setAttribute('data-cloak', 'false');
+        container.setAttribute('data-skip-cloak', 'true');
+        container.setAttribute('data-no-cloak', 'true');
+        container.setAttribute('data-viewport', 'false');
+        container.setAttribute('data-exclude-viewport', 'true');
+        container.setAttribute('data-no-viewport-track', 'true');
+        container.classList.add('no-viewport-track');
+      }
+      
+      // Also observe the topic body to catch widgets being moved around
+      const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream');
+      if (topicBody) {
+        widgetVisibilityObserver.observe(topicBody, {
+          childList: true,
+          subtree: true // Watch for widgets being added/removed/moved
         });
       }
     };
@@ -8513,6 +9268,110 @@ export default apiInitializer((api) => {
     const widgetContainerObserver = new MutationObserver(() => {
       observeWidgets();
     });
+    
+    // CRITICAL: Continuous visibility check ALWAYS (not just during scroll)
+    // This ensures widgets stay visible even if Discourse's viewport tracker tries to hide them
+    // Run continuously using requestAnimationFrame to catch any hiding immediately
+    let visibilityCheckFrame = null;
+    let lastVisibilityCheckTime = 0;
+    const VISIBILITY_CHECK_INTERVAL = 16; // Check every ~16ms (60fps)
+    
+    const continuousVisibilityCheck = () => {
+      const now = performance.now();
+      
+      // Only check if enough time has passed (throttle to ~60fps)
+      if (now - lastVisibilityCheckTime < VISIBILITY_CHECK_INTERVAL) {
+        visibilityCheckFrame = requestAnimationFrame(continuousVisibilityCheck);
+        return;
+      }
+      
+      lastVisibilityCheckTime = now;
+      
+      // CRITICAL: Force visibility on ALL widgets EVERY frame
+      // Don't check if hidden - just force visibility always to prevent any flicker
+      const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+      if (allWidgets.length > 0) {
+        allWidgets.forEach(widget => {
+          const computedStyle = window.getComputedStyle(widget);
+          const wasHidden = computedStyle.display === 'none' || 
+                           computedStyle.visibility === 'hidden' || 
+                           computedStyle.opacity === '0';
+          
+          // Force visibility immediately without checking - prevents any delay
+          widget.style.setProperty('display', 'block', 'important');
+          widget.style.setProperty('visibility', 'visible', 'important');
+          widget.style.setProperty('opacity', '1', 'important');
+          widget.classList.remove('hidden', 'd-none', 'is-hidden', 'cloaked');
+          
+          // Ensure all exclusion attributes are set
+          widget.setAttribute('data-cloak', 'false');
+          widget.setAttribute('data-skip-cloak', 'true');
+          widget.setAttribute('data-no-cloak', 'true');
+          widget.setAttribute('data-viewport', 'false');
+          widget.setAttribute('data-exclude-viewport', 'true');
+          widget.setAttribute('data-no-viewport-track', 'true');
+          widget.classList.add('no-viewport-track');
+          
+          markWidgetAsVisibleInCache(widget);
+          
+          // Log if we had to restore visibility
+          if (wasHidden) {
+            console.log(`🔵 [CONTINUOUS] Widget was hidden, forced visible - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
+          }
+        });
+      }
+      
+      // Also force container visibility every frame
+      const container = document.querySelector('.governance-widgets-wrapper');
+      if (container) {
+        const containerStyle = window.getComputedStyle(container);
+        const containerWasHidden = containerStyle.display === 'none' || 
+                                   containerStyle.visibility === 'hidden' || 
+                                   containerStyle.opacity === '0';
+        
+        container.style.setProperty('display', 'flex', 'important');
+        container.style.setProperty('visibility', 'visible', 'important');
+        container.style.setProperty('opacity', '1', 'important');
+        container.classList.remove('cloaked', 'hidden');
+        
+        // Ensure all exclusion attributes are set
+        container.setAttribute('data-cloak', 'false');
+        container.setAttribute('data-skip-cloak', 'true');
+        container.setAttribute('data-no-cloak', 'true');
+        container.setAttribute('data-viewport', 'false');
+        container.setAttribute('data-exclude-viewport', 'true');
+        container.setAttribute('data-no-viewport-track', 'true');
+        container.classList.add('no-viewport-track');
+        
+        if (containerWasHidden) {
+          console.log(`🔵 [CONTINUOUS] Container was hidden, forced visible`);
+        }
+      }
+      
+      // Continue checking ALWAYS (not just during scroll)
+      visibilityCheckFrame = requestAnimationFrame(continuousVisibilityCheck);
+    };
+    
+    // Start continuous visibility check immediately
+    visibilityCheckFrame = requestAnimationFrame(continuousVisibilityCheck);
+    
+    // Enhanced scroll handler - continuous visibility check is already running
+    const originalHandleScroll = handleScroll;
+    const enhancedHandleScroll = () => {
+      // Call original scroll handler
+      originalHandleScroll();
+      
+      // Continuous visibility check is already running, so we don't need to start it here
+      // But we can force an immediate check on scroll for extra safety
+      requestAnimationFrame(() => {
+        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+        allWidgets.forEach(widget => {
+          widget.style.setProperty('display', 'block', 'important');
+          widget.style.setProperty('visibility', 'visible', 'important');
+          widget.style.setProperty('opacity', '1', 'important');
+        });
+      });
+    };
     
     const topicBody = document.querySelector('.topic-body, .post-stream, .topic-post');
     if (topicBody) {
@@ -8917,12 +9776,13 @@ export default apiInitializer((api) => {
       console.log("🔄 [REFRESH] Checking for updates for widget:", widgetId);
       
       const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
-      // Force refresh by bypassing cache
+      // Force refresh by bypassing cache - fresh data will automatically update localStorage cache
       const freshData = await fetchProposalData(proposalId, url, proposalInfo.govId, proposalInfo.urlProposalNumber, true);
       
       if (freshData && freshData.title && freshData.title !== "Snapshot Proposal") {
         // Update widget with fresh data (status, votes, days left)
-        console.log("🔄 [REFRESH] Updating widget with fresh data from Snapshot");
+        // Note: freshData is automatically saved to localStorage cache by fetchProposalDataByType
+        console.log("🔄 [REFRESH] Updating widget with fresh data from Snapshot (cache updated)");
         renderStatusWidget(freshData, url, widgetId, proposalInfo);
       }
     }, 2 * 60 * 1000); // Refresh every 2 minutes
@@ -9803,6 +10663,7 @@ export default apiInitializer((api) => {
     
     // Watch for widgets being added to DOM and immediately force visibility (works on all devices)
     // CRITICAL: Only process widgets on topic pages - remove widgets on non-topic pages
+    // Also watch for widgets being REMOVED and prevent removal if on topic page
     const widgetObserver = new MutationObserver((mutations) => {
       const isCurrentTopicPage = window.location.pathname.match(/^\/t\//);
       
@@ -9831,6 +10692,40 @@ export default apiInitializer((api) => {
         }
         return;
       }
+      
+      // On topic page: watch for widgets being removed and prevent it
+      mutations.forEach((mutation) => {
+        // CRITICAL: Watch for widgets being removed from DOM and prevent it if on topic page
+        if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
+          mutation.removedNodes.forEach((node) => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              if (node.classList?.contains('tally-status-widget-container') || 
+                  node.classList?.contains('governance-widgets-wrapper')) {
+                console.warn(`⚠️ [OBSERVER] Widget/container was removed from DOM! Attempting to restore...`);
+                // Try to restore the widget - insert it back where it was
+                if (mutation.target && mutation.target.parentNode) {
+                  try {
+                    mutation.target.insertBefore(node, mutation.nextSibling);
+                    console.log(`✅ [OBSERVER] Restored widget/container to DOM`);
+                    // Force visibility immediately
+                    if (node.classList?.contains('tally-status-widget-container')) {
+                      node.style.setProperty('display', 'block', 'important');
+                      node.style.setProperty('visibility', 'visible', 'important');
+                      node.style.setProperty('opacity', '1', 'important');
+                    } else if (node.classList?.contains('governance-widgets-wrapper')) {
+                      node.style.setProperty('display', 'flex', 'important');
+                      node.style.setProperty('visibility', 'visible', 'important');
+                      node.style.setProperty('opacity', '1', 'important');
+                    }
+                  } catch (e) {
+                    console.error(`❌ [OBSERVER] Failed to restore widget:`, e);
+                  }
+                }
+              }
+            }
+          });
+        }
+      });
       
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {

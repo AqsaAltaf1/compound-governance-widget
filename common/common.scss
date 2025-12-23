@@ -55,6 +55,16 @@
   opacity: 1 !important;
   pointer-events: auto !important;
 
+  // CRITICAL: Prevent Discourse's cloaking system from hiding the container
+  // Discourse uses [data-cloak] attribute to hide elements - we override it
+  &[data-cloak],
+  &[data-cloak="true"],
+  &[data-cloak="false"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
   // CRITICAL: Ensure widget stays fixed and visible during scroll
   // Use !important to override any Discourse styles that might hide it
   will-change: transform !important; // Optimize for fixed positioning
@@ -180,8 +190,86 @@
   contain: layout style paint !important;
 
   // Ensure widget stays visible during updates (prevent opacity flicker)
+  // CRITICAL: These !important rules prevent widgets from disappearing on scroll
+  // These base rules apply ALWAYS, regardless of any attributes or classes Discourse might add
   opacity: 1 !important;
   visibility: visible !important;
+  display: block !important;
+
+  // CRITICAL: Override ANY possible state Discourse might apply
+  // This catches ALL possible combinations of attributes and classes
+  // Use universal selector to catch everything
+  &,
+  &[data-cloak],
+  &[data-cloak="true"],
+  &[data-cloak="false"],
+  &[data-cloaked],
+  &[data-cloaked="true"],
+  &.cloaked,
+  &.hidden,
+  &[style*="display: none"],
+  &[style*="visibility: hidden"],
+  &[style*="opacity: 0"],
+  &[style*="display:none"],
+  &[style*="visibility:hidden"],
+  &[style*="opacity:0"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    // Force these even if inline styles try to override
+    min-height: 1px !important;
+    height: auto !important;
+  }
+
+  // CRITICAL: Additional protection - ensure widgets can never be hidden
+  // Use max specificity to override any Discourse styles
+  html body & {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // CRITICAL: Exclude from Discourse's viewport tracking entirely
+  // Discourse viewport tracker should NOT process these widgets at all
+  // Use multiple selectors to ensure complete exclusion
+  &.no-viewport-track,
+  &[data-viewport="false"],
+  &[data-exclude-viewport="true"],
+  &[data-no-viewport-track="true"] {
+    // Force visibility and prevent Discourse from hiding
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+
+    // Prevent Discourse from applying viewport tracking styles
+    contain: none !important;
+
+    // Ensure these widgets are never processed by viewport tracker
+    will-change: auto !important;
+  }
+
+  // This prevents Discourse from even attempting to hide/cloak our widgets
+  pointer-events: auto !important;
+
+  // CRITICAL: Prevent Discourse's cloaking system from hiding widgets
+  // Discourse uses [data-cloak] attribute to hide elements on scroll - we override it
+  &[data-cloak],
+  &[data-cloak="true"],
+  &[data-cloak="false"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // Also override any CSS that Discourse might apply for cloaked elements
+  &.cloaked,
+  &[data-cloaked="true"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
 
   // When NOT in wrapper (legacy/fallback), use fixed positioning for large screens, inline for smaller
   &:not(.governance-widgets-wrapper > *) {
