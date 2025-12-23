@@ -31,6 +31,114 @@ console.log("✅ Aave Governance Widget: JavaScript file loaded!");
  */
 
 export default apiInitializer((api) => {
+  // CRITICAL: Force scroll to top (0, 0) on page load
+  // User wants to stay at top, no auto-scroll to proposals
+  // This prevents Discourse from auto-scrolling to posts/proposals
+  let initialScrollX = 0;
+  let initialScrollY = 0;
+  
+  // Immediately force scroll to top
+  window.scrollTo(0, 0);
+  document.documentElement.scrollLeft = 0;
+  document.documentElement.scrollTop = 0;
+  document.body.scrollLeft = 0;
+  document.body.scrollTop = 0;
+  
+  // Lock scroll position during initial widget setup to prevent auto-scrolling
+  let scrollLocked = true;
+  let widgetsInserting = false; // Track when widgets are being inserted
+  
+  const restoreScroll = () => {
+    if (scrollLocked || widgetsInserting) {
+      // Always restore to top (0, 0) - user wants to stay at top
+      window.scrollTo(0, 0);
+      document.documentElement.scrollLeft = 0;
+      document.documentElement.scrollTop = 0;
+      document.body.scrollLeft = 0;
+      document.body.scrollTop = 0;
+    }
+  };
+  
+  const lockScrollUntilWidgetsReady = () => {
+    // Stop locking after widgets are ready (extended to 10 seconds to prevent Discourse auto-scroll)
+    // Note: We rely on MutationObserver and scroll event listener instead of fixed intervals
+    setTimeout(() => {
+      scrollLocked = false;
+      // Final restore to top
+      restoreScroll();
+    }, 10000);
+  };
+  
+  // Start scroll locking immediately
+  lockScrollUntilWidgetsReady();
+  
+  // CRITICAL: Aggressively restore scroll position on any scroll event during lock/insertion
+  // This prevents Discourse or browser from auto-scrolling to widgets or posts
+  const aggressiveScrollRestore = (e) => {
+    if (scrollLocked || widgetsInserting) {
+      // Prevent default scroll behavior and force to top
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      restoreScroll();
+    }
+  };
+  
+  // Listen for scroll events and restore position if locked (non-passive to allow preventDefault)
+  window.addEventListener('scroll', aggressiveScrollRestore, { passive: false, capture: true });
+  
+  // Also restore on any DOM mutations that might trigger scrolling
+  const scrollRestoreOnMutation = () => {
+    if (scrollLocked || widgetsInserting) {
+      // Use multiple methods to ensure scroll is restored
+      requestAnimationFrame(() => {
+        restoreScroll();
+        setTimeout(() => restoreScroll(), 0);
+        setTimeout(() => restoreScroll(), 10);
+        setTimeout(() => restoreScroll(), 50);
+      });
+    }
+  };
+  
+  // CRITICAL: Also prevent scrolling when widgets are added to DOM via MutationObserver
+  // This catches any scroll events triggered by DOM changes
+  const scrollPreventionObserver = new MutationObserver((mutations) => {
+    // Check if widgets are being added
+    const hasWidgetAddition = mutations.some(mutation => {
+      return Array.from(mutation.addedNodes).some(node => {
+        if (node.nodeType === 1) { // Element node
+          return node.classList?.contains('tally-status-widget-container') ||
+                 node.classList?.contains('governance-widgets-wrapper') ||
+                 node.querySelector?.('.tally-status-widget-container') ||
+                 node.querySelector?.('.governance-widgets-wrapper');
+        }
+        return false;
+      });
+    });
+    
+    if (hasWidgetAddition) {
+      widgetsInserting = true;
+      scrollRestoreOnMutation();
+      // Keep preventing scroll for 500ms after widget insertion
+      setTimeout(() => {
+        widgetsInserting = false;
+      }, 500);
+    }
+    
+    if (scrollLocked || widgetsInserting) {
+      scrollRestoreOnMutation();
+    }
+  });
+  
+  // Observe document body for widget additions
+  if (document.body) {
+    scrollPreventionObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+  
   console.log("✅ Aave Governance Widget: apiInitializer called!");
 
   // Track errors that are being handled to avoid false positives in unhandled rejection handler
@@ -2378,94 +2486,6 @@ export default apiInitializer((api) => {
     `;
   }
 
-  // Create a SINGLE global loading placeholder for all widgets
-  // Shows one loading indicator while any widgets are being fetched
-  function createGlobalLoadingPlaceholder() {
-    // Check if global placeholder already exists
-    const existingGlobalPlaceholder = document.getElementById('global-governance-widgets-loader');
-    if (existingGlobalPlaceholder) {
-      console.log(`🔵 [LOADING] Global loading placeholder already exists, skipping duplicate`);
-      return existingGlobalPlaceholder;
-    }
-    
-    const isMobile = window.innerWidth <= 1400 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    const placeholder = document.createElement('div');
-    placeholder.id = 'global-governance-widgets-loader';
-    placeholder.className = 'tally-status-widget-container loading-placeholder global-loader';
-    placeholder.setAttribute('data-global-loader', 'true');
-    
-    // Apply same positioning as regular widgets
-    if (isMobile) {
-      placeholder.style.position = 'relative';
-      placeholder.style.width = '100%';
-      placeholder.style.maxWidth = '100%';
-      placeholder.style.marginBottom = '20px';
-    } else {
-      placeholder.style.position = 'fixed';
-      placeholder.style.width = '320px';
-      placeholder.style.maxWidth = '320px';
-    }
-    
-    placeholder.innerHTML = `
-      <div class="tally-status-widget loading-widget">
-        <div class="loading-header">
-          <div class="loading-title"></div>
-          <div class="loading-badge"></div>
-        </div>
-        <div class="loading-content">
-          <div class="loading-bar" style="width: 70%"></div>
-          <div class="loading-bar" style="width: 50%"></div>
-          <div class="loading-bar" style="width: 60%"></div>
-        </div>
-        <div class="loading-footer">
-          <div class="loading-button"></div>
-        </div>
-        <div class="loading-spinner-overlay">
-          <div class="loading-spinner"></div>
-        </div>
-      </div>
-    `;
-    
-    // Insert placeholder in the DOM immediately
-    const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
-    const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
-    
-    if (isMobile && firstPost && firstPost.parentNode) {
-      firstPost.parentNode.insertBefore(placeholder, firstPost);
-      console.log(`✅ [LOADING] Created global loading placeholder (mobile)`);
-    } else {
-      // For desktop, add to container
-      const container = getOrCreateWidgetsContainer();
-      if (container) {
-        container.appendChild(placeholder);
-        console.log(`✅ [LOADING] Created global loading placeholder (desktop)`);
-      } else {
-        // Fallback: add to topic body
-        if (topicBody) {
-          topicBody.insertBefore(placeholder, topicBody.firstChild);
-          console.log(`✅ [LOADING] Created global loading placeholder (fallback)`);
-        }
-      }
-    }
-    
-    // Force visibility
-    placeholder.style.setProperty('display', 'block', 'important');
-    placeholder.style.setProperty('visibility', 'visible', 'important');
-    placeholder.style.setProperty('opacity', '1', 'important');
-    
-    return placeholder;
-  }
-  
-  // Remove the global loading placeholder once widgets are loaded
-  function removeGlobalLoadingPlaceholder() {
-    const globalLoader = document.getElementById('global-governance-widgets-loader');
-    if (globalLoader) {
-      console.log(`✅ [LOADING] Removing global loading placeholder`);
-      globalLoader.remove();
-    }
-  }
 
   // Render status widget on the right side (outside post box) - like the image
   // Render multi-stage widget showing Temp Check, ARFC, and AIP all together
@@ -2505,7 +2525,10 @@ export default apiInitializer((api) => {
       // Position container like tally widget - fixed on right side
       updateContainerPosition(container);
       
-      document.body.appendChild(container);
+      // CRITICAL: Preserve scroll position when adding container to prevent auto-scrolling
+      preserveScrollPosition(() => {
+        document.body.appendChild(container);
+      });
       console.log("✅ [CONTAINER] Created widgets container for column layout");
       
       // Update position on resize - handles desktop to mobile transitions
@@ -3629,6 +3652,7 @@ export default apiInitializer((api) => {
     
     if (isMobile) {
       // Mobile/small screens: inline positioning at top of proposal
+      // CRITICAL: Set visibility immediately, not in requestAnimationFrame (causes delay)
       statusWidget.style.display = 'block';
       statusWidget.style.visibility = 'visible';
       statusWidget.style.opacity = '1';
@@ -3639,14 +3663,8 @@ export default apiInitializer((api) => {
       statusWidget.style.marginLeft = '0';
       statusWidget.style.marginRight = '0';
       statusWidget.style.zIndex = '1';
-      
-      // Force immediate visibility - ensure widget appears without scroll
-      requestAnimationFrame(() => {
-        statusWidget.style.display = 'block';
-        statusWidget.style.visibility = 'visible';
-        statusWidget.style.opacity = '1';
-        void statusWidget.offsetHeight; // Force reflow
-      });
+      // Force immediate reflow to ensure visibility
+      void statusWidget.offsetHeight;
     }
     
     // Use inline positioning for mobile/small screens (insert before first post)
@@ -3684,77 +3702,79 @@ export default apiInitializer((api) => {
       
       // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
       // Widgets appear at top of proposal, before first post
-      try {
-        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
-        const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
-        
-        // Get proposal order for this widget (order in content, not stage order)
-        const thisProposalOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
-        
-        // Find all existing widgets in the insertion area
-        let widgetsContainer = null;
-        let existingWidgets = [];
-        
-        if (firstPost && firstPost.parentNode) {
-          // Find widgets before the first post
-          widgetsContainer = firstPost.parentNode;
-          const siblings = Array.from(firstPost.parentNode.children);
-          existingWidgets = siblings.filter(sibling => 
-            sibling.classList.contains('tally-status-widget-container') && 
-            siblings.indexOf(sibling) < siblings.indexOf(firstPost)
-          );
-        } else if (topicBody) {
-          widgetsContainer = topicBody;
-          existingWidgets = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
-        } else {
-          const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-          if (mainContent) {
-            widgetsContainer = mainContent;
-            existingWidgets = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
-          }
-        }
-        
-        if (widgetsContainer && existingWidgets.length > 0) {
-          // Sort existing widgets by proposal order to ensure correct positioning
-          const sortedWidgets = [...existingWidgets].sort((a, b) => {
-            const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
-            const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
-            return orderA - orderB; // Ascending order (0, 1, 2, ...)
-          });
+      // CRITICAL: Preserve scroll position during insertion to prevent auto-scrolling
+      preserveScrollPosition(() => {
+        try {
+          const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+          const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
           
-          // Find the correct position to insert based on proposal order (order in content)
-          let insertBefore = null;
+          // Get proposal order for this widget (order in content, not stage order)
+          const thisProposalOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
           
-          // Find first widget with higher proposal order
-          for (const widget of sortedWidgets) {
-            const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
-            if (widgetProposalOrder > thisProposalOrder) {
-              insertBefore = widget;
-              break;
+          // Find all existing widgets in the insertion area
+          let widgetsContainer = null;
+          let existingWidgets = [];
+          
+          if (firstPost && firstPost.parentNode) {
+            // Find widgets before the first post
+            widgetsContainer = firstPost.parentNode;
+            const siblings = Array.from(firstPost.parentNode.children);
+            existingWidgets = siblings.filter(sibling => 
+              sibling.classList.contains('tally-status-widget-container') && 
+              siblings.indexOf(sibling) < siblings.indexOf(firstPost)
+            );
+          } else if (topicBody) {
+            widgetsContainer = topicBody;
+            existingWidgets = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+          } else {
+            const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+            if (mainContent) {
+              widgetsContainer = mainContent;
+              existingWidgets = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
             }
           }
           
-          if (insertBefore) {
-            widgetsContainer.insertBefore(statusWidget, insertBefore);
-            console.log(`✅ [WIDGET] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
-          } else {
-            // No widget with higher order, insert at end (after all existing widgets, before first post)
-            if (firstPost && firstPost.parentNode) {
-              // Insert before first post (which is after all widgets)
-              firstPost.parentNode.insertBefore(statusWidget, firstPost);
-            } else if (topicBody) {
-              // Append to topic body
-              topicBody.appendChild(statusWidget);
-            } else {
-              const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-              if (mainContent) {
-                mainContent.appendChild(statusWidget);
-              } else {
-                document.body.appendChild(statusWidget);
+          if (widgetsContainer && existingWidgets.length > 0) {
+            // Sort existing widgets by proposal order to ensure correct positioning
+            const sortedWidgets = [...existingWidgets].sort((a, b) => {
+              const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
+              const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
+              return orderA - orderB; // Ascending order (0, 1, 2, ...)
+            });
+            
+            // Find the correct position to insert based on proposal order (order in content)
+            let insertBefore = null;
+            
+            // Find first widget with higher proposal order
+            for (const widget of sortedWidgets) {
+              const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
+              if (widgetProposalOrder > thisProposalOrder) {
+                insertBefore = widget;
+                break;
               }
             }
-            console.log(`✅ [WIDGET] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
-          }
+            
+            if (insertBefore) {
+              widgetsContainer.insertBefore(statusWidget, insertBefore);
+              console.log(`✅ [WIDGET] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
+            } else {
+              // No widget with higher order, insert at end (after all existing widgets, before first post)
+              if (firstPost && firstPost.parentNode) {
+                // Insert before first post (which is after all widgets)
+                firstPost.parentNode.insertBefore(statusWidget, firstPost);
+              } else if (topicBody) {
+                // Append to topic body
+                topicBody.appendChild(statusWidget);
+              } else {
+                const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+                if (mainContent) {
+                  mainContent.appendChild(statusWidget);
+                } else {
+                  document.body.appendChild(statusWidget);
+                }
+              }
+              console.log(`✅ [WIDGET] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
+            }
           
           // CRITICAL: Force immediate visibility RIGHT AFTER insertion (before requestAnimationFrame)
           // This ensures widget is visible even if Discourse applies lazy loading CSS
@@ -3817,28 +3837,30 @@ export default apiInitializer((api) => {
                 return orderA - orderB; // Ascending order (0, 1, 2, ...)
               });
               
-              // Re-insert widgets in correct order
-              sortedAllWidgets.forEach((widget, idx) => {
-                if (idx === 0) {
-                  // First widget - insert before first post or at beginning
-                  if (firstPost && firstPost.parentNode) {
-                    firstPost.parentNode.insertBefore(widget, firstPost);
-                  } else if (topicBody) {
-                    if (topicBody.firstChild) {
-                      topicBody.insertBefore(widget, topicBody.firstChild);
+              // Re-insert widgets in correct order (preserve scroll during re-sort too)
+              preserveScrollPosition(() => {
+                sortedAllWidgets.forEach((widget, idx) => {
+                  if (idx === 0) {
+                    // First widget - insert before first post or at beginning
+                    if (firstPost && firstPost.parentNode) {
+                      firstPost.parentNode.insertBefore(widget, firstPost);
+                    } else if (topicBody) {
+                      if (topicBody.firstChild) {
+                        topicBody.insertBefore(widget, topicBody.firstChild);
+                      } else {
+                        topicBody.appendChild(widget);
+                      }
+                    }
+                  } else {
+                    // Insert after previous widget
+                    const prevWidget = sortedAllWidgets[idx - 1];
+                    if (prevWidget.nextSibling) {
+                      widgetsContainer.insertBefore(widget, prevWidget.nextSibling);
                     } else {
-                      topicBody.appendChild(widget);
+                      widgetsContainer.appendChild(widget);
                     }
                   }
-                } else {
-                  // Insert after previous widget
-                  const prevWidget = sortedAllWidgets[idx - 1];
-                  if (prevWidget.nextSibling) {
-                    widgetsContainer.insertBefore(widget, prevWidget.nextSibling);
-                  } else {
-                    widgetsContainer.appendChild(widget);
-                  }
-                }
+                });
               });
               console.log(`✅ [WIDGET] Re-sorted ${allWidgets.length} widget(s) in correct order (1, 2, 3...)`);
             }
@@ -3875,33 +3897,28 @@ export default apiInitializer((api) => {
             }
           }
         }
+        } catch (error) {
+          console.error("❌ [WIDGET] Error inserting widget:", error);
+          // Remove URL from rendering set on error
+          if (proposalUrl) {
+            renderingUrls.delete(proposalUrl);
+          }
+          // Fallback: try to append to a safe location (preserve scroll during fallback too)
+          preserveScrollPosition(() => {
+            const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
+            if (topicBody) {
+              topicBody.appendChild(statusWidget);
+            } else {
+              document.body.appendChild(statusWidget);
+            }
+          });
+        }
         
         // Remove URL from rendering set now that widget is in DOM
         if (proposalUrl) {
           renderingUrls.delete(proposalUrl);
         }
-      } catch (error) {
-        console.error("❌ [WIDGET] Error inserting widget:", error);
-        // Remove URL from rendering set on error
-        if (proposalUrl) {
-          renderingUrls.delete(proposalUrl);
-        }
-        // Fallback: try to append to a safe location (append at end for new widgets at bottom)
-        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
-        if (topicBody) {
-          topicBody.appendChild(statusWidget);
-          // Remove URL from rendering set after fallback insert
-          if (proposalUrl) {
-            renderingUrls.delete(proposalUrl);
-          }
-        } else {
-          document.body.appendChild(statusWidget);
-          // Remove URL from rendering set after fallback insert
-          if (proposalUrl) {
-            renderingUrls.delete(proposalUrl);
-          }
-        }
-      }
+      });
     } else {
       // Desktop/Large screens: Use fixed positioning on right side
       const widgetsContainer = getOrCreateWidgetsContainer();
@@ -3922,14 +3939,17 @@ export default apiInitializer((api) => {
           }
         }
         
-        if (insertBefore) {
-          widgetsContainer.insertBefore(statusWidget, insertBefore);
-          console.log(`✅ [DESKTOP] Widget inserted in correct order (proposal order: ${thisProposalOrder})`);
-        } else {
-          // No widget with higher order, append at end
-          widgetsContainer.appendChild(statusWidget);
-          console.log(`✅ [DESKTOP] Widget appended at end (proposal order: ${thisProposalOrder})`);
-        }
+        // CRITICAL: Preserve scroll position during desktop widget insertion
+        preserveScrollPosition(() => {
+          if (insertBefore) {
+            widgetsContainer.insertBefore(statusWidget, insertBefore);
+            console.log(`✅ [DESKTOP] Widget inserted in correct order (proposal order: ${thisProposalOrder})`);
+          } else {
+            // No widget with higher order, append at end
+            widgetsContainer.appendChild(statusWidget);
+            console.log(`✅ [DESKTOP] Widget appended at end (proposal order: ${thisProposalOrder})`);
+          }
+        });
         
         // CRITICAL: Force immediate visibility RIGHT AFTER insertion
         if (statusWidget && statusWidget.parentNode) {
@@ -3973,15 +3993,18 @@ export default apiInitializer((api) => {
       } else {
         // Fallback: if container creation failed, insert inline
         console.warn("⚠️ [DESKTOP] Container not available, inserting inline");
-        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream');
-        if (topicBody) {
-          const firstPost = document.querySelector('.topic-post, .post, [data-post-id]');
-          if (firstPost && firstPost.parentNode) {
-            firstPost.parentNode.insertBefore(statusWidget, firstPost);
-          } else {
-            topicBody.insertBefore(statusWidget, topicBody.firstChild);
+        // CRITICAL: Preserve scroll position during fallback insertion
+        preserveScrollPosition(() => {
+          const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream');
+          if (topicBody) {
+            const firstPost = document.querySelector('.topic-post, .post, [data-post-id]');
+            if (firstPost && firstPost.parentNode) {
+              firstPost.parentNode.insertBefore(statusWidget, firstPost);
+            } else {
+              topicBody.insertBefore(statusWidget, topicBody.firstChild);
+            }
           }
-        }
+        });
         
         // Force visibility for fallback insertion too
         requestAnimationFrame(() => {
@@ -4655,88 +4678,94 @@ export default apiInitializer((api) => {
       
       // Mobile: Insert widgets sequentially so all are visible
       // Find existing widgets and insert after the last one, or before first post if none exist
-      try {
-        const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
-        const firstPost = allPosts.length > 0 ? allPosts[0] : null;
-        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
-        
-        // Find all existing widgets on mobile (they should be before the first post)
-        let lastWidget = null;
-        
-        // Find the last widget that's actually in the DOM and before posts
-        if (firstPost && firstPost.parentNode) {
-          const siblings = Array.from(firstPost.parentNode.children);
-          for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
-            if (siblings[i].classList.contains('tally-status-widget-container')) {
-              lastWidget = siblings[i];
-          break;
+      // CRITICAL: Preserve scroll position during mobile widget insertion
+      preserveScrollPosition(() => {
+        try {
+          const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
+          const firstPost = allPosts.length > 0 ? allPosts[0] : null;
+          const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+          
+          // Find all existing widgets on mobile (they should be before the first post)
+          let lastWidget = null;
+          
+          // Find the last widget that's actually in the DOM and before posts
+          if (firstPost && firstPost.parentNode) {
+            const siblings = Array.from(firstPost.parentNode.children);
+            for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
+              if (siblings[i].classList.contains('tally-status-widget-container')) {
+                lastWidget = siblings[i];
+            break;
+              }
             }
           }
-        }
-        
-        if (firstPost && firstPost.parentNode) {
-          if (lastWidget) {
-            // Insert after the last widget
-            lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
-            console.log("✅ [MOBILE] Status widget inserted after last widget");
-        } else {
-            // No existing widgets, insert before first post
-            firstPost.parentNode.insertBefore(statusWidget, firstPost);
-            console.log("✅ [MOBILE] Status widget inserted before first post (first widget)");
-          }
-        } else if (topicBody) {
-          // Find last widget in topic body
-          const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
-          if (widgetsInBody.length > 0) {
-            // Insert after the last widget
-            const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
-            if (lastWidgetInBody.nextSibling) {
-              topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
-      } else {
-              topicBody.appendChild(statusWidget);
-            }
-            console.log("✅ [MOBILE] Status widget inserted after last widget in topic body");
+          
+          if (firstPost && firstPost.parentNode) {
+            if (lastWidget) {
+              // Insert after the last widget
+              lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
+              console.log("✅ [MOBILE] Status widget inserted after last widget");
           } else {
-            // No existing widgets, insert at the beginning
-            if (topicBody.firstChild) {
-              topicBody.insertBefore(statusWidget, topicBody.firstChild);
-            } else {
-              topicBody.appendChild(statusWidget);
+              // No existing widgets, insert before first post
+              firstPost.parentNode.insertBefore(statusWidget, firstPost);
+              console.log("✅ [MOBILE] Status widget inserted before first post (first widget)");
             }
-            console.log("✅ [MOBILE] Status widget inserted at top of topic body (first widget)");
-          }
+          } else if (topicBody) {
+            // Find last widget in topic body
+            const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+            if (widgetsInBody.length > 0) {
+              // Insert after the last widget
+              const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
+              if (lastWidgetInBody.nextSibling) {
+                topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
         } else {
-          // Try to find the main content area
-          const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-          if (mainContent) {
-            const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
-            if (widgetsInMain.length > 0) {
-              const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
-              if (lastWidgetInMain.nextSibling) {
-                mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
-              } else {
-                mainContent.appendChild(statusWidget);
+                topicBody.appendChild(statusWidget);
               }
-              console.log("✅ [MOBILE] Status widget inserted after last widget in main content");
+              console.log("✅ [MOBILE] Status widget inserted after last widget in topic body");
             } else {
-              if (mainContent.firstChild) {
-                mainContent.insertBefore(statusWidget, mainContent.firstChild);
+              // No existing widgets, insert at the beginning
+              if (topicBody.firstChild) {
+                topicBody.insertBefore(statusWidget, topicBody.firstChild);
               } else {
-                mainContent.appendChild(statusWidget);
+                topicBody.appendChild(statusWidget);
               }
-              console.log("✅ [MOBILE] Status widget inserted in main content area (first widget)");
+              console.log("✅ [MOBILE] Status widget inserted at top of topic body (first widget)");
             }
           } else {
-            // Last resort: append to body at top
-            const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
-            if (bodyFirstChild) {
-              document.body.insertBefore(statusWidget, bodyFirstChild);
-        } else {
-          document.body.appendChild(statusWidget);
+            // Try to find the main content area
+            const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+            if (mainContent) {
+              const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
+              if (widgetsInMain.length > 0) {
+                const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
+                if (lastWidgetInMain.nextSibling) {
+                  mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
+                } else {
+                  mainContent.appendChild(statusWidget);
+                }
+                console.log("✅ [MOBILE] Status widget inserted after last widget in main content");
+              } else {
+                if (mainContent.firstChild) {
+                  mainContent.insertBefore(statusWidget, mainContent.firstChild);
+                } else {
+                  mainContent.appendChild(statusWidget);
+                }
+                console.log("✅ [MOBILE] Status widget inserted in main content area (first widget)");
+              }
+            } else {
+              // Last resort: append to body at top
+              const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
+              if (bodyFirstChild) {
+                document.body.insertBefore(statusWidget, bodyFirstChild);
+          } else {
+            document.body.appendChild(statusWidget);
+              }
+              console.log("✅ [MOBILE] Status widget inserted at top of body");
             }
-            console.log("✅ [MOBILE] Status widget inserted at top of body");
           }
+        } catch (error) {
+          console.error("❌ [MOBILE] Error inserting widget:", error);
         }
+      });
         
         // Ensure widget is visible on mobile - force visibility
         statusWidget.style.display = 'block';
@@ -4785,10 +4814,7 @@ export default apiInitializer((api) => {
             const computedStyle = window.getComputedStyle(statusWidget);
             if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden') {
               console.warn(`⚠️ [MOBILE] Widget still hidden after force - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}`);
-              // Try to scroll widget into view if it exists
-              if (statusWidget.scrollIntoView) {
-                statusWidget.scrollIntoView({ behavior: 'instant', block: 'nearest' });
-              }
+              // Don't scroll to widget - just log the warning. Visibility is already forced via CSS.
             }
           }
         }, 50);
@@ -4812,16 +4838,6 @@ export default apiInitializer((api) => {
           renderingUrls.add(originalUrl);
           console.log(`✅ [MOBILE] Widget rendered and marked: ${originalUrl}`);
         }
-      } catch (error) {
-        console.error("❌ [MOBILE] Error inserting status widget:", error);
-        // Fallback: try to append to a safe location
-        const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
-        if (topicBody) {
-          topicBody.insertBefore(statusWidget, topicBody.firstChild);
-        } else {
-          document.body.insertBefore(statusWidget, document.body.firstChild);
-        }
-      }
     } else {
       // Desktop: Position widget next to timeline scroll indicator
       // Find main-outlet-wrapper to constrain widget within main content area
@@ -5807,6 +5823,74 @@ export default apiInitializer((api) => {
     markWidgetAsVisibleInCache(errorWidget);
   }
 
+  // Helper function to preserve scroll position during DOM operations
+  // Prevents auto-scrolling when widgets are inserted into the page
+  function preserveScrollPosition(callback) {
+    // Save current scroll position BEFORE any DOM operations
+    // Use initial scroll position if we're still in the scroll lock period
+    const scrollX = scrollLocked ? initialScrollX : (window.pageXOffset || window.scrollX || document.documentElement.scrollLeft || 0);
+    const scrollY = scrollLocked ? initialScrollY : (window.pageYOffset || window.scrollY || document.documentElement.scrollTop || 0);
+    
+    // Mark that widgets are being inserted
+    widgetsInserting = true;
+    
+    // Execute the callback (widget insertion)
+    callback();
+    
+    // Immediately restore scroll position synchronously
+    window.scrollTo(scrollX, scrollY);
+    document.documentElement.scrollLeft = scrollX;
+    document.documentElement.scrollTop = scrollY;
+    document.body.scrollLeft = scrollX;
+    document.body.scrollTop = scrollY;
+    
+    // Keep preventing scroll for a bit after insertion
+    setTimeout(() => {
+      widgetsInserting = false;
+    }, 500);
+    
+    // Restore multiple times using different methods to ensure it sticks
+    // Use setTimeout(0) for immediate execution after current call stack
+    setTimeout(() => {
+      window.scrollTo(scrollX, scrollY);
+      document.documentElement.scrollLeft = scrollX;
+      document.documentElement.scrollTop = scrollY;
+      document.body.scrollLeft = scrollX;
+      document.body.scrollTop = scrollY;
+    }, 0);
+    
+    // Use requestAnimationFrame to ensure it happens after any browser auto-scroll
+    requestAnimationFrame(() => {
+      window.scrollTo(scrollX, scrollY);
+      document.documentElement.scrollLeft = scrollX;
+      document.documentElement.scrollTop = scrollY;
+      document.body.scrollLeft = scrollX;
+      document.body.scrollTop = scrollY;
+      // Also restore in next frame as backup
+      requestAnimationFrame(() => {
+        window.scrollTo(scrollX, scrollY);
+        document.documentElement.scrollLeft = scrollX;
+        document.documentElement.scrollTop = scrollY;
+        document.body.scrollLeft = scrollX;
+        document.body.scrollTop = scrollY;
+        // Final restore after a short delay
+        setTimeout(() => {
+          window.scrollTo(scrollX, scrollY);
+          document.documentElement.scrollLeft = scrollX;
+          document.documentElement.scrollTop = scrollY;
+          document.body.scrollLeft = scrollX;
+          document.body.scrollTop = scrollY;
+        }, 10);
+        // Extra restore after longer delay
+        setTimeout(() => {
+          window.scrollTo(scrollX, scrollY);
+          document.documentElement.scrollLeft = scrollX;
+          document.documentElement.scrollTop = scrollY;
+        }, 50);
+      });
+    });
+  }
+  
   // CRITICAL: Ensure all widgets are visible immediately after creation
   // This function ensures widgets appear on page load and stay visible on ALL screen sizes
   // This is called after widgets are created and periodically to prevent them from being hidden
@@ -6433,11 +6517,11 @@ export default apiInitializer((api) => {
       widgetSetupCompleted = true;
     }
     
-    // CRITICAL: Retry multiple times to catch lazy-loaded content for BOTH Snapshot and AIP proposals
+    // CRITICAL: Retry to catch lazy-loaded content for BOTH Snapshot and AIP proposals
     // This ensures proposals are detected on page load, not just when scrolling
     // Retry even if some proposals were found, in case there are more in lazy-loaded posts
-    // Reduced delays for faster widget appearance: 50ms, 150ms, 300ms, 600ms, 1.2s, 2.5s
-    const retryDelays = [50, 150, 300, 600, 1200, 2500];
+    // Match tally widget timing: single retry after 1000ms
+    const retryDelays = [1000];
     let retryCount = 0;
     const foundUrls = new Set([...allProposals.snapshot, ...allProposals.aip]);
     
@@ -7746,11 +7830,6 @@ export default apiInitializer((api) => {
     const totalProposals = uniqueSnapshotUrls.length + uniqueAipUrls.length;
     console.log(`🔵 [TOPIC] Rendering ${totalProposals} widget(s) - one per unique proposal URL`);
     
-    // Create a SINGLE global loading placeholder for all widgets
-    if (totalProposals > 0) {
-      createGlobalLoadingPlaceholder();
-    }
-    
     // Create combined ordered list of all proposals (maintain order: snapshot first, then aip)
     // This preserves the order proposals appear in the content
     const orderedProposals = [];
@@ -8001,14 +8080,9 @@ export default apiInitializer((api) => {
               ensureAIPWidgetsVisible();
             }, 100);
           });
-          
-          // Remove global loader once all Snapshot widgets are rendered
-          removeGlobalLoadingPlaceholder();
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing Snapshot proposals:", error);
-          // Remove loader even on error
-          removeGlobalLoadingPlaceholder();
         });
     }
     
@@ -8287,8 +8361,6 @@ export default apiInitializer((api) => {
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing AIP proposals:", error);
-          // Remove global loader even on error
-          removeGlobalLoadingPlaceholder();
         });
     }
     
@@ -8297,9 +8369,8 @@ export default apiInitializer((api) => {
     // Reduced delays for faster visibility: immediate, 100ms, 300ms
     ensureAIPWidgetsVisible(); // Immediate
     
-    // Remove global loading placeholder after a delay to ensure all widgets are loaded
+    // Ensure widgets are visible after a delay
     setTimeout(() => {
-      removeGlobalLoadingPlaceholder();
       ensureAIPWidgetsVisible();
       console.log("✅ [TOPIC] Ensured all widgets are visible after processing all proposals");
     }, 500); // Give widgets time to render
@@ -8356,13 +8427,10 @@ export default apiInitializer((api) => {
       }
     }
     
-    // Detect mobile for faster rendering
-    const isMobile = window.innerWidth <= 1400 || 
-                     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
     // Use shorter debounce for faster initial load on all devices
-    // Reduced from 100/500ms to 50/200ms for faster widget appearance
-    const debounceDelay = isMobile ? 50 : 200;
+    // Reduced from 100/500ms to 50ms for both mobile and desktop for faster widget appearance
+    // This ensures widgets appear immediately on page load without requiring scroll
+    const debounceDelay = 50;
     
     widgetSetupTimeout = setTimeout(() => {
       if (!isWidgetSetupRunning) {
@@ -8677,32 +8745,25 @@ export default apiInitializer((api) => {
     
     // CRITICAL: Run immediate scan first (before debounce) to find proposals on page load
     // This ensures widgets appear immediately, not just when scrolling
-    // Run multiple times with delays to catch lazy-loaded content
+    // Process immediately like tally widget - minimal delays
     console.log("🔍 [TOPIC] Running immediate scan for proposals on page load...");
     
-    // Run immediately
+    // Run immediately (like tally widget)
     setupTopicWidget();
     
-    // Run again after short delays to catch lazy-loaded content
-    // These retries ensure proposals are detected on page load, not just when scrolling
-    // Reduced delays for faster detection: 0ms (immediate), 50ms, 150ms, 300ms, 600ms, 1200ms
-    const initialRetryDelays = [0, 50, 150, 300, 600, 1200];
-    initialRetryDelays.forEach((delay) => {
-      setTimeout(() => {
-        console.log(`🔍 [TOPIC] Initial retry scan after ${delay}ms...`);
-        setupTopicWidget();
-        ensureAllWidgetsVisible();
-      }, delay);
-    });
+    // Only retry once after 100ms (like tally widget) to catch lazy-loaded content
+    setTimeout(() => {
+      setupTopicWidget();
+      ensureAllWidgetsVisible();
+    }, 100);
     
     // Then also set up debounced version for subsequent changes
     debouncedSetupTopicWidget();
     
     // CRITICAL: Also scan when user scrolls - this catches lazy-loaded posts
-    // Use a debounced scroll handler to avoid too many scans
+    // Use a throttled scroll handler to avoid too many scans
     // IMPORTANT: This ONLY adds new proposals found on scroll, it NEVER hides existing widgets
     // Widgets are detected on page load and remain visible regardless of scroll position
-    let scrollScanTimeout = null;
     let lastVisibilityCheck = 0;
     const VISIBILITY_CHECK_THROTTLE = 100; // Reduced to 100ms for more aggressive checking during scroll
     const handleScroll = () => {
@@ -8797,59 +8858,26 @@ export default apiInitializer((api) => {
         }
       }
       
-      // CRITICAL: Skip expensive scanning if widget setup is already completed and widgets exist
-      // This prevents widgets from appearing/disappearing on scroll
-      if (widgetSetupCompleted) {
-        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
-        if (existingWidgets.length > 0) {
-          // Widgets already exist and setup is completed - skip scanning on scroll
-          return; // Early return to prevent unnecessary re-scans
-        }
-      }
+      // DISABLED: No scroll-based widget initialization
+      // Widgets are only initialized on page load, not on scroll
+      // This prevents loaders from appearing when scrolling and prevents auto-scrolling to widgets
+      return; // Early return - skip all scroll-based widget scanning
+    };
+    
+    // Enhanced scroll handler - wraps handleScroll with additional visibility checks
+    const enhancedHandleScroll = () => {
+      // Call original scroll handler
+      handleScroll();
       
-      // Debounce the expensive scanning operation (but visibility is enforced immediately above)
-      if (scrollScanTimeout) {
-        clearTimeout(scrollScanTimeout);
-      }
-      scrollScanTimeout = setTimeout(() => {
-        // CRITICAL: Double-check that widgets don't exist before scanning
-        // This prevents race conditions where widgets were added between scroll events
-        if (widgetSetupCompleted) {
-          const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
-          if (existingWidgets.length > 0) {
-            return; // Skip - widgets already exist
-          }
-        }
-        
-        // Check if we've found all proposals yet - if not, scan for new ones
-        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
-        const existingUrls = new Set();
-        existingWidgets.forEach(widget => {
-          const url = widget.getAttribute('data-tally-url');
-          if (url) {
-            existingUrls.add(url);
-          }
+      // Force immediate visibility check on scroll for extra safety
+      requestAnimationFrame(() => {
+        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+        allWidgets.forEach(widget => {
+          widget.style.setProperty('display', 'block', 'important');
+          widget.style.setProperty('visibility', 'visible', 'important');
+          widget.style.setProperty('opacity', '1', 'important');
         });
-        
-        // Re-scan to find any new proposals that might have been lazy-loaded
-        const currentProposals = findAllProposalsInTopic();
-        const allCurrentUrls = new Set([...currentProposals.snapshot, ...currentProposals.aip]);
-        
-        // Only re-scan if we found new proposals that aren't already rendered
-        let hasNewProposals = false;
-        for (const url of allCurrentUrls) {
-          if (!existingUrls.has(url)) {
-            hasNewProposals = true;
-            break;
-          }
-        }
-        
-        if (hasNewProposals) {
-          console.log("🔍 [SCROLL] Found new proposals while scrolling - adding widgets (existing widgets remain visible)");
-          debouncedSetupTopicWidget();
-        }
-        // If no new proposals, do nothing - widgets stay visible as they are
-      }, 1000); // Debounce scroll events (longer delay to reduce unnecessary scans)
+      });
     };
     
     // Only add scroll listener for detecting new lazy-loaded proposals
@@ -9189,24 +9217,6 @@ export default apiInitializer((api) => {
     // Start continuous visibility check immediately
     requestAnimationFrame(continuousVisibilityCheck);
     
-    // Enhanced scroll handler - continuous visibility check is already running
-    const originalHandleScroll = handleScroll;
-    const enhancedHandleScroll = () => {
-      // Call original scroll handler
-      originalHandleScroll();
-      
-      // Continuous visibility check is already running, so we don't need to start it here
-      // But we can force an immediate check on scroll for extra safety
-      requestAnimationFrame(() => {
-        const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-        allWidgets.forEach(widget => {
-          widget.style.setProperty('display', 'block', 'important');
-          widget.style.setProperty('visibility', 'visible', 'important');
-          widget.style.setProperty('opacity', '1', 'important');
-        });
-      });
-    };
-    
     const topicBody = document.querySelector('.topic-body, .post-stream, .topic-post');
     if (topicBody) {
       widgetContainerObserver.observe(topicBody, {
@@ -9222,6 +9232,11 @@ export default apiInitializer((api) => {
         subtree: true
       });
     }
+    
+    // CRITICAL: Call immediately on page load for both mobile and desktop
+    // This ensures widgets appear immediately without requiring scroll
+    debouncedSetupTopicWidget();
+    ensureAllWidgetsVisible();
     
     // On mobile, use shorter delays for faster widget display
     // On desktop, use longer delays to catch late-loading content
@@ -9246,6 +9261,11 @@ export default apiInitializer((api) => {
         ensureAllWidgetsVisible();
       }, 500);
     } else {
+      // Desktop: also call immediately (already called above, but keep for consistency)
+      setTimeout(() => {
+        debouncedSetupTopicWidget();
+        ensureAllWidgetsVisible();
+      }, 0); // Immediate check for desktop too
       setTimeout(() => {
         debouncedSetupTopicWidget();
         ensureAllWidgetsVisible();
@@ -10482,12 +10502,13 @@ export default apiInitializer((api) => {
     }, true);
   };
 
-  // Initialize global composer detection
-  setTimeout(setupGlobalComposerDetection, 500);
+  // Initialize global composer detection immediately
+  setupGlobalComposerDetection();
 
-  // Initialize topic widget (shows first proposal found, no scroll tracking)
+  // Initialize topic widget immediately (shows first proposal found, no scroll tracking)
   // Only run on topic pages to prevent widgets from appearing on wrong pages
-  setTimeout(() => {
+  // Use immediate initialization like tally widget - no setTimeout delays
+  function startWidgetInitialization() {
     const isTopicPage = window.location.pathname.match(/^\/t\//);
     if (isTopicPage) {
       setupTopicWatcher();
@@ -10663,7 +10684,14 @@ export default apiInitializer((api) => {
     setInterval(observeAIPWidgets, 1000);
     
     console.log("✅ [AIP] Widget visibility observer, periodic check, and MutationObserver set up");
-  }, 1000);
+  }
+  
+  // Initialize immediately when DOM is ready (like tally widget)
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startWidgetInitialization);
+  } else {
+    startWidgetInitialization();
+  }
 
   // Re-initialize topic widget on page changes
   api.onPageChange(() => {
@@ -10684,10 +10712,9 @@ export default apiInitializer((api) => {
       return;
     }
     
-    setTimeout(() => {
-      setupTopicWatcher();
-      setupGlobalComposerDetection();
-    }, 500);
+    // Initialize immediately - no setTimeout delay
+    setupTopicWatcher();
+    setupGlobalComposerDetection();
   });
 });
 
