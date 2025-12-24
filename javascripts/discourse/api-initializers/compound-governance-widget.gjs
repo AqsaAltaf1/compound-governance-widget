@@ -3206,8 +3206,8 @@ export default apiInitializer((api) => {
       const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
       const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
       
-      // Progress bar HTML
-      const progressBarHtml = totalVotes > 0 ? `
+      // Progress bar HTML - always show, even if 0 votes
+      const progressBarHtml = `
         <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
           <div class="progress-bar">
             ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
@@ -3215,7 +3215,7 @@ export default apiInitializer((api) => {
             ${abstainPercent > 0 ? `<div class="progress-segment progress-abstain" style="width: ${abstainPercent}%"></div>` : ''}
           </div>
         </div>
-      ` : '';
+      `;
       
       // Determine if ended - includes passed and executed statuses, or daysLeft < 0
       // Use case-insensitive comparison for status
@@ -3481,15 +3481,15 @@ export default apiInitializer((api) => {
       const isCreated = stageData.status === 'created';
       
       // Progress bar HTML - For AIP: show For/Against votes, no abstain
-      // Only show progress bar if votes are available AND proposal is not cancelled/failed
-      const progressBarHtml = shouldShowVotes ? `
+      // Always show progress bar, even if 0 votes
+      const progressBarHtml = `
         <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
           <div class="progress-bar">
             ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
             ${againstPercent > 0 ? `<div class="progress-segment progress-against" style="width: ${againstPercent}%"></div>` : ''}
           </div>
         </div>
-      ` : '';
+      `;
       
       // Quorum display for AIP (instead of abstain)
       // Only show quorum if votes are available AND proposal is not cancelled/failed
@@ -7861,8 +7861,8 @@ export default apiInitializer((api) => {
       // First sort by state priority (lower = better)
       if (priorityA !== priorityB) {
         return priorityA - priorityB;
-      }
-      
+    }
+    
       // If same priority, sort by timestamp (newer = better)
       const timeA = a.timestamp || 0;
       const timeB = b.timestamp || 0;
