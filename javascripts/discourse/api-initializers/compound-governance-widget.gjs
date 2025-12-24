@@ -648,8 +648,10 @@ export default apiInitializer((api) => {
     // Handle testnet spaces differently - allow testnet spaces for testing
     if (isTestnet) {
       console.log("🔵 [VALIDATE] Testnet proposal detected - allowing testnet space:", space);
-      // For testnet, we can be more lenient - allow any testnet space
-      // Still check proposal type (AIP, Temp Check, ARFC) below
+      // For testnet, we can be more lenient - allow any testnet space and skip type validation
+      // Testnet proposals are for testing and may not follow AIP/Temp Check/ARFC naming conventions
+      console.log("✅ [VALIDATE] Testnet proposal is valid (skipping type validation)");
+      return true;
     } else {
       // Verify space is from Aave (aave.eth or aavedao.eth) for production
       const isAaveSpace = cleanSpace === 'aave.eth' || 
@@ -665,7 +667,7 @@ export default apiInitializer((api) => {
       }
     }
     
-    // Check proposal title and body for AIP, Temp Check, or ARFC indicators
+    // Check proposal title and body for AIP, Temp Check, or ARFC indicators (production only)
     const title = proposal.title || '';
     const body = proposal.body || '';
     const titleLower = title.toLowerCase();
