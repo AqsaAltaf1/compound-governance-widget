@@ -3206,17 +3206,6 @@ export default apiInitializer((api) => {
       const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
       const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
       
-      // Progress bar HTML - always show, even if 0 votes
-      const progressBarHtml = `
-        <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
-          <div class="progress-bar">
-            ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
-            ${againstPercent > 0 ? `<div class="progress-segment progress-against" style="width: ${againstPercent}%"></div>` : ''}
-            ${abstainPercent > 0 ? `<div class="progress-segment progress-abstain" style="width: ${abstainPercent}%"></div>` : ''}
-          </div>
-        </div>
-      `;
-      
       // Determine if ended - includes passed and executed statuses, or daysLeft < 0
       // Use case-insensitive comparison for status
       const statusLower = (stageData.status || '').toLowerCase();
@@ -3227,6 +3216,21 @@ export default apiInitializer((api) => {
                       statusLower === 'failed' ||
                       statusLower === 'cancelled' ||
                       statusLower === 'expired';
+      
+      // For cancelled and failed proposals, voting never happened - don't show vote data or progress bar
+      const isCancelledOrFailed = statusLower === 'cancelled' || statusLower === 'failed';
+      
+      // Progress bar HTML - always show, even if 0 votes
+      // EXCEPT: cancelled/failed - don't show progress bar
+      const progressBarHtml = !isCancelledOrFailed ? `
+        <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
+          <div class="progress-bar">
+            ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
+            ${againstPercent > 0 ? `<div class="progress-segment progress-against" style="width: ${againstPercent}%"></div>` : ''}
+            ${abstainPercent > 0 ? `<div class="progress-segment progress-abstain" style="width: ${abstainPercent}%"></div>` : ''}
+          </div>
+        </div>
+      ` : '';
       
       // Format "Ended X days ago" text - use months if >30 days, years if >365 days
       let endedText = '';
@@ -3262,17 +3266,27 @@ export default apiInitializer((api) => {
       
       // For ended proposals, wrap in collapsible container
       const stageId = `stage-${stageName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
-      const shouldShowVotes = totalVotes > 0;
+      // Always show vote data for all statuses (created, active, ended, passed, etc.), even if 0 votes
+      // EXCEPT: cancelled/failed - don't show vote data
+      // Show "0" for For/Against/Abstain when there are no votes
+      const displayFor = totalVotes > 0 ? formatVoteAmount(forVotes) : '0';
+      const displayAgainst = totalVotes > 0 ? formatVoteAmount(againstVotes) : '0';
+      const displayAbstain = totalVotes > 0 ? formatVoteAmount(abstainVotes) : '0';
+      const shouldShowVoteCounts = !isPending && !isCreated && !isCancelledOrFailed; // Show vote counts for all statuses except pending/created/cancelled/failed
       const collapsedContent = isEnded ? `
         <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
           ${progressBarHtml}
-          ${shouldShowVotes ? `
+          ${shouldShowVoteCounts ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-              <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-              <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-              <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+              <strong style="color: #10b981;">For: ${displayFor}</strong> | 
+              <strong style="color: #ef4444;">Against: ${displayAgainst}</strong> | 
+              <strong style="color: #6b7280;">Abstain: ${displayAbstain}</strong>
             </div>
           ` : isPending ? `
+            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+              Voting Starting Soon
+            </div>
+          ` : isCreated ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
               Voting Starting Soon
             </div>
@@ -3283,13 +3297,17 @@ export default apiInitializer((api) => {
         </div>
       ` : `
         ${progressBarHtml}
-        ${shouldShowVotes ? `
+        ${shouldShowVoteCounts ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong> | 
-            <strong style="color: #6b7280;">Abstain: ${formatVoteAmount(abstainVotes)}</strong>
+            <strong style="color: #10b981;">For: ${displayFor}</strong> | 
+            <strong style="color: #ef4444;">Against: ${displayAgainst}</strong> | 
+            <strong style="color: #6b7280;">Abstain: ${displayAbstain}</strong>
           </div>
         ` : isPending ? `
+          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            Voting Starting Soon
+          </div>
+        ` : isCreated ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
             Voting Starting Soon
           </div>
@@ -3471,9 +3489,14 @@ export default apiInitializer((api) => {
       // Use exact status from API - show as-is (capitalize first letter only)
       const statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
       
-      // For cancelled and failed proposals, voting never happened - don't show vote data
+      // For cancelled and failed proposals, voting never happened - don't show vote data or progress bar
       const isCancelledOrFailed = stageData.status === 'cancelled' || stageData.status === 'failed';
-      const shouldShowVotes = !isCancelledOrFailed && votesAvailable && totalVotes !== null && totalVotes > 0;
+      // Always show vote data for all statuses (created, active, ended, passed, etc.), even if 0 votes
+      // EXCEPT: cancelled/failed - don't show vote data or progress bar
+      // Show "0" for For/Against when there are no votes
+      const displayForAIP = totalVotes > 0 ? formatVoteAmount(forVotes) : '0';
+      const displayAgainstAIP = totalVotes > 0 ? formatVoteAmount(againstVotes) : '0';
+      const shouldShowVoteCounts = !isPending && !isCreated && !isCancelledOrFailed; // Show vote counts for all statuses except pending/created/cancelled/failed
       
       // Define status flags for button text logic
       const isActive = stageData.status === 'active' || stageData.status === 'open';
@@ -3482,18 +3505,19 @@ export default apiInitializer((api) => {
       
       // Progress bar HTML - For AIP: show For/Against votes, no abstain
       // Always show progress bar, even if 0 votes
-      const progressBarHtml = `
+      // EXCEPT: cancelled/failed - don't show progress bar
+      const progressBarHtml = !isCancelledOrFailed ? `
         <div class="progress-bar-container" style="margin-top: 8px; margin-bottom: 8px;">
           <div class="progress-bar">
             ${forPercent > 0 ? `<div class="progress-segment progress-for" style="width: ${forPercent}%"></div>` : ''}
             ${againstPercent > 0 ? `<div class="progress-segment progress-against" style="width: ${againstPercent}%"></div>` : ''}
           </div>
         </div>
-      `;
+      ` : '';
       
       // Quorum display for AIP (instead of abstain)
-      // Only show quorum if votes are available AND proposal is not cancelled/failed
-      const quorumHtml = (quorum > 0 && shouldShowVotes) ? `
+      // Show quorum if available and votes exist (or for ended/passed proposals)
+      const quorumHtml = (quorum > 0 && shouldShowVoteCounts) ? `
         <div style="font-size: 0.85em; color: #6b7280; margin-top: 8px; margin-bottom: 8px; padding: 8px; background: ${quorumReached ? '#f0fdf4' : '#fef2f2'}; border-radius: 4px; border-left: 3px solid ${quorumReached ? '#10b981' : '#ef4444'};">
           <strong style="color: #111827;">Quorum:</strong> ${formatVoteAmount(totalVotes)} / ${formatVoteAmount(quorum)} AAVE 
           <span style="color: ${quorumReached ? '#10b981' : '#ef4444'}; font-weight: 600;">
@@ -3507,14 +3531,10 @@ export default apiInitializer((api) => {
       const collapsedContent = isEnded ? `
         <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
           ${progressBarHtml}
-          ${shouldShowVotes ? `
+          ${shouldShowVoteCounts ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-              <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-              <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong>
-            </div>
-          ` : isCancelledOrFailed ? `
-            <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
-              ${stageData.status === 'cancelled' ? 'Voting was cancelled before it started' : 'Voting failed - no vote data available'}
+              <strong style="color: #10b981;">For: ${displayForAIP}</strong> | 
+              <strong style="color: #ef4444;">Against: ${displayAgainstAIP}</strong>
             </div>
           ` : stageData.status === 'created' ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
@@ -3536,14 +3556,10 @@ export default apiInitializer((api) => {
         </div>
       ` : `
         ${progressBarHtml}
-        ${shouldShowVotes ? `
+        ${shouldShowVoteCounts ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            <strong style="color: #10b981;">For: ${formatVoteAmount(forVotes)}</strong> | 
-            <strong style="color: #ef4444;">Against: ${formatVoteAmount(againstVotes)}</strong>
-          </div>
-        ` : isCancelledOrFailed ? `
-          <div style="font-size: 0.85em; color: #9ca3af; margin-top: 4px; margin-bottom: 8px; line-height: 1.5; font-style: italic;">
-            ${stageData.status === 'cancelled' ? 'Voting was cancelled before it started' : 'Voting failed - no vote data available'}
+            <strong style="color: #10b981;">For: ${displayForAIP}</strong> | 
+            <strong style="color: #ef4444;">Against: ${displayAgainstAIP}</strong>
           </div>
         ` : stageData.status === 'created' ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
@@ -4634,16 +4650,12 @@ export default apiInitializer((api) => {
           const displayAgainst = totalVotes > 0 ? formatVoteAmount(votesAgainstNum) : '0';
           const displayAbstain = totalVotes > 0 ? formatVoteAmount(votesAbstainNum) : '0';
           
-          // For progress bar, only show segments if there are votes
-          const progressBarHtml = totalVotes > 0 ? `
+          // Progress bar - always show, even if 0 votes
+          const progressBarHtml = `
             <div class="progress-bar">
-              <div class="progress-segment progress-for" style="width: ${percentFor}%"></div>
-              <div class="progress-segment progress-against" style="width: ${percentAgainst}%"></div>
-              <div class="progress-segment progress-abstain" style="width: ${percentAbstain}%"></div>
-            </div>
-          ` : `
-            <div class="progress-bar">
-              <!-- Empty progress bar for proposals with no votes -->
+              ${percentFor > 0 ? `<div class="progress-segment progress-for" style="width: ${percentFor}%"></div>` : ''}
+              ${percentAgainst > 0 ? `<div class="progress-segment progress-against" style="width: ${percentAgainst}%"></div>` : ''}
+              ${percentAbstain > 0 ? `<div class="progress-segment progress-abstain" style="width: ${percentAbstain}%"></div>` : ''}
           </div>
           `;
           
