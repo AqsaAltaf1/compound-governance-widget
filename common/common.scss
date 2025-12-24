@@ -457,7 +457,8 @@
 
         &.defeated,
         &.quorum-not-reached,
-        &.failed {
+        &.failed,
+        &.rejected {
           background: #fee2e2;
           color: #dc2626; // Red text like Tally website
           border: 1px solid #fca5a5;

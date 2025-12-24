@@ -3239,8 +3239,13 @@ export default apiInitializer((api) => {
           : 'Unknown';
       }
       
-      // Keep statusClass for styling (still use isPassed logic for CSS class)
-      const statusClass = isPassed ? 'executed' : (isActive ? 'active' : (isPending ? 'pending' : (isCreated ? 'created' : 'inactive')));
+      // Determine statusClass for styling - handle rejected/failed/defeated to show red color
+      const isRejectedOrDefeated = statusLower === 'rejected' || statusLower === 'defeated' || statusLower === 'failed' || statusBadgeText === 'Rejected';
+      const statusClass = isPassed ? 'executed' : 
+                         (isRejectedOrDefeated ? 'rejected' : 
+                         (isActive ? 'active' : 
+                         (isPending ? 'pending' : 
+                         (isCreated ? 'created' : 'inactive'))));
       
       // For "pending" status, show time until voting starts instead of time until voting ends
       let timeDisplay;
@@ -3398,6 +3403,7 @@ export default apiInitializer((api) => {
                          statusLower === 'executed' ? 'executed' :
                          statusLower === 'passed' ? 'passed' :
                          statusLower === 'queued' ? 'queued' :
+                         (statusLower === 'rejected' || statusLower === 'defeated') ? 'rejected' :
                          statusLower === 'failed' ? 'failed' :
                          statusLower === 'cancelled' ? 'cancelled' :
                          statusLower === 'expired' ? 'expired' : 'inactive';
@@ -4672,7 +4678,7 @@ export default apiInitializer((api) => {
         ${stageLabel ? `<div class="stage-label" style="margin-bottom: 8px; font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">${stageLabel}</div>` : ''}
         ${isEndingSoon ? `<div class="urgency-alert" style="padding: 8px; margin-bottom: 12px; border-radius: 4px; background: #fee2e2; font-size: 0.85em; font-weight: 600; text-align: center; color: #dc2626;">⚠️ Ending Soon!</div>` : ''}
         <div class="status-badges-row">
-          <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isCreated ? 'created' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : 'inactive'}">
+          <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isCreated ? 'created' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : (displayStatus === 'Rejected' || status === 'rejected') ? 'rejected' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : status === 'failed' ? 'failed' : 'inactive'}">
             ${displayStatus}
           </div>
           ${(() => {
