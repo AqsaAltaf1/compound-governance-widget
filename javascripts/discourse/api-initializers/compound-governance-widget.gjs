@@ -3182,14 +3182,23 @@ export default apiInitializer((api) => {
       
       console.log(`🔵 [RENDER] ${stageName} - For: ${forVotes}, Against: ${againstVotes}, Total: ${totalVotes}, Support: ${supportPercent}%`);
       
-      const isActive = stageData.status === 'active' || stageData.status === 'open';
-      const isPending = stageData.status === 'pending';
-      const isCreated = stageData.status === 'created';
-      const isPassed = stageData.status === 'passed' || 
-                       stageData.status === 'closed' || 
-                       (stageData.status === 'executed' && supportPercent > 50) ||
-                       (stageData.status !== 'active' && stageData.status !== 'open' && stageData.status !== 'pending' && supportPercent > 50);
-      const status = isPassed ? 'Passed' : (isActive ? 'Active' : (isPending ? 'Pending' : (isCreated ? 'Created' : 'Closed')));
+      // Use case-insensitive comparison for all status checks
+      const statusLower = (stageData.status || '').toLowerCase();
+      
+      const isActive = statusLower === 'active' || statusLower === 'open';
+      const isPending = statusLower === 'pending';
+      const isCreated = statusLower === 'created';
+      const isPassed = statusLower === 'passed' || 
+                       statusLower === 'closed' || 
+                       (statusLower === 'executed' && supportPercent > 50) ||
+                       (statusLower !== 'active' && statusLower !== 'open' && statusLower !== 'pending' && supportPercent > 50);
+      
+      // Show exact status from API (capitalize first letter only, like AIP does)
+      const statusBadgeText = stageData.status 
+        ? (stageData.status.charAt(0).toUpperCase() + stageData.status.slice(1).toLowerCase())
+        : 'Unknown';
+      
+      // Keep statusClass for styling (still use isPassed logic for CSS class)
       const statusClass = isPassed ? 'executed' : (isActive ? 'active' : (isPending ? 'pending' : (isCreated ? 'created' : 'inactive')));
       
       // For "pending" status, show time until voting starts instead of time until voting ends
@@ -3206,12 +3215,12 @@ export default apiInitializer((api) => {
       const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
       const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
       
-      // Determine if ended - includes passed and executed statuses, or daysLeft < 0
+      // Determine if ended - includes passed, closed, executed, and other ended statuses, or daysLeft < 0
       // Use case-insensitive comparison for status
-      const statusLower = (stageData.status || '').toLowerCase();
       const isEnded = (stageData.daysLeft !== null && stageData.daysLeft < 0) ||
                       statusLower === 'executed' || 
                       statusLower === 'passed' ||
+                      statusLower === 'closed' ||
                       statusLower === 'queued' ||
                       statusLower === 'failed' ||
                       statusLower === 'cancelled' ||
@@ -3323,7 +3332,7 @@ export default apiInitializer((api) => {
             <span>${stageName} (Snapshot)</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <div class="status-badge ${statusClass}">
-                ${status}
+                ${statusBadgeText}
               </div>
             </div>
           </div>
@@ -3357,16 +3366,19 @@ export default apiInitializer((api) => {
       
       // Use exact status from API (no mapping)
       const status = stageData.status || 'unknown';
-      // Map status to CSS class for styling
+      // Use case-insensitive comparison for status checks
+      const statusLower = (stageData.status || '').toLowerCase();
+      
+      // Map status to CSS class for styling (use case-insensitive comparison)
       // "passed" means proposal passed voting but hasn't been executed yet (different from "executed")
-      const statusClass = stageData.status === 'active' ? 'active' : 
-                         stageData.status === 'created' ? 'created' :
-                         stageData.status === 'executed' ? 'executed' :
-                         stageData.status === 'passed' ? 'passed' :
-                         stageData.status === 'queued' ? 'queued' :
-                         stageData.status === 'failed' ? 'failed' :
-                         stageData.status === 'cancelled' ? 'cancelled' :
-                         stageData.status === 'expired' ? 'expired' : 'inactive';
+      const statusClass = statusLower === 'active' ? 'active' : 
+                         statusLower === 'created' ? 'created' :
+                         statusLower === 'executed' ? 'executed' :
+                         statusLower === 'passed' ? 'passed' :
+                         statusLower === 'queued' ? 'queued' :
+                         statusLower === 'failed' ? 'failed' :
+                         statusLower === 'cancelled' ? 'cancelled' :
+                         statusLower === 'expired' ? 'expired' : 'inactive';
       
       // Calculate percentages from vote counts - use actual vote counts
       // The Graph API returns forVotes/againstVotes directly, not in voteStats
@@ -3490,7 +3502,7 @@ export default apiInitializer((api) => {
       const statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
       
       // For cancelled and failed proposals, voting never happened - don't show vote data or progress bar
-      const isCancelledOrFailed = stageData.status === 'cancelled' || stageData.status === 'failed';
+      const isCancelledOrFailed = statusLower === 'cancelled' || statusLower === 'failed';
       // Always show vote data for all statuses (created, active, ended, passed, etc.), even if 0 votes
       // EXCEPT: cancelled/failed - don't show vote data or progress bar
       // Show "0" for For/Against when there are no votes
@@ -3498,10 +3510,10 @@ export default apiInitializer((api) => {
       const displayAgainstAIP = totalVotes > 0 ? formatVoteAmount(againstVotes) : '0';
       const shouldShowVoteCounts = !isPending && !isCreated && !isCancelledOrFailed; // Show vote counts for all statuses except pending/created/cancelled/failed
       
-      // Define status flags for button text logic
-      const isActive = stageData.status === 'active' || stageData.status === 'open';
-      const isPending = stageData.status === 'pending';
-      const isCreated = stageData.status === 'created';
+      // Define status flags for button text logic (use case-insensitive comparison)
+      const isActive = statusLower === 'active' || statusLower === 'open';
+      const isPending = statusLower === 'pending';
+      const isCreated = statusLower === 'created';
       
       // Progress bar HTML - For AIP: show For/Against votes, no abstain
       // Always show progress bar, even if 0 votes
@@ -7738,14 +7750,17 @@ export default apiInitializer((api) => {
   
   /**
    * Select the best proposal from an array based on status and recency
-   * Priority: active/created/pending > non-executed > non-failed > latest
+   * Groups proposals by discussion URL, then selects the best one from each group
+   * Priority: active → pending → closed/ended → failed
+   * This ensures only ONE proposal is shown per discussion URL/type
    * This handles edge cases like:
-   * - Failed + resubmitted proposals
-   * - Executed (old) + Created (new) proposals
+   * - Multiple proposals on same forum topic (active vs ended) - shows active
+   * - Failed + resubmitted proposals - shows active/resubmitted
+   * - Executed (old) + Created (new) proposals - shows newer
    */
   /**
    * Get state priority for sorting (lower number = higher priority)
-   * Priority order: active → pending → closed → failed
+   * Priority order: active → pending → closed/ended → failed
    */
   function getStatePriority(status, type = 'snapshot') {
     const statusLower = (status || '').toLowerCase();
@@ -7771,14 +7786,14 @@ export default apiInitializer((api) => {
         return 6;
       }
     } else {
-      // Snapshot states: active > pending > closed/passed > failed
+      // Snapshot states: active > pending > closed/passed/ended > failed
       if (['active', 'open'].includes(statusLower)) {
         return 1;
       }
       if (['pending'].includes(statusLower)) {
         return 2;
       }
-      if (['closed', 'passed'].includes(statusLower)) {
+      if (['closed', 'passed', 'ended'].includes(statusLower)) {
         return 3;
       }
       if (['failed', 'cancelled', 'expired'].includes(statusLower)) {
@@ -7856,7 +7871,8 @@ export default apiInitializer((api) => {
   }
 
   /**
-   * Select best proposal by state priority (active → pending → closed → failed)
+   * Select best proposal by state priority (active → pending → closed/ended → failed)
+   * This ensures only ONE proposal is shown per type, prioritizing active proposals
    */
   function selectBestProposalByState(proposals, type = 'snapshot') {
     if (!proposals || proposals.length === 0) {return null;}
