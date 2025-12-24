@@ -519,6 +519,8 @@ export default apiInitializer((api) => {
   }
 
   // Extract proposal info from URL (wrapper function that detects type)
+  // NOTE: This function extracts identifiers but does NOT determine the final type.
+  // The type should be determined by fetching from the API (see fetchProposalTypeFromAPI)
   function extractProposalInfo(url) {
     if (!url) {return null;}
     
@@ -526,6 +528,7 @@ export default apiInitializer((api) => {
     const snapshotInfo = extractSnapshotProposalInfo(url);
     if (snapshotInfo) {
       // Return format compatible with existing code
+      // Type will be determined by API fetch, not URL pattern
       return {
         ...snapshotInfo,
         urlProposalNumber: snapshotInfo.proposalId, // For compatibility
@@ -538,6 +541,7 @@ export default apiInitializer((api) => {
     if (aipInfo) {
       // Return format compatible with existing code
       // proposalId is now the primary key extracted from URL
+      // Type will be determined by API fetch, not URL pattern
       return {
         ...aipInfo,
         proposalId: aipInfo.proposalId, // Primary key
@@ -631,84 +635,45 @@ export default apiInitializer((api) => {
   }
 
   // Validate that a Snapshot proposal is a valid Aave governance proposal
-  // Must be of type AIP, Temp Check, or ARFC
+  // Validate proposal is from Aave space - uses space from API response (authoritative source)
   function isValidAaveGovernanceProposal(proposal, space, isTestnet = false) {
     if (!proposal) {
       return false;
     }
     
-    // Clean space for logging (used later)
-    let cleanSpace = space;
-    if (space.startsWith('s:')) {
-      cleanSpace = space.substring(2);
-    } else if (space.startsWith('s-tn:')) {
-      cleanSpace = space.substring(5);
-    }
-    
     // Handle testnet spaces differently - allow testnet spaces for testing
     if (isTestnet) {
-      console.log("🔵 [VALIDATE] Testnet proposal detected - allowing testnet space:", space);
-      // For testnet, we can be more lenient - allow any testnet space and skip type validation
-      // Testnet proposals are for testing and may not follow AIP/Temp Check/ARFC naming conventions
-      console.log("✅ [VALIDATE] Testnet proposal is valid (skipping type validation)");
+      console.log("🔵 [VALIDATE] Testnet proposal detected - allowing testnet space");
+      console.log("✅ [VALIDATE] Testnet proposal is valid (skipping space validation)");
       return true;
-    } else {
-      // Verify space is from Aave (aave.eth or aavedao.eth) for production
-      const isAaveSpace = cleanSpace === 'aave.eth' || 
-                         cleanSpace === 'aavedao.eth' ||
-                         cleanSpace === 's:aave.eth' ||
-                         cleanSpace === 's:aavedao.eth' ||
-                         space === 'aave.eth' ||
-                         space === 'aavedao.eth';
-      
-      if (!isAaveSpace) {
-        console.log("❌ [VALIDATE] Proposal space is not Aave:", cleanSpace);
-        return false;
-      }
     }
     
-    // Check proposal title and body for AIP, Temp Check, or ARFC indicators (production only)
-    const title = proposal.title || '';
-    const body = proposal.body || '';
-    const titleLower = title.toLowerCase();
-    const bodyLower = body.toLowerCase();
-    const combinedText = `${titleLower} ${bodyLower}`;
+    // Use space from API response (authoritative source) - fallback to URL-extracted space
+    const apiSpaceId = proposal.space?.id || proposal.space?.name;
+    const spaceToCheck = apiSpaceId || space;
     
-    // Check for Temp Check indicators
-    const hasTempCheck = titleLower.includes('temp check') || 
-                        titleLower.includes('tempcheck') ||
-                        bodyLower.includes('temp check') || 
-                        bodyLower.includes('tempcheck') ||
-                        titleLower.includes('[temp check]') ||
-                        titleLower.startsWith('temp check');
+    // Clean space for comparison (handle prefixes like 's:' or 's-tn:')
+    let cleanSpace = spaceToCheck;
+    if (spaceToCheck.startsWith('s:')) {
+      cleanSpace = spaceToCheck.substring(2);
+    } else if (spaceToCheck.startsWith('s-tn:')) {
+      cleanSpace = spaceToCheck.substring(5);
+    }
     
-    // Check for ARFC indicators
-    const hasARFC = titleLower.includes('arfc') || 
-                   bodyLower.includes('arfc') ||
-                   titleLower.includes('[arfc]');
+    // Verify space is from Aave (aave.eth or aavedao.eth)
+    const isAaveSpace = cleanSpace === 'aave.eth' || 
+                       cleanSpace === 'aavedao.eth' ||
+                       spaceToCheck === 'aave.eth' ||
+                       spaceToCheck === 'aavedao.eth' ||
+                       spaceToCheck === 's:aave.eth' ||
+                       spaceToCheck === 's:aavedao.eth';
     
-    // Check for AIP indicators (Aave Improvement Proposal)
-    const hasAIP = titleLower.includes('aip') ||
-                  bodyLower.includes('aip') ||
-                  titleLower.includes('aave improvement proposal') ||
-                  bodyLower.includes('aave improvement proposal') ||
-                  titleLower.includes('[aip]') ||
-                  /aip\s*[-:]?\s*\d+/i.test(combinedText);
-    
-    const isValid = hasTempCheck || hasARFC || hasAIP;
-    
-    if (!isValid) {
-      console.log("❌ [VALIDATE] Proposal does not match AIP, Temp Check, or ARFC types");
-      console.log("   Title:", title.substring(0, 100));
-      console.log("   Space:", cleanSpace);
+    if (!isAaveSpace) {
+      console.log("❌ [VALIDATE] Proposal space is not Aave:", cleanSpace, "(from API:", apiSpaceId, ")");
       return false;
     }
     
-    console.log("✅ [VALIDATE] Proposal is valid Aave governance proposal");
-    if (hasTempCheck) {console.log("   Type: Temp Check");}
-    if (hasARFC) {console.log("   Type: ARFC");}
-    if (hasAIP) {console.log("   Type: AIP");}
-    
+    console.log("✅ [VALIDATE] Proposal is valid Aave governance proposal (space:", cleanSpace, ")");
     return true;
   }
 
@@ -817,9 +782,9 @@ export default apiInitializer((api) => {
         if (proposal) {
           console.log("✅ [SNAPSHOT] Proposal fetched successfully with format 1");
           
-          // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
+          // Validate that this is a valid Aave governance proposal (check space from API)
           if (!isValidAaveGovernanceProposal(proposal, space, isTestnet)) {
-            console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
+            console.warn("❌ [SNAPSHOT] Proposal is not from an Aave space - skipping");
             return null;
           }
           
@@ -846,9 +811,9 @@ export default apiInitializer((api) => {
             if (retryResult2.data?.proposal) {
               console.log("✅ [SNAPSHOT] Proposal fetched with format 2 (hash only)");
               
-              // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
+              // Validate that this is a valid Aave governance proposal (check space from API)
               if (!isValidAaveGovernanceProposal(retryResult2.data.proposal, space, isTestnet)) {
-                console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
+                console.warn("❌ [SNAPSHOT] Proposal is not from an Aave space - skipping");
                 return null;
               }
               
@@ -876,9 +841,9 @@ export default apiInitializer((api) => {
               if (retryResult3.data?.proposal) {
                 console.log("✅ [SNAPSHOT] Proposal fetched with format 3 ('s:' prefix)");
                 
-                // Validate that this is a valid Aave governance proposal (AIP, Temp Check, or ARFC)
+                // Validate that this is a valid Aave governance proposal (check space from API)
                 if (!isValidAaveGovernanceProposal(retryResult3.data.proposal, space, isTestnet)) {
-                  console.warn("❌ [SNAPSHOT] Proposal is not a valid Aave governance proposal (AIP, Temp Check, or ARFC) - skipping");
+                  console.warn("❌ [SNAPSHOT] Proposal is not from an Aave space - skipping");
                   return null;
                 }
                 
@@ -2237,7 +2202,8 @@ export default apiInitializer((api) => {
         total: totalVotes
       },
       url: `https://snapshot.org/#/${space}/${proposal.id.split('/')[1]}`,
-      type: 'snapshot',
+      type: 'snapshot', // Source type (snapshot vs aip)
+      apiType: proposal.type || null, // Voting mechanism type from API (e.g., 'single-choice', 'approval', etc.)
       _rawProposal: proposal // Preserve raw API response for cascading search
     };
   }
@@ -6205,23 +6171,152 @@ export default apiInitializer((api) => {
   async function fetchProposalData(proposalId, url, govId, urlProposalNumber, forceRefresh = false) {
     if (!url) {return null;}
     
-    // Determine type from URL
-    let type = null;
-    if (url.includes('snapshot.org') || url.includes('testnet.snapshot.box')) {
-      type = 'snapshot';
-    } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
-      type = 'aip';
+    // Fetch type from API instead of determining from URL pattern
+    // This ensures we get the actual type from the API response
+    const typeResult = await fetchProposalTypeFromAPI(url);
+    if (!typeResult) {
+      console.warn("❌ Could not determine proposal type from API for URL:", url);
+      // Fallback to URL pattern matching if API fails
+      let type = null;
+      if (url.includes('snapshot.org') || url.includes('testnet.snapshot.box')) {
+        type = 'snapshot';
+      } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
+        type = 'aip';
+      }
+      if (!type) {
+        // Silently skip proposals that are not AIP or Snapshot - don't show errors
+        return null;
+      }
+      return await fetchProposalDataByType(url, type, forceRefresh);
     }
     
-    if (!type) {
-      console.warn("❌ Could not determine proposal type from URL:", url);
+    // Only process if type is AIP or Snapshot - silently skip others
+    if (typeResult.type === 'snapshot' || typeResult.type === 'aip') {
+      return await fetchProposalDataByType(url, typeResult.type, forceRefresh);
+    } else {
+      // Silently skip proposals that are not AIP or Snapshot - don't show errors
       return null;
     }
+  }
+
+  // Fetch proposal type from API by trying both Snapshot and AIP endpoints
+  // Returns the type determined from API response, not URL patterns
+  async function fetchProposalTypeFromAPI(url) {
+    if (!url) {return null;}
     
-    return await fetchProposalDataByType(url, type, forceRefresh);
+    console.log("🔍 [TYPE] Fetching proposal type from API for URL:", url);
+    
+    // Try to extract identifiers for both types
+    const snapshotInfo = extractSnapshotProposalInfo(url);
+    const aipInfo = extractAIPProposalInfo(url);
+    
+    // If we can extract Snapshot info, try Snapshot API first
+    if (snapshotInfo) {
+      try {
+        const graphqlEndpoint = snapshotInfo.isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
+        let cleanSpace = snapshotInfo.space;
+        if (cleanSpace.startsWith('s:')) {
+          cleanSpace = cleanSpace.substring(2);
+        }
+        if (cleanSpace.startsWith('s-tn:')) {
+          cleanSpace = cleanSpace.substring(5);
+        }
+        const fullProposalId = `${cleanSpace}/${snapshotInfo.proposalId}`;
+        
+        // Lightweight query to check if proposal exists and get its type from API
+        const query = `
+          query ProposalType($id: String!) {
+            proposal(id: $id) {
+              id
+              type
+              space {
+                id
+                name
+              }
+            }
+          }
+        `;
+        
+        const response = await fetchWithRetry(graphqlEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query,
+            variables: { id: fullProposalId }
+          }),
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.data?.proposal) {
+            const apiType = result.data.proposal.type || 'snapshot';
+            console.log("✅ [TYPE] Fetched type from Snapshot API:", apiType);
+            return {
+              type: 'snapshot',
+              apiType, // The type field from Snapshot API response
+              proposalInfo: snapshotInfo
+            };
+          }
+        }
+      } catch {
+        console.log("🔵 [TYPE] Snapshot API check failed, trying AIP...");
+      }
+    }
+    
+    // If Snapshot failed or we have AIP info, try AIP API
+    if (aipInfo) {
+      try {
+        // Try a lightweight check on AIP - attempt to fetch proposal metadata
+        const proposalId = aipInfo.proposalId;
+        if (proposalId) {
+          // Try fetching from subgraph first (lightweight check)
+          const subgraphResult = await fetchAIPFromSubgraph(proposalId);
+          if (subgraphResult) {
+            console.log("✅ [TYPE] Fetched type from AIP API: aip");
+            return {
+              type: 'aip',
+              proposalInfo: aipInfo
+            };
+          }
+          
+          // Try on-chain as fallback
+          const onChainResult = await fetchAIPFromOnChain(proposalId, aipInfo.urlSource || 'app.aave.com');
+          if (onChainResult) {
+            console.log("✅ [TYPE] Fetched type from AIP on-chain: aip");
+            return {
+              type: 'aip',
+              proposalInfo: aipInfo
+            };
+          }
+        }
+      } catch {
+        console.log("🔵 [TYPE] AIP API check failed");
+      }
+    }
+    
+    // Fallback: if we have extracted info but API calls failed, use extracted type
+    if (snapshotInfo) {
+      console.log("⚠️ [TYPE] Using extracted Snapshot type (API fetch failed)");
+      return {
+        type: 'snapshot',
+        proposalInfo: snapshotInfo
+      };
+    }
+    
+    if (aipInfo) {
+      console.log("⚠️ [TYPE] Using extracted AIP type (API fetch failed)");
+      return {
+        type: 'aip',
+        proposalInfo: aipInfo
+      };
+    }
+    
+    console.warn("❌ [TYPE] Could not determine proposal type from API or URL:", url);
+    return null;
   }
 
   // Fetch proposal data based on type (Tally, Snapshot, or AIP)
+  // If type is not provided or is 'auto', fetches type from API first
   async function fetchProposalDataByType(url, type, forceRefresh = false) {
     try {
       const cacheKey = url;
@@ -6247,12 +6342,38 @@ export default apiInitializer((api) => {
         proposalCache.delete(cacheKey);
       }
       
+      // If type is not provided or is 'auto', fetch type from API
+      if (!type || type === 'auto') {
+        console.log("🔍 [FETCH] Type not provided, fetching from API...");
+        const typeResult = await fetchProposalTypeFromAPI(url);
+        if (typeResult) {
+          type = typeResult.type;
+          console.log("✅ [FETCH] Determined type from API:", type);
+        } else {
+          console.warn("⚠️ [FETCH] Could not determine type from API, falling back to URL pattern matching");
+          // Fallback to URL pattern matching
+          const proposalInfo = extractProposalInfo(url);
+          if (proposalInfo && proposalInfo.type) {
+            type = proposalInfo.type;
+          }
+        }
+      }
+      
+      // Only process AIP or Snapshot proposals - silently skip other types
+      if (type !== 'snapshot' && type !== 'aip') {
+        // Silently skip proposals that are not AIP or Snapshot - don't show errors
+        return null;
+      }
+      
       if (type === 'snapshot') {
         const proposalInfo = extractSnapshotProposalInfo(url);
         if (!proposalInfo) {
           return null;
         }
-        return await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey, proposalInfo.isTestnet);
+        const result = await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey, proposalInfo.isTestnet);
+        // The result already includes apiType from transformSnapshotData
+        // which reads proposal.type from the API response
+        return result;
       } else if (type === 'aip') {
         const proposalInfo = extractAIPProposalInfo(url);
         if (!proposalInfo) {
@@ -7608,81 +7729,149 @@ export default apiInitializer((api) => {
    * - Failed + resubmitted proposals
    * - Executed (old) + Created (new) proposals
    */
+  /**
+   * Get state priority for sorting (lower number = higher priority)
+   * Priority order: active → pending → closed → failed
+   */
+  function getStatePriority(status, type = 'snapshot') {
+    const statusLower = (status || '').toLowerCase();
+    
+    if (type === 'aip') {
+      // AIP states: active > created > pending > executed > cancelled > failed
+      if (['active', 'open'].includes(statusLower)) {
+        return 1;
+      }
+      if (['created'].includes(statusLower)) {
+        return 2;
+      }
+      if (['pending'].includes(statusLower)) {
+        return 3;
+      }
+      if (['executed', 'completed', 'succeeded', 'passed'].includes(statusLower)) {
+        return 4;
+      }
+      if (['cancelled', 'expired'].includes(statusLower)) {
+        return 5;
+      }
+      if (['failed', 'defeated'].includes(statusLower)) {
+        return 6;
+      }
+    } else {
+      // Snapshot states: active > pending > closed/passed > failed
+      if (['active', 'open'].includes(statusLower)) {
+        return 1;
+      }
+      if (['pending'].includes(statusLower)) {
+        return 2;
+      }
+      if (['closed', 'passed'].includes(statusLower)) {
+        return 3;
+      }
+      if (['failed', 'cancelled', 'expired'].includes(statusLower)) {
+        return 4;
+      }
+    }
+    
+    return 99; // Unknown states get lowest priority
+  }
+
+  /**
+   * Group proposals by discussion URL
+   * Returns: Map<discussionUrl, proposals[]>
+   */
+  function groupProposalsByDiscussionUrl(proposals) {
+    const groups = new Map();
+    
+    proposals.forEach(proposal => {
+      // Get discussion URL from validation or proposal data
+      const discussionUrl = proposal._validation?.discussionLink || 
+                           proposal.data?.discussion || 
+                           proposal.discussion || 
+                           null;
+      
+      // Use 'no-discussion' as key for proposals without discussion URL
+      const key = discussionUrl ? normalizeForumUrl(discussionUrl) || discussionUrl : 'no-discussion';
+      
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push(proposal);
+    });
+    
+    return groups;
+  }
+
+  /**
+   * Select the best proposal from a group, prioritizing by state
+   * Priority: active → pending → closed → failed
+   */
   function selectBestProposal(proposals, type = 'snapshot') {
     if (!proposals || proposals.length === 0) {return null;}
     if (proposals.length === 1) {return proposals[0];}
     
     console.log(`🔵 [SELECT] Selecting best proposal from ${proposals.length} ${type} proposal(s)`);
     
-    // Sort by timestamp (newest first)
+    // Group by discussion URL first
+    const groups = groupProposalsByDiscussionUrl(proposals);
+    
+    // If all proposals have the same discussion URL (or no discussion URL), select best from all
+    if (groups.size === 1) {
+      const allProposals = Array.from(groups.values())[0];
+      return selectBestProposalByState(allProposals, type);
+    }
+    
+    // Multiple discussion groups - select best from each group, then best overall
+    console.log(`🔵 [SELECT] Found ${groups.size} discussion group(s), selecting best from each`);
+    const bestFromEachGroup = [];
+    
+    groups.forEach((groupProposals, discussionUrl) => {
+      const best = selectBestProposalByState(groupProposals, type);
+      if (best) {
+        bestFromEachGroup.push(best);
+        console.log(`   [GROUP] ${discussionUrl || 'no-discussion'}: selected "${best.data?.title?.substring(0, 50)}..." (status: ${best.data?.status || 'unknown'})`);
+      }
+    });
+    
+    // If we have multiple groups, select the best overall
+    if (bestFromEachGroup.length > 1) {
+      console.log(`🔵 [SELECT] Selecting best proposal from ${bestFromEachGroup.length} discussion group(s)`);
+      return selectBestProposalByState(bestFromEachGroup, type);
+    }
+    
+    return bestFromEachGroup[0] || null;
+  }
+
+  /**
+   * Select best proposal by state priority (active → pending → closed → failed)
+   */
+  function selectBestProposalByState(proposals, type = 'snapshot') {
+    if (!proposals || proposals.length === 0) {return null;}
+    if (proposals.length === 1) {return proposals[0];}
+    
+    // Sort by: 1) state priority, 2) timestamp (newest first)
     const sorted = [...proposals].sort((a, b) => {
+      const statusA = a.data?.status?.toLowerCase() || a.status?.toLowerCase() || '';
+      const statusB = b.data?.status?.toLowerCase() || b.status?.toLowerCase() || '';
+      
+      const priorityA = getStatePriority(statusA, type);
+      const priorityB = getStatePriority(statusB, type);
+      
+      // First sort by state priority (lower = better)
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      
+      // If same priority, sort by timestamp (newer = better)
       const timeA = a.timestamp || 0;
       const timeB = b.timestamp || 0;
       return timeB - timeA; // Descending (newest first)
     });
     
-    // Priority 1: Find active/ongoing proposals (active, created, pending)
-    // These are proposals that are still in progress or newly created
-    const activeProposals = sorted.filter(p => {
-      if (type === 'aip') {
-        const status = p.data?.status?.toLowerCase() || p.status?.toLowerCase() || '';
-        // Include: active, created, pending (all ongoing states)
-        return ['active', 'created', 'pending'].includes(status);
-      } else {
-        // Snapshot proposals - check status field (transformed from state)
-        const status = p.data?.status?.toLowerCase() || '';
-        return status === 'active' || status === 'open';
-      }
-    });
+    const selected = sorted[0];
+    const selectedStatus = selected.data?.status?.toLowerCase() || selected.status?.toLowerCase() || 'unknown';
+    console.log(`✅ [SELECT] Selected proposal: "${selected.data?.title?.substring(0, 50)}..." (status: ${selectedStatus}, priority: ${getStatePriority(selectedStatus, type)})`);
     
-    if (activeProposals.length > 0) {
-      console.log(`✅ [SELECT] Found ${activeProposals.length} active/ongoing ${type} proposal(s), selecting latest`);
-      return activeProposals[0]; // Latest active/ongoing proposal
-    }
-    
-    // Priority 2: Find non-executed/non-completed proposals (prefer ongoing over completed)
-    // This handles:
-    // - AIP: executed (old) vs created (new) - prefer created
-    // - Snapshot: closed/passed (old) vs active (new) - prefer active
-    const nonExecutedProposals = sorted.filter(p => {
-      if (type === 'aip') {
-        const status = p.data?.status?.toLowerCase() || p.status?.toLowerCase() || '';
-        // Exclude executed/completed states, prefer ongoing ones
-        return !['executed', 'completed', 'succeeded'].includes(status);
-      } else {
-        // For Snapshot (Temp Check, ARFC), prefer active/open over closed/passed
-        const status = p.data?.status?.toLowerCase() || '';
-        // Exclude closed/passed states (completed), prefer ongoing ones
-        return !['closed', 'passed'].includes(status);
-      }
-    });
-    
-    if (nonExecutedProposals.length > 0) {
-      console.log(`✅ [SELECT] Found ${nonExecutedProposals.length} non-executed ${type} proposal(s), selecting latest`);
-      return nonExecutedProposals[0]; // Latest non-executed proposal
-    }
-    
-    // Priority 3: Find non-failed proposals (exclude failed, cancelled, expired)
-    const nonFailedProposals = sorted.filter(p => {
-      if (type === 'aip') {
-        const status = p.data?.status?.toLowerCase() || p.status?.toLowerCase() || '';
-        return !['failed', 'cancelled', 'expired', 'defeated'].includes(status);
-      } else {
-        // Snapshot proposals - check status field
-        const status = p.data?.status?.toLowerCase() || '';
-        // Exclude closed/failed statuses, but include passed
-        return !['closed', 'failed'].includes(status) || status === 'passed';
-      }
-    });
-    
-    if (nonFailedProposals.length > 0) {
-      console.log(`✅ [SELECT] Found ${nonFailedProposals.length} non-failed ${type} proposal(s), selecting latest`);
-      return nonFailedProposals[0]; // Latest non-failed proposal
-    }
-    
-    // Priority 4: Just return the latest one (even if failed/executed)
-    console.log(`⚠️ [SELECT] All ${type} proposals appear to be failed/inactive/executed, selecting latest`);
-    return sorted[0];
+    return selected;
   }
   
   /**
@@ -7943,13 +8132,28 @@ export default apiInitializer((api) => {
             (result.status === 'fulfilled' && (!result.value || !result.value.data || !result.value.data.title))
           );
           
-          if (failedSnapshots.length > 0 && validSnapshots.length === 0) {
-            // All proposals failed - show error message
+          // Filter out failures that are due to invalid types (not AIP or Snapshot)
+          // Only show errors for actual network/fetch failures, not for unsupported proposal types
+          const actualFailures = failedSnapshots.filter(result => {
+            // Check if the failure was due to invalid type (silently skipped)
+            if (result.status === 'fulfilled' && result.value && result.value.type === 'snapshot' && !result.value.data) {
+              // This might be a type mismatch - check if URL doesn't match Snapshot pattern
+              const url = result.value.url || '';
+              if (!url.includes('snapshot.org') && !url.includes('snapshot.box')) {
+                // Not a Snapshot URL - silently skip, don't count as error
+                return false;
+              }
+            }
+            return true;
+          });
+          
+          if (actualFailures.length > 0 && validSnapshots.length === 0) {
+            // All proposals failed - show error message (only for actual failures, not type mismatches)
             console.warn(`⚠️ [TOPIC] All ${uniqueSnapshotUrls.length} Snapshot proposal(s) failed to load. This may be a temporary network issue.`);
             // Optionally show a user-visible error widget
             showNetworkErrorWidget(uniqueSnapshotUrls.length, 'snapshot');
-          } else if (failedSnapshots.length > 0) {
-            console.warn(`⚠️ [TOPIC] ${failedSnapshots.length} out of ${uniqueSnapshotUrls.length} Snapshot proposal(s) failed to load`);
+          } else if (actualFailures.length > 0) {
+            console.warn(`⚠️ [TOPIC] ${actualFailures.length} out of ${uniqueSnapshotUrls.length} Snapshot proposal(s) failed to load`);
           }
           
           console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
