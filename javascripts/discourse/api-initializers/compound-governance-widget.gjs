@@ -3069,7 +3069,7 @@ export default apiInitializer((api) => {
     // Only shows exact time when minutes are included in the relative text
     function formatVotingStartTime(votingActivationTimestamp) {
       if (!votingActivationTimestamp) {
-        return { relative: 'Voting starts soon', exact: null, showExact: false };
+        return { relative: '', exact: null, showExact: false };
       }
       
       const now = Date.now() / 1000; // Current time in seconds
@@ -3088,7 +3088,7 @@ export default apiInitializer((api) => {
       });
       
       if (diffTime <= 0) {
-        return { relative: 'Voting starting soon', exact: exactDate, showExact: true };
+        return { relative: '', exact: exactDate, showExact: false };
       }
       
       const diffTimeMs = diffTime * 1000; // Convert to milliseconds
@@ -3193,10 +3193,50 @@ export default apiInitializer((api) => {
                        (statusLower === 'executed' && supportPercent > 50) ||
                        (statusLower !== 'active' && statusLower !== 'open' && statusLower !== 'pending' && supportPercent > 50);
       
-      // Show exact status from API (capitalize first letter only, like AIP does)
-      const statusBadgeText = stageData.status 
-        ? (stageData.status.charAt(0).toUpperCase() + stageData.status.slice(1).toLowerCase())
-        : 'Unknown';
+      // Determine if ended - includes passed, closed, executed, and other ended statuses, or daysLeft < 0
+      // Use case-insensitive comparison for status
+      const isEnded = (stageData.daysLeft !== null && stageData.daysLeft < 0) ||
+                      statusLower === 'executed' || 
+                      statusLower === 'passed' ||
+                      statusLower === 'closed' ||
+                      statusLower === 'queued' ||
+                      statusLower === 'failed' ||
+                      statusLower === 'cancelled' ||
+                      statusLower === 'expired';
+      
+      // For ended proposals, show result status (Passed/Rejected/Defeated) instead of generic "Closed" or "Ended"
+      // since we're already showing "Ended today/X days ago" in the time display
+      let statusBadgeText;
+      if (isEnded) {
+        // Check for explicit result statuses first
+        if (statusLower === 'rejected' || statusLower === 'defeated') {
+          statusBadgeText = 'Rejected';
+        } else if (statusLower === 'passed') {
+          statusBadgeText = 'Passed';
+        } else if (statusLower === 'closed' || (stageData.daysLeft !== null && stageData.daysLeft < 0)) {
+          // For "closed" or time-ended proposals, determine result from votes
+          if (totalVotes > 0 && forVotes > againstVotes) {
+            statusBadgeText = 'Passed';
+          } else if (totalVotes > 0 && againstVotes >= forVotes) {
+            statusBadgeText = 'Rejected';
+          } else {
+            // No votes or can't determine - show original status
+            statusBadgeText = stageData.status 
+              ? (stageData.status.charAt(0).toUpperCase() + stageData.status.slice(1).toLowerCase())
+              : 'Ended';
+          }
+        } else {
+          // For other ended statuses (executed, queued, failed, cancelled, expired), show the status
+          statusBadgeText = stageData.status 
+            ? (stageData.status.charAt(0).toUpperCase() + stageData.status.slice(1).toLowerCase())
+            : 'Ended';
+        }
+      } else {
+        // For non-ended proposals, show exact status from API
+        statusBadgeText = stageData.status 
+          ? (stageData.status.charAt(0).toUpperCase() + stageData.status.slice(1).toLowerCase())
+          : 'Unknown';
+      }
       
       // Keep statusClass for styling (still use isPassed logic for CSS class)
       const statusClass = isPassed ? 'executed' : (isActive ? 'active' : (isPending ? 'pending' : (isCreated ? 'created' : 'inactive')));
@@ -3214,17 +3254,6 @@ export default apiInitializer((api) => {
       const forPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
       const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
       const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
-      
-      // Determine if ended - includes passed, closed, executed, and other ended statuses, or daysLeft < 0
-      // Use case-insensitive comparison for status
-      const isEnded = (stageData.daysLeft !== null && stageData.daysLeft < 0) ||
-                      statusLower === 'executed' || 
-                      statusLower === 'passed' ||
-                      statusLower === 'closed' ||
-                      statusLower === 'queued' ||
-                      statusLower === 'failed' ||
-                      statusLower === 'cancelled' ||
-                      statusLower === 'expired';
       
       // For cancelled and failed proposals, voting never happened - don't show vote data or progress bar
       const isCancelledOrFailed = statusLower === 'cancelled' || statusLower === 'failed';
@@ -3286,49 +3315,41 @@ export default apiInitializer((api) => {
         <div class="stage-collapsed-content" id="${stageId}-content" style="display: none;">
           ${progressBarHtml}
           ${shouldShowVoteCounts ? `
-            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+            <div style="margin-top: 4px; margin-bottom: 8px; font-size: 0.85em; line-height: 1.5; color: #6b7280;">
               <strong style="color: #10b981;">For: ${displayFor}</strong> | 
               <strong style="color: #ef4444;">Against: ${displayAgainst}</strong> | 
               <strong style="color: #6b7280;">Abstain: ${displayAbstain}</strong>
             </div>
-          ` : isPending ? `
-            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-              Voting Starting Soon
-            </div>
-          ` : isCreated ? `
-            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+          ` : (isCreated && !isEnded) ? `
+            <div style="margin-top: 4px; margin-bottom: 8px; font-size: 0.85em; line-height: 1.5; color: #6b7280;">
               Voting Starting Soon
             </div>
           ` : ''}
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; min-width: 100%; max-width: 100%; padding: 8px 12px; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; border: none; border-radius: 4px; background-color: #e5e7eb !important; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; color: #6b7280 !important;">
             View on Snapshot
           </a>
         </div>
       ` : `
         ${progressBarHtml}
         ${shouldShowVoteCounts ? `
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+          <div style="margin-top: 4px; margin-bottom: 8px; font-size: 0.85em; line-height: 1.5; color: #6b7280;">
             <strong style="color: #10b981;">For: ${displayFor}</strong> | 
             <strong style="color: #ef4444;">Against: ${displayAgainst}</strong> | 
             <strong style="color: #6b7280;">Abstain: ${displayAbstain}</strong>
           </div>
-        ` : isPending ? `
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            Voting Starting Soon
-          </div>
-        ` : isCreated ? `
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
+        ` : (isCreated && !isEnded) ? `
+          <div style="margin-top: 4px; margin-bottom: 8px; font-size: 0.85em; line-height: 1.5; color: #6b7280;">
             Voting Starting Soon
           </div>
         ` : ''}
-        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; min-width: 100%; max-width: 100%; padding: 8px 12px; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; border: none; border-radius: 4px; background-color: var(--d-button-primary-bg-color, #2563eb) !important; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; color: var(--d-button-primary-text-color, white) !important;">
           ${isPending || isCreated ? 'View on Snapshot' : 'Vote on Snapshot'}
         </a>
       `;
       
       return `
         <div class="governance-stage ${isEnded ? 'stage-ended' : ''}">
-          <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 32px; margin-bottom: 8px; font-size: 0.9em; font-weight: 600; color: #111827;">
             <span>${stageName} (Snapshot)</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <div class="status-badge ${statusClass}">
@@ -3338,14 +3359,14 @@ export default apiInitializer((api) => {
           </div>
           ${endedText || (!isEnded && timeDisplay) ? `
             <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.7em; font-weight: 600; white-space: nowrap; color: #6b7280;">
                 ${endedText || timeDisplay}
               </div>
             </div>
           ` : ''}
           ${isEnded ? `
-            <div id="${stageId}-collapse-container" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 0.8em; color: #9ca3af; font-style: italic; line-height: 1.4;">
-              <button class="stage-toggle-btn" data-stage-id="${stageId}" style="background: transparent; border: none; cursor: pointer; color: #6b7280; font-size: 14px; padding: 0; margin: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; flex-shrink: 0;" title="Click to expand">
+            <div id="${stageId}-collapse-container" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 0.8em; font-style: italic; line-height: 1.4; color: #9ca3af;">
+              <button class="stage-toggle-btn" data-stage-id="${stageId}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 18px; height: 18px; padding: 0; margin: 0; border: none; border-radius: 4px; background: transparent; cursor: pointer; transition: all 0.2s; font-size: 14px; color: #6b7280;" title="Click to expand">
                 <span id="${stageId}-icon">▶</span>
               </button>
               <span id="${stageId}-collapsed-text" style="flex: 1;">View Result</span>
@@ -3497,8 +3518,22 @@ export default apiInitializer((api) => {
         endDateText = 'Ended';
       }
       
-      // Use exact status from API - show as-is (capitalize first letter only)
-      const statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      // For ended AIP proposals, show result status (Passed/Rejected/Defeated/Executed/Queued) instead of generic "Ended"
+      // since we're already showing "Ended today/X days ago" in the time display
+      let statusBadgeText;
+      if (isEnded) {
+        // For ended proposals, show the actual status (Passed, Executed, Queued, Failed, Cancelled, etc.)
+        // Don't show generic "Ended" since we show "Ended today/X days ago" in time display
+        if (statusLower === 'rejected' || statusLower === 'defeated') {
+          statusBadgeText = 'Rejected';
+        } else {
+          // For passed, executed, queued, failed, cancelled, expired - show the status as-is
+          statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+        }
+      } else {
+        // For non-ended proposals, show exact status from API
+        statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      }
       
       // For cancelled and failed proposals, voting never happened - don't show vote data or progress bar
       const isCancelledOrFailed = statusLower === 'cancelled' || statusLower === 'failed';
@@ -3529,9 +3564,9 @@ export default apiInitializer((api) => {
       // Quorum display for AIP (instead of abstain)
       // Show quorum if available and votes exist (or for ended/passed proposals)
       const quorumHtml = (quorum > 0 && shouldShowVoteCounts) ? `
-        <div style="font-size: 0.85em; color: #6b7280; margin-top: 8px; margin-bottom: 8px; padding: 8px; background: ${quorumReached ? '#f0fdf4' : '#fef2f2'}; border-radius: 4px; border-left: 3px solid ${quorumReached ? '#10b981' : '#ef4444'};">
+        <div style="padding: 8px; margin-top: 8px; margin-bottom: 8px; border-left: 3px solid ${quorumReached ? '#10b981' : '#ef4444'}; border-radius: 4px; background: ${quorumReached ? '#f0fdf4' : '#fef2f2'}; font-size: 0.85em; color: #6b7280;">
           <strong style="color: #111827;">Quorum:</strong> ${formatVoteAmount(totalVotes)} / ${formatVoteAmount(quorum)} AAVE 
-          <span style="color: ${quorumReached ? '#10b981' : '#ef4444'}; font-weight: 600;">
+          <span style="font-weight: 600; color: ${quorumReached ? '#10b981' : '#ef4444'};">
             (${Math.round(quorumPercent)}% - ${quorumReached ? '✓ Reached' : '✗ Not Reached'})
           </span>
         </div>
@@ -3547,10 +3582,6 @@ export default apiInitializer((api) => {
               <strong style="color: #10b981;">For: ${displayForAIP}</strong> | 
               <strong style="color: #ef4444;">Against: ${displayAgainstAIP}</strong>
             </div>
-          ` : stageData.status === 'created' ? `
-            <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-              Voting Starting Soon
-            </div>
           ` : (stageData.status === 'active' && !votesAvailable) ? `
             <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
               Data will be available soon
@@ -3561,7 +3592,7 @@ export default apiInitializer((api) => {
             </div>
           `}
           ${quorumHtml}
-          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: #e5e7eb !important; color: #6b7280 !important;">
+          <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; min-width: 100%; max-width: 100%; padding: 8px 12px; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; border: none; border-radius: 4px; background-color: #e5e7eb !important; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; color: #6b7280 !important;">
             View on Aave
           </a>
         </div>
@@ -3571,10 +3602,6 @@ export default apiInitializer((api) => {
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
             <strong style="color: #10b981;">For: ${displayForAIP}</strong> | 
             <strong style="color: #ef4444;">Against: ${displayAgainstAIP}</strong>
-          </div>
-        ` : stageData.status === 'created' ? `
-          <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
-            Voting Starting Soon
           </div>
         ` : (stageData.status === 'active' && !votesAvailable) ? `
           <div style="font-size: 0.85em; color: #6b7280; margin-top: 4px; margin-bottom: 8px; line-height: 1.5;">
@@ -3586,14 +3613,14 @@ export default apiInitializer((api) => {
           </div>
         `}
         ${quorumHtml}
-        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; max-width: 100%; min-width: 100%; padding: 8px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; background-color: var(--d-button-primary-bg-color, #2563eb) !important; color: var(--d-button-primary-text-color, white) !important;">
+        <a href="${stageUrl}" target="_blank" rel="noopener" class="vote-button" style="display: block; width: 100%; min-width: 100%; max-width: 100%; padding: 8px 12px; margin-top: 10px; margin-left: 0; margin-right: 0; box-sizing: border-box; border: none; border-radius: 4px; background-color: var(--d-button-primary-bg-color, #2563eb) !important; font-size: 0.85em; font-weight: 600; text-align: center; text-decoration: none; color: var(--d-button-primary-text-color, white) !important;">
           ${isActive && !isPending && !isCreated ? 'Vote on Aave' : 'View on Aave'}
         </a>
       `;
       
       return `
         <div class="governance-stage ${isEnded ? 'stage-ended' : ''}">
-          <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; color: #111827; padding-right: 32px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 32px; margin-bottom: 8px; font-size: 0.9em; font-weight: 600; color: #111827;">
             <span>AIP (On-Chain) ${aipNumber}</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <div class="status-badge ${statusClass}">
@@ -3603,14 +3630,14 @@ export default apiInitializer((api) => {
           </div>
           ${(endDateText && endDateText !== 'Ended') || (!isEnded && timeDisplay) ? `
             <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
                 ${endDateText && endDateText !== 'Ended' ? endDateText : timeDisplay}
               </div>
             </div>
           ` : ''}
           ${isEnded ? `
-            <div id="${stageId}-collapse-container" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 0.8em; color: #9ca3af; font-style: italic; line-height: 1.4;">
-              <button class="stage-toggle-btn" data-stage-id="${stageId}" style="background: transparent; border: none; cursor: pointer; color: #6b7280; font-size: 14px; padding: 0; margin: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; flex-shrink: 0;" title="Click to expand">
+            <div id="${stageId}-collapse-container" style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 0.8em; font-style: italic; line-height: 1.4; color: #9ca3af;">
+              <button class="stage-toggle-btn" data-stage-id="${stageId}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 18px; height: 18px; padding: 0; margin: 0; border: none; border-radius: 4px; background: transparent; cursor: pointer; transition: all 0.2s; font-size: 14px; color: #6b7280;" title="Click to expand">
                 <span id="${stageId}-icon">▶</span>
               </button>
               <span id="${stageId}-collapsed-text" style="flex: 1;">View Result</span>
@@ -3663,8 +3690,8 @@ export default apiInitializer((api) => {
     const discussionLinkHTML = '';
     
     const widgetHTML = `
-      <div class="tally-status-widget" style="background: #fff; ${widgetOpacity} border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box; position: relative;">
-        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; z-index: 100;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
+      <div class="tally-status-widget" style="position: relative; width: 100%; max-width: 100%; padding: 16px; box-sizing: border-box; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; ${widgetOpacity}">
+        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; z-index: 100; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; cursor: pointer; transition: all 0.2s; font-size: 18px; color: #6b7280;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
           ×
         </button>
         ${tempCheckHTML}
@@ -4615,12 +4642,12 @@ export default apiInitializer((api) => {
     const endedOpacity = hasPassed && !isEndingSoon ? 'opacity: 0.6;' : '';
     
     statusWidget.innerHTML = `
-      <div class="tally-status-widget ${urgencyClass}" style="${urgencyStyle} background: #fff; ${endedOpacity} position: relative;">
-        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: #6b7280; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; z-index: 10;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
+      <div class="tally-status-widget ${urgencyClass}" style="position: relative; ${urgencyStyle} background: #fff; ${endedOpacity}">
+        <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; z-index: 10; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; cursor: pointer; transition: all 0.2s; font-size: 18px; color: #6b7280;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
           ×
         </button>
-        ${stageLabel ? `<div class="stage-label" style="font-size: 0.75em; font-weight: 600; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">${stageLabel}</div>` : ''}
-        ${isEndingSoon ? `<div class="urgency-alert" style="background: #fee2e2; color: #dc2626; padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 0.85em; font-weight: 600; text-align: center;">⚠️ Ending Soon!</div>` : ''}
+        ${stageLabel ? `<div class="stage-label" style="margin-bottom: 8px; font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">${stageLabel}</div>` : ''}
+        ${isEndingSoon ? `<div class="urgency-alert" style="padding: 8px; margin-bottom: 12px; border-radius: 4px; background: #fee2e2; font-size: 0.85em; font-weight: 600; text-align: center; color: #dc2626;">⚠️ Ending Soon!</div>` : ''}
         <div class="status-badges-row">
           <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isCreated ? 'created' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : 'inactive'}">
             ${displayStatus}
@@ -4647,9 +4674,10 @@ export default apiInitializer((api) => {
                   badgeStyle = 'background: #fef3c7; color: #92400e; border-color: #fde68a; font-weight: 700;';
               }
               }
-              return `<div class="days-left-badge" style="${badgeStyle}">${displayText}</div>`;
+              const finalStyle = badgeStyle ? `${badgeStyle} padding: 4px 10px 4px 0;` : 'padding: 4px 10px 4px 0;';
+              return `<div class="days-left-badge" style="${finalStyle}">${displayText}</div>`;
             } else if (proposalData.daysLeft === null) {
-              return '<div class="days-left-badge">Date unknown</div>';
+              return '<div class="days-left-badge" style="padding: 4px 10px 4px 0;">Date unknown</div>';
             }
             return '';
           })()}
@@ -4682,7 +4710,7 @@ export default apiInitializer((api) => {
           `;
         })()}
         ${proposalData.quorum && proposalData.type === 'aip' ? `
-          <div class="quorum-info" style="font-size: 0.85em; color: #6b7280; margin-top: 8px; margin-bottom: 8px;">
+          <div class="quorum-info" style="margin-top: 8px; margin-bottom: 8px; font-size: 0.85em; color: #6b7280;">
             Quorum: ${formatVoteAmount(totalVotes)} / ${formatVoteAmount(proposalData.quorum)}
           </div>
         ` : ''}
@@ -5846,9 +5874,9 @@ export default apiInitializer((api) => {
     markWidgetAsVisibleInCache(errorWidget);
     
     errorWidget.innerHTML = `
-      <div class="tally-status-widget" style="background: #fff; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px;">
-        <div style="font-weight: 700; font-size: 1em; margin-bottom: 12px; color: #dc2626;">⚠️ Network Error</div>
-        <div style="font-size: 0.9em; color: #6b7280; line-height: 1.5; margin-bottom: 12px;">
+      <div class="tally-status-widget" style="padding: 16px; border: 1px solid #fca5a5; border-radius: 8px; background: #fff;">
+        <div style="margin-bottom: 12px; font-size: 1em; font-weight: 700; color: #dc2626;">⚠️ Network Error</div>
+        <div style="margin-bottom: 12px; font-size: 0.9em; line-height: 1.5; color: #6b7280;">
           Unable to load ${count} ${type} proposal(s). This may be a temporary network issue.
         </div>
         <div style="font-size: 0.85em; color: #9ca3af;">
