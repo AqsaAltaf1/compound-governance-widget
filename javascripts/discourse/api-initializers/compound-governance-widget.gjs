@@ -3214,16 +3214,17 @@ export default apiInitializer((api) => {
         } else if (statusLower === 'passed') {
           statusBadgeText = 'Passed';
         } else if (statusLower === 'closed' || (stageData.daysLeft !== null && stageData.daysLeft < 0)) {
-          // For "closed" or time-ended proposals, determine result from votes
+          // For "closed" or time-ended proposals, determine result from votes (like Snapshot website)
           if (totalVotes > 0 && forVotes > againstVotes) {
             statusBadgeText = 'Passed';
           } else if (totalVotes > 0 && againstVotes >= forVotes) {
             statusBadgeText = 'Rejected';
+          } else if (totalVotes === 0) {
+            // Closed with 0 votes = Rejected (no one voted for it, like Snapshot website)
+            statusBadgeText = 'Rejected';
           } else {
-            // No votes or can't determine - show original status
-            statusBadgeText = stageData.status 
-              ? (stageData.status.charAt(0).toUpperCase() + stageData.status.slice(1).toLowerCase())
-              : 'Ended';
+            // Can't determine - show "Closed"
+            statusBadgeText = 'Closed';
           }
         } else {
           // For other ended statuses (executed, queued, failed, cancelled, expired), show the status
@@ -4489,6 +4490,7 @@ export default apiInitializer((api) => {
     console.log("🔵 [WIDGET] Quorum check - isQuorumNotReached:", isQuorumNotReached);
     
     // Check for defeat statuses (but NOT if it's quorum not reached)
+    // Also check if "closed" status with 0 votes should be treated as defeat (Rejected)
     // Only match standalone "defeat" status, not if it's part of "quorum not reached"
     const isDefeat = !isQuorumNotReached && defeatStatuses.some(s => {
       const defeatWord = s.toLowerCase();
@@ -4498,6 +4500,9 @@ export default apiInitializer((api) => {
       }
       return matches;
     });
+    
+    // Also treat "closed" with 0 votes as defeat (Rejected) - will be checked after we calculate totalVotes
+    const isClosedWithNoVotes = status === "closed";
     
     console.log("🔵 [WIDGET] Defeat check - isDefeat:", isDefeat);
     
@@ -4547,7 +4552,9 @@ export default apiInitializer((api) => {
     const isActuallyQuorumNotReached = isQuorumNotReached || 
                                        (quorumNotReachedByVotes && (status === "defeated" || status === "defeat"));
     const finalIsQuorumNotReached = isActuallyQuorumNotReached;
-    const finalIsDefeat = isDefeat && !finalIsQuorumNotReached && quorumReached;
+    // Also treat "closed" with 0 votes or majority against as defeat (Rejected) - matches Snapshot website behavior
+    const isClosedAsRejected = isClosedWithNoVotes && (totalVotes === 0 || (totalVotes > 0 && votesAgainstNum >= votesForNum));
+    const finalIsDefeat = (isDefeat && !finalIsQuorumNotReached && quorumReached) || isClosedAsRejected;
     
     // Determine display status (match Tally website behavior)
     let displayStatus = exactStatus;
@@ -4559,6 +4566,22 @@ export default apiInitializer((api) => {
       console.log("🔵 [WIDGET] Overriding status: 'defeated' → 'Quorum not reached' (quorum not met, like Tally website)");
     } else if (finalIsDefeat && quorumReached) {
       displayStatus = "Defeated";
+    } else if (status === "closed") {
+      // For "closed" status, determine result from votes (like Snapshot website does)
+      if (totalVotes > 0 && votesForNum > votesAgainstNum) {
+        displayStatus = "Passed";
+        console.log("🔵 [WIDGET] Overriding status: 'closed' → 'Passed' (majority support)");
+      } else if (totalVotes > 0 && votesAgainstNum >= votesForNum) {
+        displayStatus = "Rejected";
+        console.log("🔵 [WIDGET] Overriding status: 'closed' → 'Rejected' (majority against)");
+      } else if (totalVotes === 0) {
+        // Closed with 0 votes = Rejected (no one voted for it, like Snapshot website)
+        displayStatus = "Rejected";
+        console.log("🔵 [WIDGET] Overriding status: 'closed' → 'Rejected' (0 votes, like Snapshot website)");
+      } else {
+        // Keep "Closed" if we can't determine
+        displayStatus = "Closed";
+      }
     }
     
     console.log("🔵 [WIDGET] Raw vote counts:", { 
