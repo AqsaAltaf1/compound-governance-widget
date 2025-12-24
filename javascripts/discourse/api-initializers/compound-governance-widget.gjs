@@ -4537,25 +4537,36 @@ export default apiInitializer((api) => {
     
     // Determine stage label and button text based on proposal type
     let stageLabel = '';
+    // Check if proposal has passed/ended - dim with opacity instead of changing background
+    const isEnded = proposalData.daysLeft !== null && proposalData.daysLeft < 0;
+    // "passed" means voting ended and proposal passed, but not executed yet (different from "executed")
+    // All these statuses indicate the proposal has ended (voting is over)
+    const isPassedStatus = status === 'passed';
+    const isExecutedStatus = status === 'executed';
+    const isFailedStatus = status === 'failed';
+    const isCancelledStatus = status === 'cancelled';
+    const isExpiredStatus = status === 'expired';
+    const hasPassed = isExecuted || isEnded || isExecutedStatus || isPassedStatus || isFailedStatus || isCancelledStatus || isExpiredStatus;
+    
     let buttonText = 'View Proposal';
     
     if (proposalData.type === 'snapshot') {
       if (proposalData.stage === 'temp-check') {
         stageLabel = 'Temp Check';
-        // Show "View on Snapshot" for pending/created, "Vote on Snapshot" for active
-        buttonText = (status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
+        // Show "View on Snapshot" for pending/created/ended, "Vote on Snapshot" for active
+        buttonText = (hasPassed || status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
       } else if (proposalData.stage === 'arfc') {
         stageLabel = 'ARFC';
-        // Show "View on Snapshot" for pending/created, "Vote on Snapshot" for active
-        buttonText = (status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
+        // Show "View on Snapshot" for pending/created/ended, "Vote on Snapshot" for active
+        buttonText = (hasPassed || status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
       } else {
         stageLabel = 'Snapshot';
         buttonText = 'View on Snapshot';
       }
     } else if (proposalData.type === 'aip') {
       stageLabel = 'AIP (On-Chain)';
-      // Show "View on Aave" for pending/created, "Vote on Aave" for active (not pending/created)
-      buttonText = (status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Aave' : (status === 'active' ? 'Vote on Aave' : 'View on Aave');
+      // Show "View on Aave" for pending/created/ended, "Vote on Aave" for active (not pending/created)
+      buttonText = (hasPassed || status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Aave' : (status === 'active' ? 'Vote on Aave' : 'View on Aave');
     } else {
       // Default fallback (shouldn't happen, but just in case)
       stageLabel = '';
@@ -4572,17 +4583,6 @@ export default apiInitializer((api) => {
     // Determine urgency styling
     const urgencyClass = isEndingSoon ? 'ending-soon' : '';
     const urgencyStyle = isEndingSoon ? 'border: 2px solid #ef4444; background: #fef2f2;' : '';
-    
-    // Check if proposal has passed/ended - dim with opacity instead of changing background
-    const isEnded = proposalData.daysLeft !== null && proposalData.daysLeft < 0;
-    // "passed" means voting ended and proposal passed, but not executed yet (different from "executed")
-    // All these statuses indicate the proposal has ended (voting is over)
-    const isPassedStatus = status === 'passed';
-    const isExecutedStatus = status === 'executed';
-    const isFailedStatus = status === 'failed';
-    const isCancelledStatus = status === 'cancelled';
-    const isExpiredStatus = status === 'expired';
-    const hasPassed = isExecuted || isEnded || isExecutedStatus || isPassedStatus || isFailedStatus || isCancelledStatus || isExpiredStatus;
     const endedOpacity = hasPassed && !isEndingSoon ? 'opacity: 0.6;' : '';
     
     statusWidget.innerHTML = `
