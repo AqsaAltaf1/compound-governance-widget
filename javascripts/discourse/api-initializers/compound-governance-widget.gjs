@@ -3453,8 +3453,7 @@ export default apiInitializer((api) => {
       // Determine if ended - includes passed and executed statuses, or daysLeft < 0
       // "passed" means proposal passed voting but is waiting to be executed - should be collapsed
       // "executed" means proposal has been executed on-chain - should be collapsed
-      // Use case-insensitive comparison for status
-      const statusLower = (stageData.status || '').toLowerCase();
+      // Use case-insensitive comparison for status (statusLower already declared at line 3370)
       const isEnded = (stageData.daysLeft !== null && stageData.daysLeft < 0) ||
                      statusLower === 'executed' || 
                      statusLower === 'passed' ||
