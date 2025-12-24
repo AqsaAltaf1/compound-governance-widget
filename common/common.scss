@@ -71,8 +71,8 @@
   backface-visibility: hidden !important; // Prevent flickering
   transform: translateZ(0) !important; // Force GPU acceleration
 
-  // Position like tally widget - fixed on right side (large screens only)
-  right: 5px !important;
+  // Position like tally widget - fixed percentage distance from right edge (large screens only)
+  right: 2% !important; // Percentage-based distance from right edge, maintains consistent spacing
   top: 180px !important;
   left: auto !important;
 

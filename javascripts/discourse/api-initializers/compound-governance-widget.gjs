@@ -60,13 +60,13 @@ export default apiInitializer((api) => {
   };
   
   const lockScrollUntilWidgetsReady = () => {
-    // Stop locking after widgets are ready (extended to 10 seconds to prevent Discourse auto-scroll)
+    // Stop locking after widgets are ready (reduced to 500ms to allow immediate scrolling)
     // Note: We rely on MutationObserver and scroll event listener instead of fixed intervals
     setTimeout(() => {
       scrollLocked = false;
       // Final restore to top
       restoreScroll();
-    }, 10000);
+    }, 500);
   };
   
   // Start scroll locking immediately
@@ -2765,10 +2765,10 @@ export default apiInitializer((api) => {
         }
       }
       
-      // Desktop: Use fixed positioning (right side)
+      // Desktop: Use fixed positioning (right side) - percentage-based like Tally widget
       container.style.setProperty('position', 'fixed', 'important');
       container.style.setProperty('z-index', '500', 'important');
-      container.style.setProperty('right', '5px', 'important');
+      container.style.setProperty('right', '2%', 'important'); // Percentage-based distance from right edge
       container.style.setProperty('left', 'auto', 'important');
       container.style.setProperty('top', '180px', 'important');
       // CRITICAL: Keep width fixed at 320px to prevent width changes on scroll
