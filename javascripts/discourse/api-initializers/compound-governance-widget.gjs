@@ -2402,7 +2402,8 @@ export default apiInitializer((api) => {
             const isPending = statusLower === 'pending';
             const isCreated = statusLower === 'created';
             const showVoteButton = totalVotes > 0 && !isPending && !isCreated;
-            const buttonText = (isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
+            // If active, show "Vote", otherwise show "View"
+            const buttonText = isActive ? 'Vote on Snapshot' : 'View on Snapshot';
             
             if (showVoteButton) {
               return `
@@ -4550,23 +4551,24 @@ export default apiInitializer((api) => {
     
     let buttonText = 'View Proposal';
     
+    // Simple rule: If active, show "Vote", otherwise show "View"
+    // This applies to all proposal types (Snapshot, AIP, etc.)
+    const shouldShowVote = isActive;
+    
     if (proposalData.type === 'snapshot') {
       if (proposalData.stage === 'temp-check') {
         stageLabel = 'Temp Check';
-        // Show "View on Snapshot" for pending/created/ended, "Vote on Snapshot" for active
-        buttonText = (hasPassed || status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
+        buttonText = shouldShowVote ? 'Vote on Snapshot' : 'View on Snapshot';
       } else if (proposalData.stage === 'arfc') {
         stageLabel = 'ARFC';
-        // Show "View on Snapshot" for pending/created/ended, "Vote on Snapshot" for active
-        buttonText = (hasPassed || status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Snapshot' : 'Vote on Snapshot';
+        buttonText = shouldShowVote ? 'Vote on Snapshot' : 'View on Snapshot';
       } else {
         stageLabel = 'Snapshot';
-        buttonText = 'View on Snapshot';
+        buttonText = shouldShowVote ? 'Vote on Snapshot' : 'View on Snapshot';
       }
     } else if (proposalData.type === 'aip') {
       stageLabel = 'AIP (On-Chain)';
-      // Show "View on Aave" for pending/created/ended, "Vote on Aave" for active (not pending/created)
-      buttonText = (hasPassed || status === 'pending' || status === 'created' || isPending || isCreated) ? 'View on Aave' : (status === 'active' ? 'Vote on Aave' : 'View on Aave');
+      buttonText = shouldShowVote ? 'Vote on Aave' : 'View on Aave';
     } else {
       // Default fallback (shouldn't happen, but just in case)
       stageLabel = '';
@@ -6177,17 +6179,17 @@ export default apiInitializer((api) => {
     if (!typeResult) {
       console.warn("❌ Could not determine proposal type from API for URL:", url);
       // Fallback to URL pattern matching if API fails
-      let type = null;
-      if (url.includes('snapshot.org') || url.includes('testnet.snapshot.box')) {
-        type = 'snapshot';
-      } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
-        type = 'aip';
-      }
-      if (!type) {
+    let type = null;
+    if (url.includes('snapshot.org') || url.includes('testnet.snapshot.box')) {
+      type = 'snapshot';
+    } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
+      type = 'aip';
+    }
+    if (!type) {
         // Silently skip proposals that are not AIP or Snapshot - don't show errors
-        return null;
-      }
-      return await fetchProposalDataByType(url, type, forceRefresh);
+      return null;
+    }
+    return await fetchProposalDataByType(url, type, forceRefresh);
     }
     
     // Only process if type is AIP or Snapshot - silently skip others
@@ -10947,9 +10949,9 @@ export default apiInitializer((api) => {
                       node.style.setProperty('visibility', 'visible', 'important');
                       node.style.setProperty('opacity', '1', 'important');
                     }
-                  }
-                } catch (e) {
-                  console.error(`❌ [OBSERVER] Failed to restore widget:`, e);
+                    }
+                  } catch (e) {
+                    console.error(`❌ [OBSERVER] Failed to restore widget:`, e);
                 } finally {
                   // Reconnect observer after a short delay
                   setTimeout(() => {
