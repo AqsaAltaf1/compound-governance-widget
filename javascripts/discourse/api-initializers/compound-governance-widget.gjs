@@ -3054,8 +3054,8 @@ export default apiInitializer((api) => {
         return `Ends today (${hoursLeft} ${hoursLeft === 1 ? 'hour' : 'hours'} left)`;
       }
       if (daysLeft === 0) {
-        // If daysLeft is 0 but hoursLeft is null, assume it hasn't ended yet
-        return 'Ends today';
+        // If daysLeft is 0 but hoursLeft is null, it means diffTime <= 0, so the ending time has already passed
+        return 'Ended today';
       }
       // Show years if more than 365 days left
       if (daysLeft >= 365) {
@@ -4714,8 +4714,8 @@ export default apiInitializer((api) => {
                   badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
                 }
               } else if (proposalData.daysLeft === 0) {
-                // If daysLeft is 0 but hoursLeft is null, assume it hasn't ended yet
-                displayText = 'Ends today';
+                // If daysLeft is 0 but hoursLeft is null, it means diffTime <= 0, so the ending time has already passed
+                displayText = 'Ended today';
                 if (isEndingSoon) {
                   badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
                 }
