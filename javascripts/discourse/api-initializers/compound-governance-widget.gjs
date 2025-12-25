@@ -3046,9 +3046,15 @@ export default apiInitializer((api) => {
         return `Ended ${daysAgo} ${daysAgo === 1 ? 'day' : 'days'} ago`;
       }
       if (daysLeft === 0 && hoursLeft !== null) {
-        return `Ends in ${hoursLeft} ${hoursLeft === 1 ? 'hour' : 'hours'}!`;
+        // If hoursLeft is 0 or negative, the ending time has already passed today
+        if (hoursLeft <= 0) {
+          return 'Ended today';
+        }
+        // If hoursLeft > 0, the ending time hasn't passed yet - show "Ends today" with hours left
+        return `Ends today (${hoursLeft} ${hoursLeft === 1 ? 'hour' : 'hours'} left)`;
       }
       if (daysLeft === 0) {
+        // If daysLeft is 0 but hoursLeft is null, assume it hasn't ended yet
         return 'Ends today';
       }
       // Show years if more than 365 days left
@@ -4697,11 +4703,18 @@ export default apiInitializer((api) => {
               if (proposalData.daysLeft < 0) {
                 displayText = 'Ended';
               } else if (proposalData.daysLeft === 0 && proposalData.hoursLeft !== null) {
-                displayText = proposalData.hoursLeft + ' ' + (proposalData.hoursLeft === 1 ? 'hour' : 'hours') + ' left';
+                // If hoursLeft is 0 or negative, the ending time has already passed today
+                if (proposalData.hoursLeft <= 0) {
+                  displayText = 'Ended today';
+                } else {
+                  // If hoursLeft > 0, the ending time hasn't passed yet - show "Ends today" with hours left
+                  displayText = `Ends today (${proposalData.hoursLeft} ${proposalData.hoursLeft === 1 ? 'hour' : 'hours'} left)`;
+                }
                 if (isEndingSoon) {
                   badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
                 }
               } else if (proposalData.daysLeft === 0) {
+                // If daysLeft is 0 but hoursLeft is null, assume it hasn't ended yet
                 displayText = 'Ends today';
                 if (isEndingSoon) {
                   badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
