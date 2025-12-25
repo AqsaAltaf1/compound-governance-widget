@@ -3018,7 +3018,7 @@ export default apiInitializer((api) => {
     statusWidget.style.setProperty('--proposal-order', orderValue);
     
     // Helper function to format time display
-    function formatTimeDisplay(daysLeft, hoursLeft) {
+    function formatTimeDisplay(daysLeft, hoursLeft, status = null, endTimestamp = null) {
       if (daysLeft === null || daysLeft === undefined) {
         return 'Date unknown';
       }
@@ -3046,16 +3046,38 @@ export default apiInitializer((api) => {
         return `Ended ${daysAgo} ${daysAgo === 1 ? 'day' : 'days'} ago`;
       }
       if (daysLeft === 0 && hoursLeft !== null) {
-        // If hoursLeft is 0 or negative, the ending time has already passed today
-        if (hoursLeft <= 0) {
-          return 'Ended today';
+        // Check if hoursLeft is negative (proposal has ended)
+        if (hoursLeft < 0) {
+          return 'Ended Today';
         }
-        // If hoursLeft > 0, the ending time hasn't passed yet - show "Ends today" with hours left
-        return `Ends today (${hoursLeft} ${hoursLeft === 1 ? 'hour' : 'hours'} left)`;
+        // If hoursLeft is 0, show exact time instead of "Ends in 0 hours"
+        if (hoursLeft === 0 && endTimestamp) {
+          const endDate = new Date(endTimestamp);
+          if (!isNaN(endDate.getTime())) {
+            const exactTime = endDate.toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            });
+            return `Ends at ${exactTime}`;
+          }
+        }
+        return `Ends in ${hoursLeft} ${hoursLeft === 1 ? 'hour' : 'hours'}!`;
       }
       if (daysLeft === 0) {
-        // If daysLeft is 0 but hoursLeft is null, it means diffTime <= 0, so the ending time has already passed
-        return 'Ended today';
+        // If daysLeft is 0 but we don't have hoursLeft, check status to determine if ended
+        const statusLower = (status || '').toLowerCase();
+        const endedStatuses = ['closed', 'ended', 'passed', 'executed', 'rejected', 'defeated', 'failed', 'cancelled', 'expired'];
+        if (endedStatuses.includes(statusLower)) {
+          return 'Ended Today';
+        }
+        // If status indicates it's still active, show "Ends today"
+        const activeStatuses = ['active', 'open', 'pending', 'created'];
+        if (activeStatuses.includes(statusLower)) {
+          return 'Ends today';
+        }
+        // Default to "Ended Today" to be safe (avoids confusion)
+        return 'Ended Today';
       }
       // Show years if more than 365 days left
       if (daysLeft >= 365) {
@@ -3268,7 +3290,15 @@ export default apiInitializer((api) => {
         const startTimeInfo = formatVotingStartTime(stageData.startTime);
         timeDisplay = startTimeInfo.relative;
       } else {
-        timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+        // Calculate end timestamp if needed (for showing exact time when hoursLeft === 0)
+        let endTimestamp = stageData.endTimestamp || stageData.endTime || null;
+        if (!endTimestamp && stageData.daysLeft !== null && stageData.hoursLeft !== null) {
+          // Calculate approximate end timestamp from current time + daysLeft + hoursLeft
+          const now = Date.now();
+          const endTimeMs = now + (stageData.daysLeft * 24 * 60 * 60 * 1000) + (stageData.hoursLeft * 60 * 60 * 1000);
+          endTimestamp = endTimeMs;
+        }
+        timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft, stageData.status, endTimestamp);
       }
       
       // Calculate percentages for progress bar
@@ -3380,7 +3410,7 @@ export default apiInitializer((api) => {
           </div>
           ${endedText || (!isEnded && timeDisplay) ? `
             <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.8em; font-weight: 600; white-space: nowrap; color: #6b7280;">
+              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.7em; font-weight: 600; white-space: nowrap; color: #6b7280;">
                 ${endedText || timeDisplay}
               </div>
             </div>
@@ -3473,7 +3503,15 @@ export default apiInitializer((api) => {
         const startTimeInfo = formatVotingStartTime(stageData.votingActivationTimestamp);
         timeDisplay = startTimeInfo.relative;
       } else {
-        timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
+        // Calculate end timestamp if needed (for showing exact time when hoursLeft === 0)
+        let endTimestamp = stageData.endTimestamp || stageData.endTime || null;
+        if (!endTimestamp && stageData.daysLeft !== null && stageData.hoursLeft !== null) {
+          // Calculate approximate end timestamp from current time + daysLeft + hoursLeft
+          const now = Date.now();
+          const endTimeMs = now + (stageData.daysLeft * 24 * 60 * 60 * 1000) + (stageData.hoursLeft * 60 * 60 * 1000);
+          endTimestamp = endTimeMs;
+        }
+        timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft, stageData.status, endTimestamp);
       }
       // eslint-disable-next-line no-unused-vars
       const isEndingSoon = stageData.daysLeft !== null && stageData.daysLeft >= 0 && 
@@ -3652,7 +3690,7 @@ export default apiInitializer((api) => {
           </div>
           ${(endDateText && endDateText !== 'Ended') || (!isEnded && timeDisplay) ? `
             <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.8em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
                 ${endDateText && endDateText !== 'Ended' ? endDateText : timeDisplay}
               </div>
             </div>
@@ -4703,21 +4741,68 @@ export default apiInitializer((api) => {
               if (proposalData.daysLeft < 0) {
                 displayText = 'Ended';
               } else if (proposalData.daysLeft === 0 && proposalData.hoursLeft !== null) {
-                // If hoursLeft is 0 or negative, the ending time has already passed today
-                if (proposalData.hoursLeft <= 0) {
-                  displayText = 'Ended today';
+                // Check if hoursLeft is negative (proposal has ended)
+                if (proposalData.hoursLeft < 0) {
+                  displayText = 'Ended Today';
+                } else if (proposalData.hoursLeft === 0) {
+                  // Show exact time when hoursLeft is 0
+                  let endTimestamp = null;
+                  if (proposalData.endTimestamp) {
+                    endTimestamp = proposalData.endTimestamp;
+                  } else if (proposalData.end && proposalData.end.timestamp) {
+                    endTimestamp = typeof proposalData.end.timestamp === 'number' 
+                      ? (proposalData.end.timestamp > 946684800000 ? proposalData.end.timestamp : proposalData.end.timestamp * 1000)
+                      : Date.parse(proposalData.end.timestamp);
+                  } else if (proposalData.end && proposalData.end.ts) {
+                    endTimestamp = typeof proposalData.end.ts === 'number'
+                      ? (proposalData.end.ts > 946684800000 ? proposalData.end.ts : proposalData.end.ts * 1000)
+                      : Date.parse(proposalData.end.ts);
+                  } else if (proposalData.endTime) {
+                    endTimestamp = Number(proposalData.endTime) * 1000;
+                  }
+                  
+                  if (endTimestamp && !isNaN(endTimestamp)) {
+                    const endDate = new Date(endTimestamp);
+                    if (!isNaN(endDate.getTime())) {
+                      const exactTime = endDate.toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true
+                      });
+                      displayText = `Ends at ${exactTime}`;
+                    } else {
+                      displayText = 'Ends today';
+                    }
+                  } else {
+                    displayText = 'Ends today';
+                  }
+                  if (isEndingSoon) {
+                    badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
+                  }
                 } else {
-                  // If hoursLeft > 0, the ending time hasn't passed yet - show "Ends today" with hours left
-                  displayText = `Ends today (${proposalData.hoursLeft} ${proposalData.hoursLeft === 1 ? 'hour' : 'hours'} left)`;
-                }
-                if (isEndingSoon) {
-                  badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
+                  displayText = proposalData.hoursLeft + ' ' + (proposalData.hoursLeft === 1 ? 'hour' : 'hours') + ' left';
+                  if (isEndingSoon) {
+                    badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
+                  }
                 }
               } else if (proposalData.daysLeft === 0) {
-                // If daysLeft is 0 but hoursLeft is null, it means diffTime <= 0, so the ending time has already passed
-                displayText = 'Ended today';
-                if (isEndingSoon) {
-                  badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
+                // If daysLeft is 0 but we don't have hoursLeft, check status to determine if ended
+                const proposalStatus = (proposalData.status || status || '').toLowerCase();
+                const endedStatuses = ['closed', 'ended', 'passed', 'executed', 'rejected', 'defeated', 'failed', 'cancelled', 'expired'];
+                if (endedStatuses.includes(proposalStatus)) {
+                  displayText = 'Ended Today';
+                } else {
+                  // If status indicates it's still active, show "Ends today"
+                  const stillActiveStatuses = ['active', 'open', 'pending', 'created'];
+                  if (stillActiveStatuses.includes(proposalStatus)) {
+                    displayText = 'Ends today';
+                    if (isEndingSoon) {
+                      badgeStyle = 'background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700;';
+                    }
+                  } else {
+                    // Default to "Ended Today" to be safe (avoids confusion)
+                    displayText = 'Ended Today';
+                  }
                 }
               } else {
                 displayText = proposalData.daysLeft + ' ' + (proposalData.daysLeft === 1 ? 'day' : 'days') + ' left';
@@ -4725,10 +4810,10 @@ export default apiInitializer((api) => {
                   badgeStyle = 'background: #fef3c7; color: #92400e; border-color: #fde68a; font-weight: 700;';
               }
               }
-              const finalStyle = badgeStyle ? `${badgeStyle} padding: 4px 10px 4px 0; font-size: 0.8em; color: #6b7280;` : 'padding: 4px 10px 4px 0; font-size: 0.8em; color: #6b7280;';
+              const finalStyle = badgeStyle ? `${badgeStyle} padding: 4px 10px 4px 0;` : 'padding: 4px 10px 4px 0;';
               return `<div class="days-left-badge" style="${finalStyle}">${displayText}</div>`;
             } else if (proposalData.daysLeft === null) {
-              return '<div class="days-left-badge" style="padding: 4px 10px 4px 0; font-size: 0.8em; color: #6b7280;">Date unknown</div>';
+              return '<div class="days-left-badge" style="padding: 4px 10px 4px 0;">Date unknown</div>';
             }
             return '';
           })()}
