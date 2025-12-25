@@ -3380,7 +3380,7 @@ export default apiInitializer((api) => {
           </div>
           ${endedText || (!isEnded && timeDisplay) ? `
             <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.7em; font-weight: 600; white-space: nowrap; color: #6b7280;">
+              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.8em; font-weight: 600; white-space: nowrap; color: #6b7280;">
                 ${endedText || timeDisplay}
               </div>
             </div>
@@ -3652,7 +3652,7 @@ export default apiInitializer((api) => {
           </div>
           ${(endDateText && endDateText !== 'Ended') || (!isEnded && timeDisplay) ? `
             <div style="margin-bottom: 12px;">
-              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.7em; font-weight: 600; color: #6b7280; white-space: nowrap;">
+              <div class="days-left-badge" style="padding: 4px 10px 4px 0; border-radius: 4px; font-size: 0.8em; font-weight: 600; color: #6b7280; white-space: nowrap;">
                 ${endDateText && endDateText !== 'Ended' ? endDateText : timeDisplay}
               </div>
             </div>
@@ -4725,10 +4725,10 @@ export default apiInitializer((api) => {
                   badgeStyle = 'background: #fef3c7; color: #92400e; border-color: #fde68a; font-weight: 700;';
               }
               }
-              const finalStyle = badgeStyle ? `${badgeStyle} padding: 4px 10px 4px 0;` : 'padding: 4px 10px 4px 0;';
+              const finalStyle = badgeStyle ? `${badgeStyle} padding: 4px 10px 4px 0; font-size: 0.8em; color: #6b7280;` : 'padding: 4px 10px 4px 0; font-size: 0.8em; color: #6b7280;';
               return `<div class="days-left-badge" style="${finalStyle}">${displayText}</div>`;
             } else if (proposalData.daysLeft === null) {
-              return '<div class="days-left-badge" style="padding: 4px 10px 4px 0;">Date unknown</div>';
+              return '<div class="days-left-badge" style="padding: 4px 10px 4px 0; font-size: 0.8em; color: #6b7280;">Date unknown</div>';
             }
             return '';
           })()}
