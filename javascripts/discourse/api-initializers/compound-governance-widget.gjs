@@ -2155,16 +2155,25 @@ export default apiInitializer((api) => {
     }
     
     // Determine status
+    // NOTE: Snapshot API doesn't provide a direct "result" field (Passed/Rejected)
+    // We must calculate it from votes, matching Snapshot's frontend logic exactly:
+    // - Closed with 0 votes → Rejected
+    // - Closed with forVotes > againstVotes → Passed
+    // - Closed with againstVotes >= forVotes → Rejected
     let status = 'unknown';
     if (proposal.state === 'active' || proposal.state === 'open') {
       status = 'active';
     } else if (proposal.state === 'closed') {
-      // For closed proposals, determine if it passed based on votes
-      // A proposal passes if For votes > Against votes
-      if (forVotes > againstVotes && totalVotes > 0) {
+      // For closed proposals, determine result from votes (matches Snapshot website calculation)
+      if (totalVotes === 0) {
+        // Closed with 0 votes = Rejected (no one voted for it, like Snapshot website)
+        status = 'rejected';
+      } else if (forVotes > againstVotes) {
+        // Majority support = Passed
         status = 'passed';
       } else {
-        status = 'closed';
+        // Against votes >= For votes, or equal votes = Rejected
+        status = 'rejected';
       }
     } else if (proposal.state === 'pending') {
       status = 'pending';
@@ -2173,7 +2182,7 @@ export default apiInitializer((api) => {
       status = proposal.state || 'unknown';
     }
     
-    console.log("🔵 [TRANSFORM] Proposal state:", proposal.state, "→ Final status:", status);
+    console.log("🔵 [TRANSFORM] Proposal state:", proposal.state, "→ Final status:", status, "(calculated from votes:", { forVotes, againstVotes, totalVotes }, ")");
     
     // Calculate support percentage (For votes / Total votes)
     const supportPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
@@ -2395,7 +2404,7 @@ export default apiInitializer((api) => {
         </div>
         <div class="proposal-sidebar">
           <div class="status-badge ${isActive ? 'active' : isExecuted ? 'executed' : 'inactive'}">
-            ${isActive ? 'ACTIVE' : isExecuted ? 'EXECUTED' : 'INACTIVE'}
+            <strong>${isActive ? 'ACTIVE' : isExecuted ? 'EXECUTED' : 'INACTIVE'}</strong>
           </div>
           ${(() => {
             const statusLower = (proposalData.status || '').toLowerCase();
@@ -3359,7 +3368,7 @@ export default apiInitializer((api) => {
             <span>${stageName} (Snapshot)</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <div class="status-badge ${statusClass}">
-                ${statusBadgeText}
+                <strong>${statusBadgeText}</strong>
               </div>
             </div>
           </div>
@@ -3631,7 +3640,7 @@ export default apiInitializer((api) => {
             <span>AIP (On-Chain) ${aipNumber}</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <div class="status-badge ${statusClass}">
-                ${statusBadgeText}
+                <strong>${statusBadgeText}</strong>
               </div>
             </div>
           </div>
@@ -4679,7 +4688,7 @@ export default apiInitializer((api) => {
         ${isEndingSoon ? `<div class="urgency-alert" style="padding: 8px; margin-bottom: 12px; border-radius: 4px; background: #fee2e2; font-size: 0.85em; font-weight: 600; text-align: center; color: #dc2626;">⚠️ Ending Soon!</div>` : ''}
         <div class="status-badges-row">
           <div class="status-badge ${isPendingExecution ? 'pending' : isActive ? 'active' : isCreated ? 'created' : isExecuted ? 'executed' : isQueued ? 'queued' : isPending ? 'pending' : (displayStatus === 'Rejected' || status === 'rejected') ? 'rejected' : finalIsDefeat ? 'defeated' : finalIsQuorumNotReached ? 'quorum-not-reached' : status === 'failed' ? 'failed' : 'inactive'}">
-            ${displayStatus}
+            <strong>${displayStatus}</strong>
           </div>
           ${(() => {
             if (proposalData.daysLeft !== null && proposalData.daysLeft !== undefined && !isNaN(proposalData.daysLeft)) {
