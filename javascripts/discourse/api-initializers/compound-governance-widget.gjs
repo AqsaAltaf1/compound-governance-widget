@@ -2874,23 +2874,19 @@ export default apiInitializer((api) => {
     
     // CRITICAL: Check for existing widget by URL first (more reliable than ID)
     // This prevents duplicate widgets when the same URL is rendered multiple times
+    let statusWidget = null;
+    let isUpdatingInPlace = false;
+    
     if (proposalUrl) {
       const normalizedUrl = normalizeAIPUrl(proposalUrl);
       const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${proposalUrl}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
       if (existingWidgetByUrl) {
         // Check if it's the same widget by ID or if it's a different widget with same URL
         if (existingWidgetByUrl.id === statusWidgetId) {
-          // Same widget - check if it needs updating
-          const existingOrder = parseInt(existingWidgetByUrl.getAttribute("data-proposal-order") || existingWidgetByUrl.getAttribute("data-stage-order") || "999", 10);
-          const expectedOrder = proposalOrder !== null ? proposalOrder : (hasAllStages ? 3 : (stages.tempCheck && !stages.arfc && !stages.aip ? 1 : (stages.arfc && !stages.aip ? 2 : 3)));
-          
-          if (existingOrder === expectedOrder && existingWidgetByUrl.parentNode) {
-            console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists in correct position with same URL, skipping re-render to prevent blinking`);
-            // Remove from rendering set since widget is confirmed in DOM
-            renderingUrls.delete(proposalUrl);
-            renderingUrls.delete(normalizedUrl);
-            return;
-          }
+          // Same widget - update in place to prevent blinking
+          statusWidget = existingWidgetByUrl;
+          isUpdatingInPlace = true;
+          console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists, updating in place to prevent blinking`);
         } else {
           // Different widget with same URL - this is a duplicate, skip rendering
           console.log(`🔵 [RENDER] Found existing widget with same URL but different ID, skipping duplicate render`);
@@ -2902,39 +2898,33 @@ export default apiInitializer((api) => {
     }
     
     // Check if widget already exists by ID (fallback check)
-    const existingWidget = document.getElementById(statusWidgetId);
-    if (existingWidget) {
-      // Check if widget is already in the DOM and has correct order
-      const existingOrder = parseInt(existingWidget.getAttribute("data-proposal-order") || existingWidget.getAttribute("data-stage-order") || "999", 10);
-      const expectedOrder = proposalOrder !== null ? proposalOrder : (hasAllStages ? 3 : (stages.tempCheck && !stages.arfc && !stages.aip ? 1 : (stages.arfc && !stages.aip ? 2 : 3)));
-      
-      // Also check if URL matches (to prevent re-rendering same widget)
-      const existingUrl = existingWidget.getAttribute('data-tally-url');
-      const normalizedExistingUrl = existingUrl ? normalizeAIPUrl(existingUrl) : null;
-      const normalizedProposalUrl = proposalUrl ? normalizeAIPUrl(proposalUrl) : null;
-      const urlMatches = !proposalUrl || existingUrl === proposalUrl || normalizedExistingUrl === normalizedProposalUrl;
-      
-      // Only remove if order changed, URL changed, or if it's a forced re-render
-      if (existingOrder === expectedOrder && existingWidget.parentNode && urlMatches) {
-        console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists in correct position with same URL, skipping re-render to prevent blinking`);
-        // Remove from rendering set since widget is confirmed in DOM
-        if (proposalUrl) {
-          renderingUrls.delete(proposalUrl);
-          const normalizedUrl = normalizeAIPUrl(proposalUrl);
-          renderingUrls.delete(normalizedUrl);
+    if (!statusWidget) {
+      const existingWidget = document.getElementById(statusWidgetId);
+      if (existingWidget) {
+        // Also check if URL matches (to prevent re-rendering same widget)
+        const existingUrl = existingWidget.getAttribute('data-tally-url');
+        const normalizedExistingUrl = existingUrl ? normalizeAIPUrl(existingUrl) : null;
+        const normalizedProposalUrl = proposalUrl ? normalizeAIPUrl(proposalUrl) : null;
+        const urlMatches = !proposalUrl || existingUrl === proposalUrl || normalizedExistingUrl === normalizedProposalUrl;
+        
+        // Update in place if URL matches (prevents blinking)
+        if (urlMatches && existingWidget.parentNode) {
+          statusWidget = existingWidget;
+          isUpdatingInPlace = true;
+          console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists, updating in place to prevent blinking`);
+        } else {
+          // URL or order changed - need to remove and recreate
+          existingWidget.remove();
+          console.log(`🔵 [RENDER] Removed existing widget with ID: ${statusWidgetId} (order or URL changed)`);
         }
-        return;
       }
-      
-      // Remove only if we need to re-position or update
-      existingWidget.remove();
-      console.log(`🔵 [RENDER] Removed existing widget with ID: ${statusWidgetId} (order changed or needs update)`);
     }
     
     console.log(`🔵 [RENDER] Rendering ${widgetType} widget with stages:`, {
       tempCheck: !!stages.tempCheck,
       arfc: !!stages.arfc,
-      aip: !!stages.aip
+      aip: !!stages.aip,
+      isUpdatingInPlace
     });
     
     // Debug: Log what data we have for each stage
@@ -2962,9 +2952,14 @@ export default apiInitializer((api) => {
       console.log("ℹ️ [RENDER] No ARFC data - this is normal if only Temp Check/AIP is provided");
     }
     
-    const statusWidget = document.createElement("div");
-    statusWidget.id = statusWidgetId;
-    statusWidget.className = "tally-status-widget-container";
+    // Only create new widget if we're not updating in place
+    if (!statusWidget) {
+      statusWidget = document.createElement("div");
+      statusWidget.id = statusWidgetId;
+      statusWidget.className = "tally-status-widget-container";
+    }
+    
+    // Set/update attributes for both new and existing widgets
     statusWidget.setAttribute("data-widget-id", widgetId);
     statusWidget.setAttribute("data-widget-type", widgetType); // Mark widget type
     
@@ -3800,6 +3795,22 @@ export default apiInitializer((api) => {
       statusWidget.style.zIndex = '1';
       // Force immediate reflow to ensure visibility
       void statusWidget.offsetHeight;
+    }
+    
+    // CRITICAL: If updating in place, skip DOM insertion to prevent blinking
+    if (isUpdatingInPlace && statusWidget.parentNode) {
+      console.log("✅ [WIDGET] Widget updated in place, skipping DOM insertion to prevent blinking");
+      // Ensure widget is visible
+      statusWidget.style.display = 'block';
+      statusWidget.style.visibility = 'visible';
+      statusWidget.style.opacity = '1';
+      markWidgetAsVisibleInCache(statusWidget);
+      // Remove URL from rendering set now that widget is confirmed in DOM
+      if (proposalUrl) {
+        renderingUrls.delete(proposalUrl);
+        renderingUrls.delete(normalizeAIPUrl(proposalUrl));
+      }
+      return; // Exit early - widget updated in place
     }
     
     // Use inline positioning for mobile/small screens (insert before first post)
@@ -6798,6 +6809,8 @@ export default apiInitializer((api) => {
       const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
       if (existingWidgets.length > 0) {
         console.log(`🔵 [TOPIC] Widget setup already completed - skipping (${existingWidgets.length} widget(s) exist)`);
+        // Hide loader if widgets already exist
+        hideMainWidgetLoader();
         return Promise.resolve();
       }
     }
@@ -6805,6 +6818,9 @@ export default apiInitializer((api) => {
     // Set running flag to prevent concurrent executions
     isWidgetSetupRunning = true;
     console.log("🔵 [TOPIC] Setting up widgets - one per proposal URL...");
+    
+    // Show main loader to prevent blinking while widgets are being fetched
+    showMainWidgetLoader();
     
     // Category filtering - only run in allowed categories
     const allowedCategories = []; // e.g., ['governance', 'proposals', 'aave-governance']
@@ -6905,9 +6921,13 @@ export default apiInitializer((api) => {
         // Reset running flag after all retries are complete
         if (retryCount === retryDelays.length) {
           widgetSetupCompleted = true;
+          // Hide loader when all retries are done
+          hideMainWidgetLoader();
           // Reset running flag after a short delay to allow DOM updates to complete
           setTimeout(() => {
             isWidgetSetupRunning = false;
+            // Final hide of loader
+            hideMainWidgetLoader();
           }, 100);
         }
       }, delay);
@@ -8247,6 +8267,8 @@ export default apiInitializer((api) => {
       console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s): ${existingSnapshotWidgets.length} Snapshot, ${existingAIPWidgets.length} AIP), skipping re-render`);
       // Still ensure AIP widgets are visible
       ensureAIPWidgetsVisible();
+      // Hide loader since widgets already exist
+      hideMainWidgetLoader();
       // Mark as completed since widgets already exist and match
       widgetSetupCompleted = true;
       return; // Don't re-render if widgets already match
@@ -8323,6 +8345,8 @@ export default apiInitializer((api) => {
       hideWidgetIfNoProposal(); // This function already preserves AIP widgets
       // Still ensure any existing AIP widgets stay visible
       ensureAIPWidgetsVisible();
+      // Hide loader since there are no proposals to show
+      hideMainWidgetLoader();
       return;
     }
     
@@ -8724,11 +8748,11 @@ export default apiInitializer((api) => {
           // Use requestAnimationFrame to ensure snapshot widgets are in DOM before counting
           // Use .tally-status-widget-container which is the actual widget container
           requestAnimationFrame(() => {
-            const existingWidgetCount = document.querySelectorAll('.tally-status-widget-container').length;
+            const existingWidgetsCount = document.querySelectorAll('.tally-status-widget-container').length;
             const maxWidgets = 3;
-            const remainingSlots = maxWidgets - existingWidgetCount;
+            const remainingSlots = maxWidgets - existingWidgetsCount;
             
-            console.log(`🔵 [RENDER] Existing widgets: ${existingWidgetCount}, Remaining slots: ${remainingSlots}`);
+            console.log(`🔵 [RENDER] Existing widgets: ${existingWidgetsCount}, Remaining slots: ${remainingSlots}`);
             
             // ===== RENDER WIDGET FOR SELECTED AIP =====
             // Only render if we have remaining slots and a valid AIP
@@ -8918,15 +8942,25 @@ export default apiInitializer((api) => {
     // Reduced delays for faster visibility: immediate, 100ms, 300ms
     ensureAIPWidgetsVisible(); // Immediate
     
+    // Hide main loader once widgets start appearing
+    // Use a small delay to ensure widgets are rendered before hiding loader
+    setTimeout(() => {
+      hideMainWidgetLoader();
+    }, 100);
+    
     // Ensure widgets are visible after a delay
     setTimeout(() => {
       ensureAIPWidgetsVisible();
       console.log("✅ [TOPIC] Ensured all widgets are visible after processing all proposals");
+      // Final check to hide loader if still visible
+      hideMainWidgetLoader();
     }, 500); // Give widgets time to render
     
     // Also ensure visibility after a short delay to catch any lazy-loaded widgets
     setTimeout(() => {
       ensureAIPWidgetsVisible();
+      // Final hide of loader
+      hideMainWidgetLoader();
     }, 300);
   }
   
@@ -8941,6 +8975,79 @@ export default apiInitializer((api) => {
   const renderingUrls = new Set();
   // Track URLs currently being fetched to prevent duplicate fetches
   const fetchingUrls = new Set();
+  
+  // Main loader element to show while widgets are being fetched
+  let mainWidgetLoader = null;
+  
+  /**
+   * Show main loader at widget insertion point to prevent blinking
+   */
+  function showMainWidgetLoader() {
+    // Only show loader on topic pages
+    const isTopicPage = window.location.pathname.match(/^\/t\//);
+    if (!isTopicPage) {
+      return;
+    }
+    
+    // Remove existing loader if any
+    if (mainWidgetLoader && mainWidgetLoader.parentNode) {
+      mainWidgetLoader.remove();
+    }
+    
+    // Find insertion point (where widgets will appear)
+    const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+    const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
+    
+    if (!topicBody && !firstPost) {
+      return; // Can't find insertion point
+    }
+    
+    // Create loader element
+    mainWidgetLoader = document.createElement('div');
+    mainWidgetLoader.id = 'governance-widgets-main-loader';
+    mainWidgetLoader.className = 'governance-widgets-main-loader';
+    mainWidgetLoader.innerHTML = `
+      <div class="loader-content">
+        <div class="loading-spinner"></div>
+        <span class="loader-text">Loading governance proposals...</span>
+      </div>
+    `;
+    
+    // Insert loader at widget insertion point
+    if (firstPost && firstPost.parentNode) {
+      firstPost.parentNode.insertBefore(mainWidgetLoader, firstPost);
+    } else if (topicBody) {
+      topicBody.insertBefore(mainWidgetLoader, topicBody.firstChild);
+    } else {
+      const mainContent = document.querySelector('main, [role="main"]');
+      if (mainContent) {
+        mainContent.insertBefore(mainWidgetLoader, mainContent.firstChild);
+      }
+    }
+    
+    console.log("🔵 [LOADER] Main widget loader shown");
+  }
+  
+  /**
+   * Hide main loader once widgets are rendered
+   */
+  function hideMainWidgetLoader() {
+    if (mainWidgetLoader && mainWidgetLoader.parentNode) {
+      // Fade out animation
+      mainWidgetLoader.style.opacity = '0';
+      mainWidgetLoader.style.transition = 'opacity 0.3s ease-out';
+      
+      setTimeout(() => {
+        if (mainWidgetLoader && mainWidgetLoader.parentNode) {
+          mainWidgetLoader.remove();
+          console.log("🔵 [LOADER] Main widget loader hidden");
+        }
+        mainWidgetLoader = null;
+      }, 300);
+    } else {
+      mainWidgetLoader = null;
+    }
+  }
   
   function debouncedSetupTopicWidget() {
     // Clear any pending setup
