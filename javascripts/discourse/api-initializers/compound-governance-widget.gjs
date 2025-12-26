@@ -6787,7 +6787,11 @@ export default apiInitializer((api) => {
   // AIP widget only shows after Snapshot proposals are concluded (not active)
   // Live vote counts (For, Against, Abstain) are shown for active Snapshot proposals
   function setupTopicWidget() {
-    console.log("🔵 [TOPIC] Setting up widgets - one per proposal URL...");
+    // CRITICAL: Prevent concurrent executions - check running flag first
+    if (isWidgetSetupRunning) {
+      console.log(`🔵 [TOPIC] Widget setup already running - skipping concurrent execution`);
+      return Promise.resolve();
+    }
     
     // CRITICAL: Early return if widget setup already completed and widgets exist
     if (widgetSetupCompleted) {
@@ -6797,6 +6801,10 @@ export default apiInitializer((api) => {
         return Promise.resolve();
       }
     }
+    
+    // Set running flag to prevent concurrent executions
+    isWidgetSetupRunning = true;
+    console.log("🔵 [TOPIC] Setting up widgets - one per proposal URL...");
     
     // Category filtering - only run in allowed categories
     const allowedCategories = []; // e.g., ['governance', 'proposals', 'aave-governance']
@@ -6819,9 +6827,13 @@ export default apiInitializer((api) => {
     
     // Render widgets immediately if proposals found
     if (allProposals.snapshot.length > 0 || allProposals.aip.length > 0) {
-      setupTopicWidgetWithProposals(allProposals);
-      // Mark as completed after successful widget creation
+      // Mark as completed BEFORE rendering to prevent observer-triggered re-executions
       widgetSetupCompleted = true;
+      try {
+        setupTopicWidgetWithProposals(allProposals);
+      } catch (error) {
+        console.error("❌ [TOPIC] Error in setupTopicWidgetWithProposals:", error);
+      }
     }
     
     // CRITICAL: Retry to catch lazy-loaded content for BOTH Snapshot and AIP proposals
@@ -6839,6 +6851,10 @@ export default apiInitializer((api) => {
           const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
           if (existingWidgets.length > 0) {
             console.log(`🔵 [TOPIC] Retry ${retryCount + 1} skipped - widget setup already completed`);
+            // Reset running flag when all retries are done
+            if (retryCount === retryDelays.length - 1) {
+              isWidgetSetupRunning = false;
+            }
             return;
           }
         }
@@ -6873,19 +6889,26 @@ export default apiInitializer((api) => {
             aip: [...new Set([...allProposals.aip, ...retryProposals.aip])],
             forum: [...new Set([...allProposals.forum, ...retryProposals.forum])]
           };
-          setupTopicWidgetWithProposals(mergedProposals);
+          // Mark as completed BEFORE rendering to prevent observer-triggered re-executions
+          widgetSetupCompleted = true;
+          try {
+            setupTopicWidgetWithProposals(mergedProposals);
+          } catch (error) {
+            console.error("❌ [TOPIC] Error in setupTopicWidgetWithProposals (retry):", error);
+          }
           // Update allProposals so subsequent retries don't duplicate
           allProposals.snapshot = mergedProposals.snapshot;
           allProposals.aip = mergedProposals.aip;
           allProposals.forum = mergedProposals.forum;
-          // Mark as completed after successful widget update
+        }
+        
+        // Reset running flag after all retries are complete
+        if (retryCount === retryDelays.length) {
           widgetSetupCompleted = true;
-        } else {
-          console.log(`🔵 [TOPIC] Retry ${retryCount}: No new proposals found (total: ${foundUrls.size})`);
-          // Mark as completed if no new proposals found (prevents further retries)
-          if (retryCount === retryDelays.length) {
-            widgetSetupCompleted = true;
-          }
+          // Reset running flag after a short delay to allow DOM updates to complete
+          setTimeout(() => {
+            isWidgetSetupRunning = false;
+          }, 100);
         }
       }, delay);
     });
@@ -8231,30 +8254,47 @@ export default apiInitializer((api) => {
     
     // Clear existing widgets only if proposals have changed
     // CRITICAL: Never clear AIP widgets - they are topic-level and should always stay visible
+    // CRITICAL: Only clear widgets if URLs don't match - prevents blinking on navigation
     if (existingWidgets.length > 0) {
-      console.log(`🔵 [TOPIC] Proposals changed - clearing ${existingWidgets.length} existing widget(s) before creating new ones (AIP widgets will be preserved)`);
-      existingWidgets.forEach(widget => {
-        // Check if this is an AIP widget - if so, skip it (never remove AIP widgets)
-        const widgetType = widget.getAttribute('data-proposal-type');
-        const widgetTypeAttr = widget.getAttribute('data-widget-type');
-        const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
-        const url = widget.getAttribute('data-tally-url') || '';
-        const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
-        
-        if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
-          console.log("🔵 [WIDGET] Preserving AIP widget during proposal change - type:", widgetType, "widgetType:", widgetTypeAttr);
-          return; // Skip AIP widgets - never remove them
-        }
-        
-        // Only remove Snapshot widgets
-        const widgetUrl = widget.getAttribute('data-tally-url');
-        if (widgetUrl) {
-          // Remove from tracking sets when clearing widget
-          renderingUrls.delete(widgetUrl);
-          fetchingUrls.delete(widgetUrl);
-        }
-        widget.remove();
-      });
+      // Check if we need to clear widgets - only clear if URLs don't match
+      const needsClearing = !snapshotUrlsMatch || existingSnapshotWidgets.length !== allProposals.snapshot.length;
+      
+      if (needsClearing) {
+        console.log(`🔵 [TOPIC] Proposals changed - clearing ${existingWidgets.length} existing widget(s) before creating new ones (AIP widgets will be preserved)`);
+        existingWidgets.forEach(widget => {
+          // Check if this is an AIP widget - if so, skip it (never remove AIP widgets)
+          const widgetType = widget.getAttribute('data-proposal-type');
+          const widgetTypeAttr = widget.getAttribute('data-widget-type');
+          const hasAIP = widget.querySelector('.governance-stage[data-stage="aip"]') !== null;
+          const url = widget.getAttribute('data-tally-url') || '';
+          const isAIPUrl = url.includes('vote.onaave.com') || url.includes('app.aave.com/governance') || url.includes('governance.aave.com/aip/');
+          
+          if (widgetType === 'aip' || widgetTypeAttr === 'aip' || hasAIP || isAIPUrl) {
+            console.log("🔵 [WIDGET] Preserving AIP widget during proposal change - type:", widgetType, "widgetType:", widgetTypeAttr);
+            return; // Skip AIP widgets - never remove them
+          }
+          
+          // Only remove Snapshot widgets that don't match current proposals
+          const widgetUrl = widget.getAttribute('data-tally-url');
+          if (widgetUrl) {
+            // For Snapshot URLs, compare directly (they're already in currentUrls as-is)
+            // Only remove if URL is not in current proposals
+            if (!currentUrls.has(widgetUrl)) {
+              // Remove from tracking sets when clearing widget
+              renderingUrls.delete(widgetUrl);
+              fetchingUrls.delete(widgetUrl);
+              widget.remove();
+            } else {
+              console.log(`🔵 [WIDGET] Preserving widget with matching URL: ${widgetUrl}`);
+            }
+          } else {
+            // No URL - remove it
+            widget.remove();
+          }
+        });
+      } else {
+        console.log(`🔵 [TOPIC] Widgets match current proposals - skipping widget clearing to prevent blinking`);
+      }
     }
     
     // Also clear the container if it exists (will be recreated if needed)
@@ -8271,9 +8311,10 @@ export default apiInitializer((api) => {
       }
     }
     
-    // Clear all tracking sets when starting fresh
-    renderingUrls.clear();
-    fetchingUrls.clear();
+    // Clear tracking sets only for URLs that were actually removed
+    // URLs for preserved widgets are already handled above (removed from sets when widgets are removed)
+    // Only clear tracking for URLs that don't have corresponding widgets anymore
+    // This prevents re-rendering preserved widgets while allowing new widgets to be created
     
     // Only clear widgets if there are no proposals at all
     // hideWidgetIfNoProposal() already preserves AIP widgets, so it's safe to call
@@ -9185,6 +9226,15 @@ export default apiInitializer((api) => {
     // CRITICAL: Also watch for oneboxes and preview containers being added
     // When oneboxes/preview containers are added, extract URLs from them
     const previewObserver = new MutationObserver((mutations) => {
+      // CRITICAL: Skip if widget setup is already completed or running to prevent blinking
+      if (widgetSetupCompleted || isWidgetSetupRunning) {
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (existingWidgets.length > 0) {
+          // Widgets already exist - skip observer-triggered setup to prevent re-renders
+          return;
+        }
+      }
+      
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === 1) { // Element node
@@ -9201,11 +9251,14 @@ export default apiInitializer((api) => {
               SNAPSHOT_URL_REGEX.lastIndex = 0;
               const textMatches = Array.from(oneboxText.matchAll(SNAPSHOT_URL_REGEX));
               if (textMatches.length > 0 || oneboxLinks.length > 0) {
-                console.log(`✅ [TOPIC] Onebox added with ${textMatches.length} Snapshot URL(s) in text, ${oneboxLinks.length} in links`);
-                // Re-scan to add these URLs to proposals
-                setTimeout(() => {
-                  debouncedSetupTopicWidget();
-                }, 200);
+                // CRITICAL: Double-check before triggering setup
+                if (!widgetSetupCompleted && !isWidgetSetupRunning) {
+                  console.log(`✅ [TOPIC] Onebox added with ${textMatches.length} Snapshot URL(s) in text, ${oneboxLinks.length} in links`);
+                  // Re-scan to add these URLs to proposals
+                  setTimeout(() => {
+                    debouncedSetupTopicWidget();
+                  }, 200);
+                }
               }
             }
             
@@ -9218,17 +9271,23 @@ export default apiInitializer((api) => {
               // Check for URL in data attribute first (fastest method)
               const storedUrl = preview.getAttribute('data-tally-url');
               if (storedUrl && (storedUrl.includes('snapshot.org') || storedUrl.includes('snapshot.box'))) {
-                console.log(`✅ [TOPIC] Preview container added with Snapshot URL in data attribute: ${storedUrl}`);
-                // Re-scan immediately for faster detection
-                debouncedSetupTopicWidget();
+                // CRITICAL: Double-check before triggering setup
+                if (!widgetSetupCompleted && !isWidgetSetupRunning) {
+                  console.log(`✅ [TOPIC] Preview container added with Snapshot URL in data attribute: ${storedUrl}`);
+                  // Re-scan immediately for faster detection
+                  debouncedSetupTopicWidget();
+                }
               } else {
                 // Wait a short time for links to be added to preview container (reduced from 500ms to 100ms)
                 setTimeout(() => {
-                  const previewLinks = preview.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
-                  if (previewLinks.length > 0) {
-                    console.log(`✅ [TOPIC] Preview container added with ${previewLinks.length} Snapshot URL(s)`);
-                    // Re-scan to add these URLs to proposals
-                    debouncedSetupTopicWidget();
+                  // CRITICAL: Check again before triggering setup
+                  if (!widgetSetupCompleted && !isWidgetSetupRunning) {
+                    const previewLinks = preview.querySelectorAll('a[href*="snapshot.org"], a[href*="snapshot.box"], a[href*="testnet.snapshot.box"]');
+                    if (previewLinks.length > 0) {
+                      console.log(`✅ [TOPIC] Preview container added with ${previewLinks.length} Snapshot URL(s)`);
+                      // Re-scan to add these URLs to proposals
+                      debouncedSetupTopicWidget();
+                    }
                   }
                 }, 100);
               }
@@ -9256,12 +9315,13 @@ export default apiInitializer((api) => {
     // Process immediately like tally widget - minimal delays
     console.log("🔍 [TOPIC] Running immediate scan for proposals on page load...");
     
-    // Run immediately (like tally widget)
+    // Run immediately (like tally widget) - only once to prevent multiple simultaneous executions
     setupTopicWidget();
     
     // Only retry once after 100ms (like tally widget) to catch lazy-loaded content
+    // Use debounced version to prevent concurrent executions
     setTimeout(() => {
-      setupTopicWidget();
+      debouncedSetupTopicWidget();
       ensureAllWidgetsVisible();
     }, 100);
     
@@ -11346,7 +11406,30 @@ export default apiInitializer((api) => {
       if (container) {
         container.remove();
       }
+      // Reset topic tracking
+      widgetSetupCompleted = false;
+      currentTopicId = null;
       return;
+    }
+    
+    // CRITICAL: Check if we're navigating to a different topic
+    // If same topic, preserve widgets to prevent blinking
+    const topicMatch = window.location.pathname.match(/^\/t\/[^\/]+\/(\d+)/);
+    const newTopicId = topicMatch ? topicMatch[1] : window.location.pathname;
+    
+    if (currentTopicId && currentTopicId === newTopicId) {
+      console.log(`🔵 [TOPIC] Same topic (${newTopicId}) - preserving widgets to prevent blinking`);
+      // Same topic - just ensure watcher is set up, but don't re-initialize widgets
+      setupTopicWatcher();
+      setupGlobalComposerDetection();
+      return;
+    }
+    
+    // Different topic - reset flags to allow fresh widget setup
+    if (currentTopicId !== newTopicId) {
+      console.log(`🔵 [TOPIC] Topic changed from ${currentTopicId} to ${newTopicId} - will re-initialize widgets`);
+      widgetSetupCompleted = false;
+      currentTopicId = newTopicId;
     }
     
     // Initialize immediately - no setTimeout delay
