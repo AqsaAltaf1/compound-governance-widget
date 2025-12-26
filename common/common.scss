@@ -8,21 +8,336 @@
   max-width: 1400px !important; // Adjust this value to control content width
 }
 
+// Global rule: Ensure all vote buttons are full width on mobile screens
+// Increased breakpoint from 1024px to 1400px for earlier mobile behavior
+@media (width <= 1400px) {
+  .vote-button {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  // Ensure parent containers don't constrain button width
+  .governance-stage,
+  .stage-collapsed-content,
+  .tally-status-widget,
+  .arbitrium-proposal-widget {
+    .vote-button {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 100% !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      box-sizing: border-box !important;
+    }
+  }
+}
+
+//
+// Widgets container wrapper for column layout
+// Holds multiple widgets stacked vertically
+// Fixed positioning on right side for large screens, inline for smaller screens
+//
+.governance-widgets-wrapper {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+  position: fixed !important;
+  z-index: 500 !important;
+  width: 320px !important;
+  max-width: 320px !important;
+  max-height: calc(100vh - 100px) !important;
+  overflow-y: auto !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+
+  // CRITICAL: Prevent Discourse's cloaking system from hiding the container
+  // Discourse uses [data-cloak] attribute to hide elements - we override it
+  &[data-cloak],
+  &[data-cloak="true"],
+  &[data-cloak="false"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // CRITICAL: Ensure widget stays fixed and visible during scroll
+  // Use !important to override any Discourse styles that might hide it
+  will-change: transform !important; // Optimize for fixed positioning
+  backface-visibility: hidden !important; // Prevent flickering
+  transform: translateZ(0) !important; // Force GPU acceleration
+
+  // Position like tally widget - fixed percentage distance from right edge (large screens only)
+  right: 2% !important; // Percentage-based distance from right edge, maintains consistent spacing
+  top: 180px !important;
+  left: auto !important;
+
+  // Ensure widgets maintain order based on data-proposal-order attribute
+  // This ensures consistent ordering across all screen sizes
+  .tally-status-widget-container {
+    // Use CSS custom property to set order from data attribute
+    // JavaScript will set the order via inline style, but we ensure it's respected
+    order: var(--proposal-order, 999) !important;
+
+    // When inside wrapper, remove fixed positioning
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 0 !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+  }
+
+  // CRITICAL: Force AIP widgets to always be visible (topic-level widgets, not viewport-dependent)
+  .tally-status-widget-container[data-proposal-type="aip"],
+  .tally-status-widget-container[data-widget-type="aip"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // CRITICAL: Force Snapshot widgets (including testnet) to always be visible immediately
+  // Same behavior as production - no scroll-based lazy loading
+  .tally-status-widget-container[data-proposal-type="snapshot"],
+  .tally-status-widget-container[data-widget-type="snapshot"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    // Ensure testnet widgets have same layout and responsiveness as production
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  // CRITICAL: Ensure testnet widgets are always visible (same as production)
+  // No lazy loading or scroll-based visibility for testnet widgets
+  .tally-status-widget-container[data-is-testnet="true"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    // Same classes, same layout, same responsiveness as production
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  // Tablet/Mid-range: Show widgets inline in topic (JavaScript will override for 1480-1780px if sidebar collapsed)
+  // Less than 1480px: always inline
+  @media (width > 768px) and (width < 1480px) {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    gap: 12px !important;
+  }
+
+  // 1480-1780px: JavaScript will handle based on sidebar state
+  // If sidebar collapsed: fixed on right (handled by JS)
+  // If sidebar expanded: inline on top (handled by JS)
+  @media (width >= 1480px) and (width <= 1780px) {
+    // Default to inline, JavaScript will override if sidebar is collapsed
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    gap: 12px !important;
+  }
+
+  // Mobile: Show widgets inline in topic
+  @media (width <= 768px) {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    gap: 12px !important;
+  }
+
+  // Small mobile: Reduce gap
+  @media (width <= 480px) {
+    gap: 8px !important;
+  }
+}
+
 //
 // Status widget on the right side (outside post box) - compact, no overlap
 // Position next to scroll indicator, centered with 20px left margin
+// When inside wrapper, uses relative positioning
 //
 .tally-status-widget-container {
-  position: fixed !important;
-  left: 1498.5px !important;
-  top: 180px !important;
-  transform: none !important;
-  right: 0 !important;
-  width: 320px !important;
-  max-width: 320px !important;
-  z-index: 500 !important; // Lower than scroll numbers
-  max-height: calc(100vh - 100px) !important;
-  overflow-y: auto !important;
+  position: relative !important; // Changed from fixed - container handles positioning
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-bottom: 0 !important;
+
+  // Ensure widgets maintain order based on data-proposal-order attribute
+  // This ensures consistent ordering across all screen sizes (mobile, tablet, desktop)
+  // First proposal appears first, second appears second, etc.
+  order: var(--proposal-order, 999) !important;
+
+  // Prevent flickering/blinking during DOM updates
+  // Use contain to optimize rendering and prevent layout shifts
+  contain: layout style paint !important;
+
+  // Ensure widget stays visible during updates (prevent opacity flicker)
+  // CRITICAL: These !important rules prevent widgets from disappearing on scroll
+  // These base rules apply ALWAYS, regardless of any attributes or classes Discourse might add
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+
+  // CRITICAL: Override ANY possible state Discourse might apply
+  // This catches ALL possible combinations of attributes and classes
+  // Use universal selector to catch everything
+  &,
+  &[data-cloak],
+  &[data-cloak="true"],
+  &[data-cloak="false"],
+  &[data-cloaked],
+  &[data-cloaked="true"],
+  &.cloaked,
+  &.hidden,
+  &[style*="display: none"],
+  &[style*="visibility: hidden"],
+  &[style*="opacity: 0"],
+  &[style*="display:none"],
+  &[style*="visibility:hidden"],
+  &[style*="opacity:0"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    // Force these even if inline styles try to override
+    min-height: 1px !important;
+    height: auto !important;
+  }
+
+  // CRITICAL: Additional protection - ensure widgets can never be hidden
+  // Use max specificity to override any Discourse styles
+  html body & {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // CRITICAL: Exclude from Discourse's viewport tracking entirely
+  // Discourse viewport tracker should NOT process these widgets at all
+  // Use multiple selectors to ensure complete exclusion
+  &.no-viewport-track,
+  &[data-viewport="false"],
+  &[data-exclude-viewport="true"],
+  &[data-no-viewport-track="true"] {
+    // Force visibility and prevent Discourse from hiding
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+
+    // Prevent Discourse from applying viewport tracking styles
+    contain: none !important;
+
+    // Ensure these widgets are never processed by viewport tracker
+    will-change: auto !important;
+  }
+
+  // This prevents Discourse from even attempting to hide/cloak our widgets
+  pointer-events: auto !important;
+
+  // CRITICAL: Prevent Discourse's cloaking system from hiding widgets
+  // Discourse uses [data-cloak] attribute to hide elements on scroll - we override it
+  &[data-cloak],
+  &[data-cloak="true"],
+  &[data-cloak="false"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // Also override any CSS that Discourse might apply for cloaked elements
+  &.cloaked,
+  &[data-cloaked="true"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // When NOT in wrapper (legacy/fallback), use fixed positioning for large screens, inline for smaller
+  &:not(.governance-widgets-wrapper > *) {
+    position: fixed !important;
+    left: 1498.5px !important;
+    top: 180px !important;
+    transform: none !important;
+    right: 0 !important;
+    width: 320px !important;
+    max-width: 320px !important;
+    z-index: 500 !important; // Lower than scroll numbers
+    max-height: calc(100vh - 100px) !important;
+    overflow-y: auto !important;
+
+    // For screens not wide enough, use relative positioning to prevent off-screen placement
+    // 1498.5px (left) + 320px (width) + 20px (margin) = ~1840px minimum needed
+    @media (width < 1840px) {
+      position: relative !important;
+      left: auto !important;
+      right: auto !important;
+      top: auto !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: none !important;
+      overflow-y: visible !important;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      margin-bottom: 20px !important;
+    }
+
+    // Mobile: Override fixed positioning to show inline
+    // Increased breakpoint from 1024px to 1400px for earlier mobile behavior
+    @media (width <= 1400px) {
+      position: relative !important;
+      left: auto !important;
+      right: auto !important;
+      top: auto !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: none !important;
+      overflow-y: visible !important;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      margin-bottom: 20px !important;
+    }
+  }
 
   // Position will be set dynamically by JavaScript relative to timeline
   .tally-status-widget {
@@ -31,8 +346,53 @@
     border-radius: 8px;
     box-shadow: 0 4px 6px rgb(0 0 0 / 0.1);
     padding: 12px;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     font-family:
       -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    position: relative !important;
+
+    // Responsive padding
+    @media (width <= 768px) {
+      padding: 16px !important;
+      border-radius: 12px !important;
+    }
+
+    @media (width > 768px) and (width <= 1400px) {
+      padding: 14px !important;
+    }
+
+    .widget-close-btn {
+      position: absolute !important;
+      top: 8px !important;
+      right: 8px !important;
+      background: transparent !important;
+      border: none !important;
+      font-size: 20px !important;
+      line-height: 1 !important;
+      cursor: pointer !important;
+      color: #6b7280 !important;
+      width: 24px !important;
+      height: 24px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      transition: all 0.2s !important;
+      z-index: 10 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+
+      &:hover {
+        background: #f3f4f6 !important;
+        color: #111827 !important;
+      }
+
+      &:active {
+        background: #e5e7eb !important;
+      }
+    }
 
     .status-badges-row {
       display: flex;
@@ -40,16 +400,30 @@
       align-items: center;
       margin-bottom: 12px;
       gap: 6px;
+      flex-wrap: wrap;
+
+      // Mobile: Stack badges vertically if needed
+      @media (width <= 480px) {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
 
       .status-badge {
         display: inline-block;
         padding: 4px 10px;
         border-radius: 4px;
         font-size: 0.7em;
-        font-weight: 600;
+        font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.3px;
         white-space: nowrap;
+
+        // Mobile: Larger touch targets
+        @media (width <= 768px) {
+          padding: 6px 12px !important;
+          font-size: 0.75em !important;
+        }
 
         &.active {
           background: #dcfce7;
@@ -57,7 +431,19 @@
           border: 1px solid #86efac;
         }
 
+        &.created {
+          background: #dcfce7;
+          color: #166534;
+          border: 1px solid #86efac;
+        }
+
         &.executed {
+          background: #dbeafe;
+          color: #1e40af;
+          border: 1px solid #93c5fd;
+        }
+
+        &.passed {
           background: #dbeafe;
           color: #1e40af;
           border: 1px solid #93c5fd;
@@ -71,11 +457,23 @@
 
         &.defeated,
         &.quorum-not-reached,
-        &.cancelled,
-        &.failed {
+        &.failed,
+        &.rejected {
           background: #fee2e2;
           color: #dc2626; // Red text like Tally website
           border: 1px solid #fca5a5;
+        }
+
+        &.cancelled {
+          background: #fee2e2;
+          color: #dc2626; // Red for cancelled
+          border: 1px solid #fca5a5;
+        }
+
+        &.expired {
+          background: #f3f4f6;
+          color: #6b7280; // Gray for expired
+          border: 1px solid #d1d5db;
         }
 
         &.queued {
@@ -85,36 +483,137 @@
         }
 
         &.pending {
-          background: #fef3c7;
-          color: #92400e;
-          border: 1px solid #fde68a;
+          background: #f3f4f6;
+          color: #6b7280;
+          border: 1px solid #d1d5db;
+        }
+
+        // Large screens: Add left margin
+        @media (width > 1800px) {
+          margin-left: 15px;
         }
       }
 
       .days-left-badge {
-        padding: 4px 10px;
+        padding: 4px 10px 4px 0;
         border-radius: 4px;
-        font-size: 0.7em;
+        font-size: 0.8em;
         font-weight: 600;
+        color: #6b7280;
+        white-space: nowrap;
+      }
+    }
+
+    // Status badge styling for governance-stage (when status is on same row as stage name)
+    .governance-stage .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.7em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+
+      &.active {
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+
+      &.created {
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+
+      &.executed {
+        background: #dbeafe;
+        color: #1e40af;
+        border: 1px solid #93c5fd;
+      }
+
+      &.passed {
+        background: #dbeafe;
+        color: #1e40af;
+        border: 1px solid #93c5fd;
+      }
+
+      &.inactive {
         background: #f3f4f6;
         color: #6b7280;
         border: 1px solid #d1d5db;
-        white-space: nowrap;
+      }
+
+      &.defeated,
+      &.quorum-not-reached,
+      &.failed,
+      &.rejected {
+        background: #fee2e2;
+        color: #dc2626; // Red text like Tally website
+        border: 1px solid #fca5a5;
+      }
+
+      &.cancelled {
+        background: #fee2e2;
+        color: #dc2626; // Red for cancelled
+        border: 1px solid #fca5a5;
+      }
+
+      &.expired {
+        background: #f3f4f6;
+        color: #6b7280; // Gray for expired
+        border: 1px solid #d1d5db;
+      }
+
+      &.queued {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+      }
+
+      &.pending {
+        background: #f3f4f6;
+        color: #6b7280;
+        border: 1px solid #d1d5db;
+      }
+
+      // Large screens: Add left margin
+      @media (width > 1800px) {
+        margin-left: 15px;
       }
     }
 
     .voting-results-inline {
       display: flex;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       gap: 12px;
       margin-bottom: 10px;
       font-size: 0.9em;
       line-height: 1.5;
 
+      // Mobile: Stack vote results
+      @media (width <= 480px) {
+        flex-direction: column;
+        gap: 8px;
+        font-size: 0.85em;
+      }
+
+      // Tablet: Allow wrapping
+      @media (width > 480px) and (width <= 768px) {
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
       .vote-result-inline {
         font-weight: 600;
         white-space: nowrap;
         flex-shrink: 0;
+
+        // Mobile: Allow wrapping on very small screens
+        @media (width <= 360px) {
+          white-space: normal;
+        }
 
         &.vote-for {
           color: #10b981; // Green for "For"
@@ -138,15 +637,26 @@
     .progress-bar-container {
       margin-bottom: 1px;
 
+      // Mobile: More spacing
+      @media (width <= 768px) {
+        margin-bottom: 12px;
+      }
+
       .progress-bar {
         width: 100%;
-        height: 12px;
-        border-radius: 6px;
+        height: 6px; // Thinner progress bar
+        border-radius: 3px;
         overflow: hidden;
         display: flex;
         background: #f3f4f6; // Light grey background so empty bar is visible
         border: 1px solid #e5e7eb; // Light grey border
         position: relative;
+
+        // Mobile: Slightly taller for visibility
+        @media (width <= 768px) {
+          height: 8px;
+          border-radius: 4px;
+        }
 
         .progress-segment {
           height: 100%;
@@ -172,8 +682,9 @@
     }
 
     .vote-button {
-      display: block;
-      width: 100%;
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
       padding: 8px 12px;
       background-color: var(--d-button-primary-bg-color, #2563eb) !important;
       color: var(--d-button-primary-text-color, white) !important;
@@ -181,11 +692,29 @@
       border-radius: 4px;
       font-size: 0.85em;
       font-weight: 600;
-      text-align: center;
+      text-align: center !important;
       text-decoration: none;
       transition: background-color 0.2s;
       margin-top: 10px;
       box-sizing: border-box;
+
+      // Mobile: Larger touch target (minimum 44x44px) and 100% width with centered text
+      // Ensure full width on ALL mobile screens (phones and tablets)
+      @media (width <= 1400px) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 100% !important;
+        padding: 12px 16px !important;
+        font-size: 0.9em !important;
+        min-height: 44px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
+      }
 
       &:hover {
         background-color: var(
@@ -208,6 +737,54 @@
         outline-offset: 2px;
       }
     }
+
+    // Prevent hover color change for buttons in governance stages
+    .governance-stage {
+      // Ensure full width on mobile
+      @media (width <= 768px) {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+
+      .stage-collapsed-content {
+        // Ensure collapsed content is full width on mobile
+        @media (width <= 768px) {
+          width: 100% !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+      }
+
+      .vote-button {
+        // Ensure 100% width and centered text for governance stage buttons
+        width: 100% !important;
+        max-width: 100% !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+
+        // Ensure full width on ALL mobile screens (phones and tablets)
+        @media (width <= 1400px) {
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 100% !important;
+          text-align: center !important;
+          box-sizing: border-box !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          padding-left: 12px !important;
+          padding-right: 12px !important;
+        }
+
+        &:hover {
+          background-color: var(
+            --d-button-primary-bg-color,
+            #2563eb
+          ) !important;
+          color: var(--d-button-primary-text-color, white) !important;
+        }
+      }
+    }
   }
 
   // Mobile: Show on top of post instead of side
@@ -223,6 +800,12 @@
     z-index: auto !important;
     max-height: none !important;
     overflow-y: visible !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    // Ensure order is maintained on mobile
+    order: var(--proposal-order, 999) !important;
   }
 }
 
@@ -320,13 +903,27 @@
     }
   }
 
+  // Tablet: Adjust width
+  @media (width > 768px) and (width <= 1400px) {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
   // Mobile: Full width
   @media (width <= 768px) {
     width: 100% !important;
     float: none !important;
     position: relative !important;
     margin-left: 0 !important;
+    margin-right: 0 !important;
     margin-bottom: 20px !important;
+  }
+
+  // Small mobile: Reduce margins
+  @media (width <= 480px) {
+    margin-bottom: 16px !important;
   }
 }
 
@@ -370,11 +967,27 @@
     padding: 20px;
     border-bottom: 1px solid #e5e7eb;
 
+    // Mobile: Adjust padding
+    @media (width <= 768px) {
+      padding: 16px !important;
+    }
+
+    @media (width <= 480px) {
+      padding: 12px !important;
+    }
+
     .proposal-title {
       margin: 0 0 8px 0;
       font-size: 1em;
       font-weight: 600;
       line-height: 1.4;
+
+      // Mobile: Larger text for readability
+      @media (width <= 768px) {
+        font-size: 1.05em !important;
+        line-height: 1.5 !important;
+        margin-bottom: 12px !important;
+      }
 
       a {
         color: #111827;
@@ -396,6 +1009,19 @@
       white-space: pre-wrap;
       max-height: 200px;
       overflow-y: auto;
+
+      // Mobile: Better readability
+      @media (width <= 768px) {
+        font-size: 0.9em !important;
+        line-height: 1.7 !important;
+        max-height: 250px !important;
+        margin-top: 16px !important;
+      }
+
+      @media (width <= 480px) {
+        font-size: 0.875em !important;
+        max-height: 300px !important;
+      }
     }
 
     .proposal-author {
@@ -423,16 +1049,33 @@
     gap: 16px;
     background: #f9fafb;
 
+    // Mobile: Adjust padding and gap
+    @media (width <= 768px) {
+      padding: 16px !important;
+      gap: 14px !important;
+    }
+
+    @media (width <= 480px) {
+      padding: 12px !important;
+      gap: 12px !important;
+    }
+
     .status-badge {
       padding: 8px 12px;
       border-radius: 6px;
       font-size: 0.8em;
-      font-weight: 600;
+      font-weight: 700;
       text-align: center;
       text-transform: uppercase;
       letter-spacing: 0.5px;
 
       &.active {
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+
+      &.created {
         background: #dcfce7;
         color: #166534;
         border: 1px solid #86efac;
@@ -444,17 +1087,21 @@
         border: 1px solid #93c5fd;
       }
 
-      &.cancelled,
-      &.failed {
-        background: #fee2e2;
-        color: #dc2626; // Red text like Tally website
-        border: 1px solid #fca5a5;
+      &.passed {
+        background: #dbeafe;
+        color: #1e40af;
+        border: 1px solid #93c5fd;
       }
 
       &.inactive {
         background: #f3f4f6;
         color: #6b7280;
         border: 1px solid #d1d5db;
+      }
+
+      // Large screens: Add left margin
+      @media (width > 1800px) {
+        margin-left: 15px;
       }
     }
 
@@ -497,6 +1144,16 @@
             border-radius: 4px;
             overflow: hidden;
             position: relative;
+
+            // Mobile: Taller for better visibility
+            @media (width <= 768px) {
+              height: 28px !important;
+              border-radius: 6px !important;
+            }
+
+            @media (width <= 480px) {
+              height: 26px !important;
+            }
 
             .vote-fill {
               height: 100%;
@@ -541,6 +1198,27 @@
       text-align: center;
       transition: background 0.2s;
 
+      // Mobile: Larger touch target and 100% width on ALL mobile screens
+      @media (width <= 1400px) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 100% !important;
+        padding: 14px 20px !important;
+        font-size: 1em !important;
+        min-height: 48px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
+      }
+
+      @media (width <= 480px) {
+        padding: 12px 16px !important;
+        font-size: 0.95em !important;
+      }
+
       &:hover {
         background: #1d4ed8;
         text-decoration: none;
@@ -584,9 +1262,224 @@
   }
 }
 
+// Loading placeholder styles - shows skeleton/blur while widget is loading
+.loading-placeholder {
+  .loading-widget {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    min-height: 200px;
+
+    // Blur overlay effect
+    &::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgb(255, 255, 255, 0.6) 50%,
+        transparent 100%
+      );
+      animation: shimmer 1.5s infinite;
+      z-index: 1;
+    }
+
+    .loading-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 2;
+
+      .loading-title {
+        height: 20px;
+        background: linear-gradient(
+          90deg,
+          #f3f4f6 25%,
+          #e5e7eb 50%,
+          #f3f4f6 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 4px;
+        width: 70%;
+      }
+
+      .loading-badge {
+        height: 24px;
+        width: 80px;
+        background: linear-gradient(
+          90deg,
+          #f3f4f6 25%,
+          #e5e7eb 50%,
+          #f3f4f6 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 4px;
+      }
+    }
+
+    .loading-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 2;
+
+      .loading-bar {
+        height: 12px;
+        background: linear-gradient(
+          90deg,
+          #f3f4f6 25%,
+          #e5e7eb 50%,
+          #f3f4f6 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 4px;
+      }
+    }
+
+    .loading-footer {
+      position: relative;
+      z-index: 2;
+
+      .loading-button {
+        height: 40px;
+        width: 100%;
+        background: linear-gradient(
+          90deg,
+          #e5e7eb 25%,
+          #d1d5db 50%,
+          #e5e7eb 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 6px;
+      }
+    }
+
+    .loading-spinner-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 3;
+
+      .loading-spinner {
+        width: 32px;
+        height: 32px;
+        border: 4px solid #f3f4f6;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+// Mobile: Adjust loading placeholder for smaller screens
+@media (width <= 768px) {
+  .loading-placeholder .loading-widget {
+    padding: 12px;
+    min-height: 180px;
+
+    .loading-header .loading-title {
+      height: 18px;
+    }
+
+    .loading-content .loading-bar {
+      height: 10px;
+    }
+
+    .loading-footer .loading-button {
+      height: 44px; // Larger touch target
+    }
+  }
+}
+
 // Clear float after widget
 .arbitrium-proposal-widget-container::after {
   content: "";
   display: table;
   clear: both;
+}
+
+// Main widget loader - shows while widgets are being fetched to prevent blinking
+.governance-widgets-main-loader {
+  width: 100%;
+  max-width: 100%;
+  margin: 20px 0;
+  padding: 40px 20px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgb(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 200px;
+  opacity: 1;
+  transition: opacity 0.3s ease-out;
+
+  .loader-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #f3f4f6;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .loader-text {
+    color: #6b7280;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  // Mobile adjustments
+  @media (width <= 768px) {
+    padding: 30px 16px;
+    min-height: 180px;
+    margin: 16px 0;
+
+    .loading-spinner {
+      width: 32px;
+      height: 32px;
+      border-width: 3px;
+    }
+
+    .loader-text {
+      font-size: 13px;
+    }
+  }
 }

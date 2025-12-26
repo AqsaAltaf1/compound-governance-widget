@@ -3,11 +3,13 @@
 ## Direct Links:
 
 **Install Component:**
+
 ```
 https://mytestsite.discourse.group/admin/customize/themes/components
 ```
 
 **Or navigate manually:**
+
 1. Admin → Customize → Themes
 2. Click **"Components"** tab (at the top)
 3. Click **"Install"** button
@@ -32,4 +34,3 @@ https://mytestsite.discourse.group/admin/customize/themes/components
    https://www.tally.xyz/gov/compound/proposal/510?govId=eip155:1:0x309a862bbC1A00e45506cB8A802D1ff10004c8C0
    ```
 3. Widget should appear on the right side!
-

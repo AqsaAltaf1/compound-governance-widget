@@ -72,10 +72,12 @@ git push -u origin main
 2. **Create token:** https://github.com/settings/tokens/new
 
 3. **Run push manually with token:**
+
    ```bash
    cd /home/bnb/Desktop/discourse_theme/compound-governance-widget
    git push -u origin main
    ```
+
    - Username: `AqsaAltaf1`
    - Password: **[Paste your token here]**
 
@@ -93,4 +95,3 @@ gh auth login
 # Then push
 git push -u origin main
 ```
-

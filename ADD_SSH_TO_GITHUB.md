@@ -3,6 +3,7 @@
 ## Step 1: Copy Your SSH Key
 
 Your SSH key is:
+
 ```
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOCFdTMo1ONES2+EVKOXFHE2cbRN3IQQVzfL49f3JTVR aqsa.altaf@bitandbytes.net
 ```
@@ -29,6 +30,7 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOCFdTMo1ONES2+EVKOXFHE2cbRN3IQQVzfL49f3JTVR
 ## Step 3: Change Git Remote to SSH
 
 After adding the key, run:
+
 ```bash
 cd /home/bnb/Desktop/discourse_theme/compound-governance-widget
 git remote set-url origin git@github.com:AqsaAltaf1/compound-governance-widget.git
@@ -41,4 +43,3 @@ git push -u origin main
 ```
 
 This should work without asking for a password!
-
