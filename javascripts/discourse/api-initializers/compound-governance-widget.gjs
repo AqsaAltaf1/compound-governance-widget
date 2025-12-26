@@ -3597,17 +3597,19 @@ export default apiInitializer((api) => {
       
       // For cancelled and failed proposals, voting never happened - don't show vote data or progress bar
       const isCancelledOrFailed = statusLower === 'cancelled' || statusLower === 'failed';
+      
+      // Define status flags for button text logic (use case-insensitive comparison)
+      // Must be declared before use in shouldShowVoteCounts
+      const isActive = statusLower === 'active' || statusLower === 'open';
+      const isPending = statusLower === 'pending';
+      const isCreated = statusLower === 'created';
+      
       // Always show vote data for all statuses (created, active, ended, passed, etc.), even if 0 votes
       // EXCEPT: cancelled/failed - don't show vote data or progress bar
       // Show "0" for For/Against when there are no votes
       const displayForAIP = totalVotes > 0 ? formatVoteAmount(forVotes) : '0';
       const displayAgainstAIP = totalVotes > 0 ? formatVoteAmount(againstVotes) : '0';
       const shouldShowVoteCounts = !isPending && !isCreated && !isCancelledOrFailed; // Show vote counts for all statuses except pending/created/cancelled/failed
-      
-      // Define status flags for button text logic (use case-insensitive comparison)
-      const isActive = statusLower === 'active' || statusLower === 'open';
-      const isPending = statusLower === 'pending';
-      const isCreated = statusLower === 'created';
       
       // Progress bar HTML - For AIP: show For/Against votes, no abstain
       // Always show progress bar, even if 0 votes
@@ -3909,7 +3911,7 @@ export default apiInitializer((api) => {
               console.log(`✅ [WIDGET] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
             }
           
-          // CRITICAL: Force immediate visibility RIGHT AFTER insertion (before requestAnimationFrame)
+          // CRITICAL: Force immediate visibility RIGHT AFTER insertion (single check to prevent blinking)
           // This ensures widget is visible even if Discourse applies lazy loading CSS
           if (statusWidget && statusWidget.parentNode) {
             statusWidget.style.setProperty('display', 'block', 'important');
@@ -3920,84 +3922,27 @@ export default apiInitializer((api) => {
             void statusWidget.offsetHeight;
             // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
             markWidgetAsVisibleInCache(statusWidget);
-          }
-          
-          // Also force visibility in next frame to catch any late-applied CSS
-          requestAnimationFrame(() => {
-            if (statusWidget && statusWidget.parentNode) {
-              statusWidget.style.setProperty('display', 'block', 'important');
-              statusWidget.style.setProperty('visibility', 'visible', 'important');
-              statusWidget.style.setProperty('opacity', '1', 'important');
-              statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-              const computedStyle = window.getComputedStyle(statusWidget);
-              console.log(`🔵 [WIDGET] Widget inserted - computed display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
-              if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-                console.warn(`⚠️ [WIDGET] Widget is hidden after insertion! Forcing visibility again.`);
-                statusWidget.style.setProperty('display', 'block', 'important');
-                statusWidget.style.setProperty('visibility', 'visible', 'important');
-                statusWidget.style.setProperty('opacity', '1', 'important');
-                void statusWidget.offsetHeight; // Force reflow
-              }
-            }
-          });
-          
-          // Ensure widgets are in correct order by checking if any need re-positioning
-          // Only re-sort if widgets are clearly out of order (to avoid unnecessary DOM manipulation)
-          // Skip re-sorting if widget was just inserted in correct position to prevent blinking
-          const allWidgets = Array.from(widgetsContainer.querySelectorAll('.tally-status-widget-container'));
-          if (allWidgets.length > 1) {
-            let needsResort = false;
-            let outOfOrderCount = 0;
-            for (let i = 0; i < allWidgets.length - 1; i++) {
-              const orderA = parseInt(allWidgets[i].getAttribute("data-proposal-order") || allWidgets[i].getAttribute("data-stage-order") || "999", 10);
-              const orderB = parseInt(allWidgets[i + 1].getAttribute("data-proposal-order") || allWidgets[i + 1].getAttribute("data-stage-order") || "999", 10);
-              if (orderA > orderB) {
-                needsResort = true;
-                outOfOrderCount++;
-                // Only re-sort if multiple widgets are out of order (not just the one we just added)
-                if (outOfOrderCount > 1) {
-                  break;
+            
+            // Single delayed check only if widget is actually hidden (reduces blinking)
+            requestAnimationFrame(() => {
+              if (statusWidget && statusWidget.parentNode) {
+                const computedStyle = window.getComputedStyle(statusWidget);
+                // Only force visibility again if actually hidden (prevents unnecessary DOM manipulation)
+                if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                  console.warn(`⚠️ [WIDGET] Widget is hidden after insertion! Forcing visibility.`);
+                  statusWidget.style.setProperty('display', 'block', 'important');
+                  statusWidget.style.setProperty('visibility', 'visible', 'important');
+                  statusWidget.style.setProperty('opacity', '1', 'important');
+                  void statusWidget.offsetHeight; // Force reflow
                 }
               }
-            }
-            
-            // Only re-sort if there are significant ordering issues to prevent blinking
-            if (needsResort && outOfOrderCount > 1) {
-              // Re-sort widgets in correct order
-              const sortedAllWidgets = [...allWidgets].sort((a, b) => {
-                const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
-                const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
-                return orderA - orderB; // Ascending order (0, 1, 2, ...)
-              });
-              
-              // Re-insert widgets in correct order (preserve scroll during re-sort too)
-              preserveScrollPosition(() => {
-                sortedAllWidgets.forEach((widget, idx) => {
-                  if (idx === 0) {
-                    // First widget - insert before first post or at beginning
-                    if (firstPost && firstPost.parentNode) {
-                      firstPost.parentNode.insertBefore(widget, firstPost);
-                    } else if (topicBody) {
-                      if (topicBody.firstChild) {
-                        topicBody.insertBefore(widget, topicBody.firstChild);
-                      } else {
-                        topicBody.appendChild(widget);
-                      }
-                    }
-                  } else {
-                    // Insert after previous widget
-                    const prevWidget = sortedAllWidgets[idx - 1];
-                    if (prevWidget.nextSibling) {
-                      widgetsContainer.insertBefore(widget, prevWidget.nextSibling);
-                    } else {
-                      widgetsContainer.appendChild(widget);
-                    }
-                  }
-                });
-              });
-              console.log(`✅ [WIDGET] Re-sorted ${allWidgets.length} widget(s) in correct order (1, 2, 3...)`);
-            }
+            });
           }
+          
+          // DISABLED: Re-sorting widgets after insertion causes blinking
+          // Widgets are already inserted in correct order above, so no need to re-sort
+          // This prevents the flickering/blinking issue when widgets are rendered
+          // If widgets need re-sorting, it should be done before insertion, not after
         } else {
           // No existing widgets, insert before first post or at beginning
           if (firstPost && firstPost.parentNode) {
@@ -8068,6 +8013,117 @@ export default apiInitializer((api) => {
   }
   
   /**
+   * Select up to 3 snapshot proposals with distribution logic
+   * If only one type exists, shows up to 3 of that type
+   * If multiple types exist, distributes slots (e.g., 1 of each, or 2 of one type and 1 of another)
+   * Prioritizes by status (active > pending > ended) and then by timestamp (newest first)
+   * Returns: Array of { proposal, type, order } objects
+   */
+  function selectUpTo3SnapshotProposals(categorized) {
+    const MAX_WIDGETS = 3;
+    const selected = [];
+    
+    const tempChecks = categorized.tempChecks || [];
+    const arfcs = categorized.arfcs || [];
+    const snapshots = categorized.snapshots || [];
+    
+    // Sort each type by priority (status then timestamp)
+    const sortProposals = (proposals) => {
+      return [...proposals].sort((a, b) => {
+        const statusA = a.data?.status?.toLowerCase() || a.status?.toLowerCase() || '';
+        const statusB = b.data?.status?.toLowerCase() || b.status?.toLowerCase() || '';
+        
+        const priorityA = getStatePriority(statusA, 'snapshot');
+        const priorityB = getStatePriority(statusB, 'snapshot');
+        
+        // First sort by state priority (lower = better)
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+        
+        // If same priority, sort by timestamp (newer = better)
+        const timeA = a.timestamp || 0;
+        const timeB = b.timestamp || 0;
+        return timeB - timeA; // Descending (newest first)
+      });
+    };
+    
+    const sortedTempChecks = sortProposals(tempChecks);
+    const sortedARFCs = sortProposals(arfcs);
+    const sortedSnapshots = sortProposals(snapshots);
+    
+    // Count how many types we have
+    const typeCount = (sortedTempChecks.length > 0 ? 1 : 0) + 
+                      (sortedARFCs.length > 0 ? 1 : 0) + 
+                      (sortedSnapshots.length > 0 ? 1 : 0);
+    
+    if (typeCount === 0) {
+      return [];
+    }
+    
+    // If only one type exists, show up to 3 of that type
+    if (typeCount === 1) {
+      if (sortedTempChecks.length > 0) {
+        return sortedTempChecks.slice(0, MAX_WIDGETS).map((proposal, idx) => ({
+          proposal,
+          type: 'temp-check',
+          order: idx
+        }));
+      }
+      if (sortedARFCs.length > 0) {
+        return sortedARFCs.slice(0, MAX_WIDGETS).map((proposal, idx) => ({
+          proposal,
+          type: 'arfc',
+          order: idx
+        }));
+      }
+      if (sortedSnapshots.length > 0) {
+        return sortedSnapshots.slice(0, MAX_WIDGETS).map((proposal, idx) => ({
+          proposal,
+          type: 'snapshot',
+          order: idx
+        }));
+      }
+    }
+    
+    // Multiple types exist - distribute slots
+    // Strategy: Round-robin distribution, prioritizing best proposals from each type
+    const typeQueues = [
+      { proposals: sortedTempChecks, type: 'temp-check', index: 0 },
+      { proposals: sortedARFCs, type: 'arfc', index: 0 },
+      { proposals: sortedSnapshots, type: 'snapshot', index: 0 }
+    ].filter(q => q.proposals.length > 0);
+    
+    // Round-robin selection: take one from each type in turn
+    while (selected.length < MAX_WIDGETS && typeQueues.length > 0) {
+      let foundAny = false;
+      
+      for (const queue of typeQueues) {
+        if (selected.length >= MAX_WIDGETS) {
+          break;
+        }
+        
+        if (queue.index < queue.proposals.length) {
+          selected.push({
+            proposal: queue.proposals[queue.index],
+            type: queue.type,
+            order: selected.length
+          });
+          queue.index++;
+          foundAny = true;
+        }
+      }
+      
+      // If we didn't find any proposals in this round, we're done
+      if (!foundAny) {
+        break;
+      }
+    }
+    
+    return selected;
+  }
+  
+  /**
    * Get all proposals of a specific type (for timeline/history display)
    * Returns array sorted by timestamp (newest first)
    */
@@ -8416,44 +8472,31 @@ export default apiInitializer((api) => {
           // This handles edge cases: multiple Temp Checks, multiple ARFCs, etc.
           const categorized = categorizeSnapshotProposals(validatedSnapshots);
           
-          // ===== SELECT BEST PROPOSAL FROM EACH TYPE =====
-          // For each type, select the best one (active > latest > non-failed)
-          const bestTempCheck = selectBestProposal(categorized.tempChecks, 'snapshot');
-          const bestARFC = selectBestProposal(categorized.arfcs, 'snapshot');
-          const bestSnapshot = selectBestProposal(categorized.snapshots, 'snapshot');
+          // ===== SELECT UP TO 3 PROPOSALS WITH DISTRIBUTION LOGIC =====
+          // If only one type exists, shows up to 3 of that type
+          // If multiple types exist, distributes slots (e.g., 1 of each, or 2 of one type and 1 of another)
+          const proposalsToRender = selectUpTo3SnapshotProposals(categorized);
           
           // Log what we found
           if (categorized.tempChecks.length > 1) {
-            console.log(`🔵 [EDGE-CASE] Found ${categorized.tempChecks.length} Temp Check(s) - selected best one`);
+            console.log(`🔵 [EDGE-CASE] Found ${categorized.tempChecks.length} Temp Check(s) - selected up to 3`);
             categorized.tempChecks.forEach((tc, idx) => {
               console.log(`   [${idx + 1}] ${tc.data?.title?.substring(0, 60)}... (status: ${tc.data?.status || 'unknown'})`);
             });
           }
           if (categorized.arfcs.length > 1) {
-            console.log(`🔵 [EDGE-CASE] Found ${categorized.arfcs.length} ARFC(s) - selected best one`);
+            console.log(`🔵 [EDGE-CASE] Found ${categorized.arfcs.length} ARFC(s) - selected up to 3`);
             categorized.arfcs.forEach((arfc, idx) => {
               console.log(`   [${idx + 1}] ${arfc.data?.title?.substring(0, 60)}... (status: ${arfc.data?.status || 'unknown'})`);
             });
           }
           
-          // ===== RENDER WIDGETS =====
-          // Render widgets for the selected proposals (one per type, if they exist)
-          const proposalsToRender = [];
+          // Count by type for logging
+          const tempCheckCount = proposalsToRender.filter(p => p.type === 'temp-check').length;
+          const arfcCount = proposalsToRender.filter(p => p.type === 'arfc').length;
+          const snapshotCount = proposalsToRender.filter(p => p.type === 'snapshot').length;
           
-          if (bestTempCheck) {
-            proposalsToRender.push({ proposal: bestTempCheck, type: 'temp-check', order: 0 });
-            console.log(`🔵 [RENDER] Will render Temp Check widget`);
-          }
-          if (bestARFC) {
-            proposalsToRender.push({ proposal: bestARFC, type: 'arfc', order: 1 });
-            console.log(`🔵 [RENDER] Will render ARFC widget`);
-          }
-          if (bestSnapshot) {
-            proposalsToRender.push({ proposal: bestSnapshot, type: 'snapshot', order: 2 });
-            console.log(`🔵 [RENDER] Will render Snapshot widget`);
-          }
-          
-          console.log(`🔵 [RENDER] Total widgets to render: ${proposalsToRender.length} (Temp Check: ${bestTempCheck ? 1 : 0}, ARFC: ${bestARFC ? 1 : 0}, Snapshot: ${bestSnapshot ? 1 : 0})`);
+          console.log(`🔵 [RENDER] Total snapshot widgets to render: ${proposalsToRender.length} (Temp Check: ${tempCheckCount}, ARFC: ${arfcCount}, Snapshot: ${snapshotCount})`);
           
           // Render each selected proposal
           proposalsToRender.forEach(({ proposal: snapshot, type: stageType, order: typeOrder }, index) => {
@@ -8634,179 +8677,195 @@ export default apiInitializer((api) => {
             });
           }
           
-          // ===== RENDER WIDGET FOR SELECTED AIP =====
-          if (bestAIP && bestAIP.data && bestAIP.data.title) {
-            const normalizedUrl = normalizeAIPUrl(bestAIP.url);
+          // ===== CHECK EXISTING WIDGET COUNT =====
+          // Count how many widgets already exist (from snapshot proposals)
+          // Only render AIPs if total widgets < 3
+          // Use requestAnimationFrame to ensure snapshot widgets are in DOM before counting
+          // Use .tally-status-widget-container which is the actual widget container
+          requestAnimationFrame(() => {
+            const existingWidgetCount = document.querySelectorAll('.tally-status-widget-container').length;
+            const maxWidgets = 3;
+            const remainingSlots = maxWidgets - existingWidgetCount;
             
-            // CRITICAL: Check if widget already exists by URL (same as Snapshot widgets do)
-            // This prevents re-rendering the same widget multiple times
-            const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${bestAIP.url}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
-            if (existingWidgetByUrl) {
-              console.log(`🔵 [TOPIC] AIP widget with URL ${bestAIP.url} already exists, skipping duplicate render`);
-              // Remove from tracking sets since widget already exists
-              renderingUrls.delete(normalizedUrl);
-              renderingUrls.delete(bestAIP.url);
-              fetchingUrls.delete(normalizedUrl);
-              fetchingUrls.delete(bestAIP.url);
-              return;
-            }
+            console.log(`🔵 [RENDER] Existing widgets: ${existingWidgetCount}, Remaining slots: ${remainingSlots}`);
             
-            if (renderingUrls.has(normalizedUrl) || renderingUrls.has(bestAIP.url)) {
-              console.log(`🔵 [TOPIC] AIP URL ${bestAIP.url} is already being rendered, skipping duplicate render`);
-              return;
-            }
-            
-            // Find proposal order in combined list (order in content)
-            const proposalOrderIndex = orderedProposals.findIndex(p => p.url === bestAIP.url && p.type === 'aip');
-            const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + 0);
-            
-            // Use stable widget ID based on URL (same approach as Snapshot widgets)
-            // Extract proposal ID from URL for stable ID generation
-            const proposalInfo = extractAIPProposalInfo(bestAIP.url);
-            const proposalId = proposalInfo?.proposalId || bestAIP.url.split('').reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
-            const aipWidgetId = `aip-widget-${proposalId}`;
-            
-            console.log(`🔵 [RENDER] Creating AIP widget (order: ${proposalOrder}, ID: ${aipWidgetId})`);
-            console.log(`🔵 [RENDER] AIP data:`, { title: bestAIP.data.title, status: bestAIP.status, url: bestAIP.url });
-            if (categorized.aips.length > 1) {
-              console.log(`   ⚠️ Note: Selected from ${categorized.aips.length} AIP(s) found in thread`);
-            }
-            
-            // Get validation info (discussion link if not related to current forum)
-            const validation = bestAIP._validation || { isRelated: true, discussionLink: null };
-            console.log(`🔵 [VALIDATION] AIP validation data:`, {
-              isRelated: validation.isRelated,
-              discussionLink: validation.discussionLink,
-              hasValidation: !!bestAIP._validation
-            });
-            
-            // CRITICAL: Only show proposals that have a forum link matching the current forum topic
-            // This prevents false positives when other proposal links are mentioned in discussions
-            // Also filter out proposals without any discourse URL
-            if (!validation.isRelated) {
-              if (validation.discussionLink) {
-                console.log(`⚠️ [RENDER] Skipping AIP widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
-              } else {
-                console.log(`⚠️ [RENDER] Skipping AIP widget - no forum discussion link found in proposal (preventing false positives)`);
+            // ===== RENDER WIDGET FOR SELECTED AIP =====
+            // Only render if we have remaining slots and a valid AIP
+            if (bestAIP && bestAIP.data && bestAIP.data.title && remainingSlots > 0) {
+              const normalizedUrl = normalizeAIPUrl(bestAIP.url);
+              
+              // CRITICAL: Check if widget already exists by URL (same as Snapshot widgets do)
+              // This prevents re-rendering the same widget multiple times
+              const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${bestAIP.url}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
+              if (existingWidgetByUrl) {
+                console.log(`🔵 [TOPIC] AIP widget with URL ${bestAIP.url} already exists, skipping duplicate render`);
+                // Remove from tracking sets since widget already exists
+                renderingUrls.delete(normalizedUrl);
+                renderingUrls.delete(bestAIP.url);
+                fetchingUrls.delete(normalizedUrl);
+                fetchingUrls.delete(bestAIP.url);
+                return;
               }
-              return;
-            }
-            
-            // Filter out proposals that don't have any discourse URL
-            if (!validation.discussionLink) {
-              console.log(`⚠️ [RENDER] Skipping AIP widget - proposal has no discourse URL`);
-              return;
-            }
-            
-            // Render AIP widget - use same approach as Snapshot widgets
-            renderMultiStageWidget({
-              tempCheck: null,
-              tempCheckUrl: null,
-              arfc: null,
-              arfcUrl: null,
-              aip: bestAIP.data,
-              aipUrl: bestAIP.url
-            }, aipWidgetId, proposalOrder, validation.discussionLink, validation.isRelated);
-            console.log(`✅ [RENDER] AIP widget rendered`);
-            
-            // CRITICAL: Immediately ensure AIP widget stays visible (topic-level widget, not viewport-dependent)
-            // Use requestAnimationFrame to ensure widget is in DOM before checking
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                ensureAIPWidgetsVisible();
-                console.log(`✅ [AIP] Ensured AIP widget visibility immediately after render`);
+              
+              if (renderingUrls.has(normalizedUrl) || renderingUrls.has(bestAIP.url)) {
+                console.log(`🔵 [TOPIC] AIP URL ${bestAIP.url} is already being rendered, skipping duplicate render`);
+                return;
+              }
+              
+              // Find proposal order in combined list (order in content)
+              const proposalOrderIndex = orderedProposals.findIndex(p => p.url === bestAIP.url && p.type === 'aip');
+              const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + 0);
+              
+              // Use stable widget ID based on URL (same approach as Snapshot widgets)
+              // Extract proposal ID from URL for stable ID generation
+              const proposalInfo = extractAIPProposalInfo(bestAIP.url);
+              const proposalId = proposalInfo?.proposalId || bestAIP.url.split('').reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
+              const aipWidgetId = `aip-widget-${proposalId}`;
+              
+              console.log(`🔵 [RENDER] Creating AIP widget (order: ${proposalOrder}, ID: ${aipWidgetId})`);
+              console.log(`🔵 [RENDER] AIP data:`, { title: bestAIP.data.title, status: bestAIP.status, url: bestAIP.url });
+              if (categorized.aips.length > 1) {
+                console.log(`   ⚠️ Note: Selected from ${categorized.aips.length} AIP(s) found in thread`);
+              }
+              
+              // Get validation info (discussion link if not related to current forum)
+              const validation = bestAIP._validation || { isRelated: true, discussionLink: null };
+              console.log(`🔵 [VALIDATION] AIP validation data:`, {
+                isRelated: validation.isRelated,
+                discussionLink: validation.discussionLink,
+                hasValidation: !!bestAIP._validation
               });
-            });
-            
-            // CRITICAL: AIP widgets render asynchronously (in Promise callback) while Snapshot renders synchronously
-            // This causes AIP widgets to be inserted later, after Discourse may have applied lazy loading CSS
-            // Force immediate visibility RIGHT AFTER rendering for BOTH mobile and desktop
-            // Track if widget is already visible to prevent unnecessary checks
-            let widgetIsVisible = false;
-            
-            // Use requestAnimationFrame to catch widget immediately after insertion (works for both mobile and desktop)
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
-                if (aipWidget && aipWidget.parentNode) {
-                  // Force visibility immediately - same as Snapshot widgets
-                  aipWidget.style.setProperty('display', 'block', 'important');
-                  aipWidget.style.setProperty('visibility', 'visible', 'important');
-                  aipWidget.style.setProperty('opacity', '1', 'important');
-                  aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-                  
-                  // Force reflow
-                  void aipWidget.offsetHeight;
-                  
-                  // Verify it's visible
-                  const computedStyle = window.getComputedStyle(aipWidget);
-                  // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
-                  const isMobile = window.innerWidth <= 1400;
-                  const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
-                  console.log(`🔵 [${deviceType}] AIP widget after insertion - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
-                  
-                  // Check if widget is actually visible (don't remove/re-insert - that causes blinking)
-                  if (computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden' && computedStyle.opacity !== '0') {
-                    widgetIsVisible = true;
-                    console.log(`✅ [${deviceType}] AIP widget is visible - no further checks needed`);
-                  } else {
-                    // Widget is hidden - just force styles without removing from DOM (prevents blinking)
-                    console.warn(`⚠️ [${deviceType}] AIP widget still hidden after force - applying style fixes only`);
-                    aipWidget.style.setProperty('display', 'block', 'important');
-                    aipWidget.style.setProperty('visibility', 'visible', 'important');
-                    aipWidget.style.setProperty('opacity', '1', 'important');
-                    aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-                    // Force another reflow
-                    void aipWidget.offsetHeight;
-                  }
-                  
-                  console.log(`✅ [${deviceType}] AIP widget visibility forced immediately after render`);
+              
+              // CRITICAL: Only show proposals that have a forum link matching the current forum topic
+              // This prevents false positives when other proposal links are mentioned in discussions
+              // Also filter out proposals without any discourse URL
+              if (!validation.isRelated) {
+                if (validation.discussionLink) {
+                  console.log(`⚠️ [RENDER] Skipping AIP widget - discussion URL (${validation.discussionLink}) does not match current forum topic`);
                 } else {
-                  // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
-                  const isMobile = window.innerWidth <= 1400;
-                  const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
-                  console.warn(`⚠️ [${deviceType}] AIP widget not found in DOM yet: aave-governance-widget-${aipWidgetId}`);
+                  console.log(`⚠️ [RENDER] Skipping AIP widget - no forum discussion link found in proposal (preventing false positives)`);
                 }
+                return;
+              }
+              
+              // Filter out proposals that don't have any discourse URL
+              if (!validation.discussionLink) {
+                console.log(`⚠️ [RENDER] Skipping AIP widget - proposal has no discourse URL`);
+                return;
+              }
+              
+              // Render AIP widget - use same approach as Snapshot widgets
+              renderMultiStageWidget({
+                tempCheck: null,
+                tempCheckUrl: null,
+                arfc: null,
+                arfcUrl: null,
+                aip: bestAIP.data,
+                aipUrl: bestAIP.url
+              }, aipWidgetId, proposalOrder, validation.discussionLink, validation.isRelated);
+              console.log(`✅ [RENDER] AIP widget rendered`);
+              
+              // CRITICAL: Immediately ensure AIP widget stays visible (topic-level widget, not viewport-dependent)
+              // Use requestAnimationFrame to ensure widget is in DOM before checking
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  ensureAIPWidgetsVisible();
+                  console.log(`✅ [AIP] Ensured AIP widget visibility immediately after render`);
+                });
               });
-            });
-            
-            // Reduced delayed checks - only check if widget is not yet visible (prevents blinking from repeated checks)
-            // Works for both mobile and desktop
-            const checkDelays = [100, 300, 600];
-            checkDelays.forEach((delay, index) => {
-              setTimeout(() => {
-                // Skip check if widget is already confirmed visible
-                if (widgetIsVisible) {
-                  return;
-                }
-                
-                const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
-                if (aipWidget && aipWidget.parentNode) {
-                  const computedStyle = window.getComputedStyle(aipWidget);
-                  // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
-                  const isMobile = window.innerWidth <= 1400;
-                  const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
-                  
-                  // Only force visibility if actually hidden (don't repeatedly check visible widgets)
-                  if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-                    console.log(`🔵 [${deviceType}] AIP widget hidden at ${delay}ms check ${index + 1}, forcing visibility`);
+              
+              // CRITICAL: AIP widgets render asynchronously (in Promise callback) while Snapshot renders synchronously
+              // This causes AIP widgets to be inserted later, after Discourse may have applied lazy loading CSS
+              // Force immediate visibility RIGHT AFTER rendering for BOTH mobile and desktop
+              // Track if widget is already visible to prevent unnecessary checks
+              let widgetIsVisible = false;
+              
+              // Use requestAnimationFrame to catch widget immediately after insertion (works for both mobile and desktop)
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
+                  if (aipWidget && aipWidget.parentNode) {
+                    // Force visibility immediately - same as Snapshot widgets
                     aipWidget.style.setProperty('display', 'block', 'important');
                     aipWidget.style.setProperty('visibility', 'visible', 'important');
                     aipWidget.style.setProperty('opacity', '1', 'important');
                     aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                    
                     // Force reflow
                     void aipWidget.offsetHeight;
+                    
+                    // Verify it's visible
+                    const computedStyle = window.getComputedStyle(aipWidget);
+                    // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+                    const isMobile = window.innerWidth <= 1400;
+                    const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
+                    console.log(`🔵 [${deviceType}] AIP widget after insertion - display: ${computedStyle.display}, visibility: ${computedStyle.visibility}, opacity: ${computedStyle.opacity}`);
+                    
+                    // Check if widget is actually visible (don't remove/re-insert - that causes blinking)
+                    if (computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden' && computedStyle.opacity !== '0') {
+                      widgetIsVisible = true;
+                      console.log(`✅ [${deviceType}] AIP widget is visible - no further checks needed`);
+                    } else {
+                      // Widget is hidden - just force styles without removing from DOM (prevents blinking)
+                      console.warn(`⚠️ [${deviceType}] AIP widget still hidden after force - applying style fixes only`);
+                      aipWidget.style.setProperty('display', 'block', 'important');
+                      aipWidget.style.setProperty('visibility', 'visible', 'important');
+                      aipWidget.style.setProperty('opacity', '1', 'important');
+                      aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                      // Force another reflow
+                      void aipWidget.offsetHeight;
+                    }
+                    
+                    console.log(`✅ [${deviceType}] AIP widget visibility forced immediately after render`);
                   } else {
-                    // Widget is visible - mark as such and stop checking
-                    widgetIsVisible = true;
-                    console.log(`✅ [${deviceType}] AIP widget confirmed visible at ${delay}ms - stopping checks`);
+                    // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+                    const isMobile = window.innerWidth <= 1400;
+                    const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
+                    console.warn(`⚠️ [${deviceType}] AIP widget not found in DOM yet: aave-governance-widget-${aipWidgetId}`);
                   }
-                }
-              }, delay);
-            });
-          } else if (validAIPs.length > 0) {
-            console.warn(`⚠️ [TOPIC] AIP data fetched but missing title or invalid`);
-          }
+                });
+              });
+              
+              // Reduced delayed checks - only check if widget is not yet visible (prevents blinking from repeated checks)
+              // Works for both mobile and desktop
+              const checkDelays = [100, 300, 600];
+              checkDelays.forEach((delay, index) => {
+                setTimeout(() => {
+                  // Skip check if widget is already confirmed visible
+                  if (widgetIsVisible) {
+                    return;
+                  }
+                  
+                  const aipWidget = document.getElementById(`aave-governance-widget-${aipWidgetId}`);
+                  if (aipWidget && aipWidget.parentNode) {
+                    const computedStyle = window.getComputedStyle(aipWidget);
+                    // Use screen width only - don't rely on user agent as tablets/desktops may have mobile-like user agents
+                    const isMobile = window.innerWidth <= 1400;
+                    const deviceType = isMobile ? 'MOBILE' : 'DESKTOP';
+                    
+                    // Only force visibility if actually hidden (don't repeatedly check visible widgets)
+                    if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                      console.log(`🔵 [${deviceType}] AIP widget hidden at ${delay}ms check ${index + 1}, forcing visibility`);
+                      aipWidget.style.setProperty('display', 'block', 'important');
+                      aipWidget.style.setProperty('visibility', 'visible', 'important');
+                      aipWidget.style.setProperty('opacity', '1', 'important');
+                      aipWidget.classList.remove('hidden', 'd-none', 'is-hidden');
+                      // Force reflow
+                      void aipWidget.offsetHeight;
+                    } else {
+                      // Widget is visible - mark as such and stop checking
+                      widgetIsVisible = true;
+                      console.log(`✅ [${deviceType}] AIP widget confirmed visible at ${delay}ms - stopping checks`);
+                    }
+                  }
+                }, delay);
+              });
+            } else if (bestAIP && bestAIP.data && bestAIP.data.title && remainingSlots <= 0) {
+              console.log(`🔵 [RENDER] Skipping AIP widget - maximum of ${maxWidgets} widgets already reached (${existingWidgets} existing)`);
+            } else if (validAIPs.length > 0) {
+              console.warn(`⚠️ [TOPIC] AIP data fetched but missing title or invalid`);
+            }
+          }); // End requestAnimationFrame
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing AIP proposals:", error);
