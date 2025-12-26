@@ -2881,18 +2881,18 @@ export default apiInitializer((api) => {
       const normalizedUrl = normalizeAIPUrl(proposalUrl);
       const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${proposalUrl}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
       if (existingWidgetByUrl) {
-        // Check if it's the same widget by ID or if it's a different widget with same URL
-        if (existingWidgetByUrl.id === statusWidgetId) {
-          // Same widget - update in place to prevent blinking
-          statusWidget = existingWidgetByUrl;
-          isUpdatingInPlace = true;
-          console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists, updating in place to prevent blinking`);
+        // CRITICAL: Always update in place when URL matches (even if ID differs)
+        // This prevents blinking by updating existing widget instead of removing/recreating
+        // The ID might differ if widget was created with different ID format, but URL match is what matters
+        statusWidget = existingWidgetByUrl;
+        isUpdatingInPlace = true;
+        
+        // Update the widget's ID to match the expected ID (for consistency)
+        if (existingWidgetByUrl.id !== statusWidgetId) {
+          console.log(`🔵 [RENDER] Widget found by URL with different ID (${existingWidgetByUrl.id} vs ${statusWidgetId}), updating ID and content in place to prevent blinking`);
+          existingWidgetByUrl.id = statusWidgetId;
         } else {
-          // Different widget with same URL - this is a duplicate, skip rendering
-          console.log(`🔵 [RENDER] Found existing widget with same URL but different ID, skipping duplicate render`);
-          renderingUrls.delete(proposalUrl);
-          renderingUrls.delete(normalizedUrl);
-          return;
+          console.log(`🔵 [RENDER] Widget ${statusWidgetId} already exists, updating in place to prevent blinking`);
         }
       }
     }
@@ -3758,7 +3758,34 @@ export default apiInitializer((api) => {
       </div>
     `;
     
-    statusWidget.innerHTML = widgetHTML;
+    // CRITICAL: Update content atomically to prevent visual flash
+    // When updating in place, use DocumentFragment for smooth replacement
+    if (isUpdatingInPlace && statusWidget.parentNode) {
+      // Find the inner widget container to replace only that part
+      const existingInnerWidget = statusWidget.querySelector('.tally-status-widget');
+      if (existingInnerWidget) {
+        // Create new content in a temporary container
+        const tempContainer = document.createElement('div');
+        tempContainer.innerHTML = widgetHTML;
+        const newInnerWidget = tempContainer.firstElementChild;
+        
+        // Atomically replace the inner widget (no flash)
+        existingInnerWidget.parentNode.replaceChild(newInnerWidget, existingInnerWidget);
+      } else {
+        // Fallback: update innerHTML but ensure visibility is maintained
+        const wasVisible = statusWidget.style.display !== 'none' && 
+                          statusWidget.style.visibility !== 'hidden';
+        statusWidget.innerHTML = widgetHTML;
+        if (wasVisible) {
+          statusWidget.style.display = 'block';
+          statusWidget.style.visibility = 'visible';
+          statusWidget.style.opacity = '1';
+        }
+      }
+    } else {
+      // New widget - set innerHTML directly
+      statusWidget.innerHTML = widgetHTML;
+    }
     
     // Add close button handler
     const closeBtn = statusWidget.querySelector('.widget-close-btn');
@@ -3846,167 +3873,158 @@ export default apiInitializer((api) => {
         }
       }
       
+      // CRITICAL: Prepare widget fully BEFORE insertion to prevent blinking
+      // Set all styles and content before DOM insertion to avoid layout shift
+      statusWidget.style.display = 'block';
+      statusWidget.style.visibility = 'visible';
+      statusWidget.style.opacity = '1';
+      statusWidget.style.position = 'relative';
+      statusWidget.style.marginBottom = '20px';
+      statusWidget.style.width = '100%';
+      statusWidget.style.maxWidth = '100%';
+      statusWidget.style.marginLeft = '0';
+      statusWidget.style.marginRight = '0';
+      statusWidget.style.zIndex = '1';
+      
       // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
       // Widgets appear at top of proposal, before first post
-      // CRITICAL: Preserve scroll position during insertion to prevent auto-scrolling
-      preserveScrollPosition(() => {
-        try {
-          const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
-          const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
-          
-          // Get proposal order for this widget (order in content, not stage order)
-          const thisProposalOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
-          
-          // Find all existing widgets in the insertion area
-          let widgetsContainer = null;
-          let existingWidgets = [];
-          
-          if (firstPost && firstPost.parentNode) {
-            // Find widgets before the first post
-            widgetsContainer = firstPost.parentNode;
-            const siblings = Array.from(firstPost.parentNode.children);
-            existingWidgets = siblings.filter(sibling => 
-              sibling.classList.contains('tally-status-widget-container') && 
-              siblings.indexOf(sibling) < siblings.indexOf(firstPost)
-            );
-          } else if (topicBody) {
-            widgetsContainer = topicBody;
-            existingWidgets = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
-          } else {
-            const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-            if (mainContent) {
-              widgetsContainer = mainContent;
-              existingWidgets = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
-            }
-          }
-          
-          if (widgetsContainer && existingWidgets.length > 0) {
-            // Sort existing widgets by proposal order to ensure correct positioning
-            const sortedWidgets = [...existingWidgets].sort((a, b) => {
-              const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
-              const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
-              return orderA - orderB; // Ascending order (0, 1, 2, ...)
-            });
+      // CRITICAL: Use requestAnimationFrame to batch DOM insertion and prevent blinking
+      requestAnimationFrame(() => {
+        preserveScrollPosition(() => {
+          try {
+            const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+            const firstPost = document.querySelector('.topic-post, .post, [data-post-id], article[data-post-id]');
             
-            // Find the correct position to insert based on proposal order (order in content)
-            let insertBefore = null;
+            // Get proposal order for this widget (order in content, not stage order)
+            const thisProposalOrder = parseInt(statusWidget.getAttribute("data-proposal-order") || statusWidget.getAttribute("data-stage-order") || "999", 10);
             
-            // Find first widget with higher proposal order
-            for (const widget of sortedWidgets) {
-              const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
-              if (widgetProposalOrder > thisProposalOrder) {
-                insertBefore = widget;
-                break;
+            // Find all existing widgets in the insertion area
+            let widgetsContainer = null;
+            let existingWidgets = [];
+            
+            if (firstPost && firstPost.parentNode) {
+              // Find widgets before the first post
+              widgetsContainer = firstPost.parentNode;
+              const siblings = Array.from(firstPost.parentNode.children);
+              existingWidgets = siblings.filter(sibling => 
+                sibling.classList.contains('tally-status-widget-container') && 
+                siblings.indexOf(sibling) < siblings.indexOf(firstPost)
+              );
+            } else if (topicBody) {
+              widgetsContainer = topicBody;
+              existingWidgets = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+            } else {
+              const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+              if (mainContent) {
+                widgetsContainer = mainContent;
+                existingWidgets = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
               }
             }
             
-            if (insertBefore) {
-              widgetsContainer.insertBefore(statusWidget, insertBefore);
-              console.log(`✅ [WIDGET] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
+            if (widgetsContainer && existingWidgets.length > 0) {
+              // Sort existing widgets by proposal order to ensure correct positioning
+              const sortedWidgets = [...existingWidgets].sort((a, b) => {
+                const orderA = parseInt(a.getAttribute("data-proposal-order") || a.getAttribute("data-stage-order") || "999", 10);
+                const orderB = parseInt(b.getAttribute("data-proposal-order") || b.getAttribute("data-stage-order") || "999", 10);
+                return orderA - orderB; // Ascending order (0, 1, 2, ...)
+              });
+              
+              // Find the correct position to insert based on proposal order (order in content)
+              let insertBefore = null;
+              
+              // Find first widget with higher proposal order
+              for (const widget of sortedWidgets) {
+                const widgetProposalOrder = parseInt(widget.getAttribute("data-proposal-order") || widget.getAttribute("data-stage-order") || "999", 10);
+                if (widgetProposalOrder > thisProposalOrder) {
+                  insertBefore = widget;
+                  break;
+                }
+              }
+              
+              if (insertBefore) {
+                widgetsContainer.insertBefore(statusWidget, insertBefore);
+                console.log(`✅ [WIDGET] Widget inserted in correct order (proposal order: ${thisProposalOrder}, before widget with order: ${insertBefore.getAttribute("data-proposal-order")})`);
+              } else {
+                // No widget with higher order, insert at end (after all existing widgets, before first post)
+                if (firstPost && firstPost.parentNode) {
+                  // Insert before first post (which is after all widgets)
+                  firstPost.parentNode.insertBefore(statusWidget, firstPost);
+                } else if (topicBody) {
+                  // Append to topic body
+                  topicBody.appendChild(statusWidget);
+                } else {
+                  const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+                  if (mainContent) {
+                    mainContent.appendChild(statusWidget);
+                  } else {
+                    document.body.appendChild(statusWidget);
+                  }
+                }
+                console.log(`✅ [WIDGET] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
+              }
             } else {
-              // No widget with higher order, insert at end (after all existing widgets, before first post)
+              // No existing widgets, insert before first post or at beginning
               if (firstPost && firstPost.parentNode) {
-                // Insert before first post (which is after all widgets)
                 firstPost.parentNode.insertBefore(statusWidget, firstPost);
+                console.log("✅ [WIDGET] Widget inserted before first post (first widget)");
               } else if (topicBody) {
-                // Append to topic body
-                topicBody.appendChild(statusWidget);
+                if (topicBody.firstChild) {
+                  topicBody.insertBefore(statusWidget, topicBody.firstChild);
+                } else {
+                  topicBody.appendChild(statusWidget);
+                }
+                console.log("✅ [WIDGET] Widget inserted in topic body (first widget)");
               } else {
                 const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
                 if (mainContent) {
-                  mainContent.appendChild(statusWidget);
+                  if (mainContent.firstChild) {
+                    mainContent.insertBefore(statusWidget, mainContent.firstChild);
+                  } else {
+                    mainContent.appendChild(statusWidget);
+                  }
+                  console.log("✅ [WIDGET] Widget inserted in main content (first widget)");
                 } else {
-                  document.body.appendChild(statusWidget);
+                  const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
+                  if (bodyFirstChild) {
+                    document.body.insertBefore(statusWidget, bodyFirstChild);
+                  } else {
+                    document.body.appendChild(statusWidget);
+                  }
+                  console.log("✅ [WIDGET] Widget inserted in body (first widget)");
                 }
               }
-              console.log(`✅ [WIDGET] Widget appended at end (proposal order: ${thisProposalOrder}) - highest order widget`);
             }
           
-          // CRITICAL: Force immediate visibility RIGHT AFTER insertion (single check to prevent blinking)
-          // This ensures widget is visible even if Discourse applies lazy loading CSS
-          if (statusWidget && statusWidget.parentNode) {
-            statusWidget.style.setProperty('display', 'block', 'important');
-            statusWidget.style.setProperty('visibility', 'visible', 'important');
-            statusWidget.style.setProperty('opacity', '1', 'important');
-            statusWidget.classList.remove('hidden', 'd-none', 'is-hidden');
-            // Force immediate reflow
-            void statusWidget.offsetHeight;
-            // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
-            markWidgetAsVisibleInCache(statusWidget);
-            
-            // Single delayed check only if widget is actually hidden (reduces blinking)
-            requestAnimationFrame(() => {
-              if (statusWidget && statusWidget.parentNode) {
-                const computedStyle = window.getComputedStyle(statusWidget);
-                // Only force visibility again if actually hidden (prevents unnecessary DOM manipulation)
-                if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-                  console.warn(`⚠️ [WIDGET] Widget is hidden after insertion! Forcing visibility.`);
-                  statusWidget.style.setProperty('display', 'block', 'important');
-                  statusWidget.style.setProperty('visibility', 'visible', 'important');
-                  statusWidget.style.setProperty('opacity', '1', 'important');
-                  void statusWidget.offsetHeight; // Force reflow
-                }
+            // CRITICAL: Widget is already fully styled and visible before insertion
+            // Just ensure it stays visible after DOM insertion
+            if (statusWidget && statusWidget.parentNode) {
+              // Force immediate reflow to ensure smooth rendering
+              void statusWidget.offsetHeight;
+              // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
+              markWidgetAsVisibleInCache(statusWidget);
+            }
+          } catch (error) {
+            console.error("❌ [WIDGET] Error inserting widget:", error);
+            // Remove URL from rendering set on error
+            if (proposalUrl) {
+              renderingUrls.delete(proposalUrl);
+            }
+            // Fallback: try to append to a safe location (preserve scroll during fallback too)
+            preserveScrollPosition(() => {
+              const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
+              if (topicBody) {
+                topicBody.appendChild(statusWidget);
+              } else {
+                document.body.appendChild(statusWidget);
               }
             });
           }
           
-          // DISABLED: Re-sorting widgets after insertion causes blinking
-          // Widgets are already inserted in correct order above, so no need to re-sort
-          // This prevents the flickering/blinking issue when widgets are rendered
-          // If widgets need re-sorting, it should be done before insertion, not after
-        } else {
-          // No existing widgets, insert before first post or at beginning
-          if (firstPost && firstPost.parentNode) {
-            firstPost.parentNode.insertBefore(statusWidget, firstPost);
-            console.log("✅ [WIDGET] Widget inserted before first post (first widget)");
-          } else if (topicBody) {
-            if (topicBody.firstChild) {
-              topicBody.insertBefore(statusWidget, topicBody.firstChild);
-            } else {
-              topicBody.appendChild(statusWidget);
-            }
-            console.log("✅ [WIDGET] Widget inserted in topic body (first widget)");
-          } else {
-            const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-            if (mainContent) {
-              if (mainContent.firstChild) {
-                mainContent.insertBefore(statusWidget, mainContent.firstChild);
-              } else {
-                mainContent.appendChild(statusWidget);
-              }
-              console.log("✅ [WIDGET] Widget inserted in main content (first widget)");
-            } else {
-              const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
-              if (bodyFirstChild) {
-                document.body.insertBefore(statusWidget, bodyFirstChild);
-              } else {
-                document.body.appendChild(statusWidget);
-              }
-              console.log("✅ [WIDGET] Widget inserted in body (first widget)");
-            }
-          }
-        }
-        } catch (error) {
-          console.error("❌ [WIDGET] Error inserting widget:", error);
-          // Remove URL from rendering set on error
+          // Remove URL from rendering set now that widget is in DOM
           if (proposalUrl) {
             renderingUrls.delete(proposalUrl);
           }
-          // Fallback: try to append to a safe location (preserve scroll during fallback too)
-          preserveScrollPosition(() => {
-            const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, main');
-            if (topicBody) {
-              topicBody.appendChild(statusWidget);
-            } else {
-              document.body.appendChild(statusWidget);
-            }
-          });
-        }
-        
-        // Remove URL from rendering set now that widget is in DOM
-        if (proposalUrl) {
-          renderingUrls.delete(proposalUrl);
-        }
+        });
       });
     } else {
       // Desktop/Large screens: Use fixed positioning on right side
@@ -4352,9 +4370,40 @@ export default apiInitializer((api) => {
       console.log(`🔵 [LOADING] No loading placeholder found to remove for ${originalUrl}`);
     }
     
+    // CRITICAL: Check for existing widget by URL first (more reliable than ID)
+    // This enables in-place updates to prevent blinking (same as Tally widgets)
+    // URL match is what matters, not ID match
+    let existingWidgetByUrl = null;
+    if (originalUrl) {
+      // Use normalizeAIPUrl if available (it's defined later in the file, but function declarations are hoisted)
+      let normalizedUrl = originalUrl;
+      try {
+        if (typeof normalizeAIPUrl === 'function') {
+          normalizedUrl = normalizeAIPUrl(originalUrl);
+        }
+      } catch {
+        // Fallback to original URL if normalizeAIPUrl not available
+        normalizedUrl = originalUrl;
+      }
+      existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${originalUrl}"], .tally-status-widget-container[data-tally-url="${normalizedUrl}"]`);
+    }
+    
     // Check if widget with same ID already exists (for in-place updates during auto-refresh)
     const existingWidgetById = document.getElementById(statusWidgetId);
-    if (existingWidgetById && existingWidgetById.getAttribute('data-tally-url') === originalUrl) {
+    
+    // CRITICAL: If widget exists by URL, always update in place (even if ID differs)
+    // This prevents blinking by updating existing widget instead of removing/recreating
+    if (existingWidgetByUrl) {
+      // Widget found by URL - update in place to prevent blinking
+      if (existingWidgetByUrl.id !== statusWidgetId) {
+        console.log(`🔵 [WIDGET] Widget found by URL with different ID (${existingWidgetByUrl.id} vs ${statusWidgetId}), updating ID and content in place to prevent blinking`);
+        existingWidgetByUrl.id = statusWidgetId; // Update ID for consistency
+      } else {
+        console.log(`🔵 [WIDGET] Updating existing widget in place (ID: ${statusWidgetId}) to prevent flickering`);
+      }
+      // Continue with the rest of the function to generate the HTML, then update in place
+      // (We'll handle this after generating the HTML)
+    } else if (existingWidgetById && existingWidgetById.getAttribute('data-tally-url') === originalUrl) {
       // Widget exists with same ID and URL - update in place (especially important on mobile to prevent flickering)
       console.log(`🔵 [WIDGET] Updating existing widget in place (ID: ${statusWidgetId}) to prevent flickering`);
       
@@ -4365,7 +4414,7 @@ export default apiInitializer((api) => {
       // Continue with the rest of the function to generate the HTML, then update in place
       // (We'll handle this after generating the HTML)
     } else {
-      // Widget doesn't exist or has different ID/URL - remove duplicates and create new
+      // Widget doesn't exist - remove duplicates and create new
       const existingWidgetsByUrl = document.querySelectorAll(`.tally-status-widget-container[data-tally-url="${originalUrl}"]`);
       if (existingWidgetsByUrl.length > 0) {
         console.log(`🔵 [WIDGET] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, removing duplicates`);
@@ -4423,7 +4472,8 @@ export default apiInitializer((api) => {
     }
 
     // Check if widget already exists for in-place update (prevents flickering on mobile during auto-refresh)
-    let statusWidget = existingWidgetById;
+    // CRITICAL: Prefer widget found by URL (more reliable) over widget found by ID
+    let statusWidget = existingWidgetByUrl || existingWidgetById;
     const isUpdatingInPlace = statusWidget && statusWidget.getAttribute('data-tally-url') === originalUrl;
     
     if (!statusWidget) {
@@ -4679,7 +4729,7 @@ export default apiInitializer((api) => {
     const urgencyStyle = isEndingSoon ? 'border: 2px solid #ef4444; background: #fef2f2;' : '';
     const endedOpacity = hasPassed && !isEndingSoon ? 'opacity: 0.6;' : '';
     
-    statusWidget.innerHTML = `
+    const widgetHTML = `
       <div class="tally-status-widget ${urgencyClass}" style="position: relative; ${urgencyStyle} background: #fff; ${endedOpacity}">
         <button class="widget-close-btn" style="position: absolute; top: 8px; right: 8px; z-index: 10; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; cursor: pointer; transition: all 0.2s; font-size: 18px; color: #6b7280;" title="Close widget" onmouseover="this.style.background='#f3f4f6'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#6b7280';">
           ×
@@ -4812,6 +4862,47 @@ export default apiInitializer((api) => {
       </div>
     `;
 
+    // CRITICAL: Update content atomically to prevent visual flash
+    // When updating in place, use atomic replacement for smooth update
+    if (isUpdatingInPlace && statusWidget.parentNode) {
+      // Find the inner widget container to replace only that part
+      const existingInnerWidget = statusWidget.querySelector('.tally-status-widget');
+      if (existingInnerWidget) {
+        // Create new content in a temporary container
+        const tempContainer = document.createElement('div');
+        tempContainer.innerHTML = widgetHTML;
+        const newInnerWidget = tempContainer.firstElementChild;
+        
+        // Atomically replace the inner widget (no flash)
+        if (newInnerWidget && existingInnerWidget.parentNode) {
+          existingInnerWidget.parentNode.replaceChild(newInnerWidget, existingInnerWidget);
+        } else {
+          // Fallback: update innerHTML but ensure visibility is maintained
+          const wasVisible = statusWidget.style.display !== 'none' && 
+                            statusWidget.style.visibility !== 'hidden';
+          statusWidget.innerHTML = widgetHTML;
+          if (wasVisible) {
+            statusWidget.style.display = 'block';
+            statusWidget.style.visibility = 'visible';
+            statusWidget.style.opacity = '1';
+          }
+        }
+      } else {
+        // Fallback: update innerHTML but ensure visibility is maintained
+        const wasVisible = statusWidget.style.display !== 'none' && 
+                          statusWidget.style.visibility !== 'hidden';
+        statusWidget.innerHTML = widgetHTML;
+        if (wasVisible) {
+          statusWidget.style.display = 'block';
+          statusWidget.style.visibility = 'visible';
+          statusWidget.style.opacity = '1';
+        }
+      }
+    } else {
+      // New widget - set innerHTML directly
+      statusWidget.innerHTML = widgetHTML;
+    }
+
     // Add close button handler for this widget type
     // Remove old handlers first to prevent duplicates when updating in place
     const closeBtn = statusWidget.querySelector('.widget-close-btn');
@@ -4839,95 +4930,119 @@ export default apiInitializer((api) => {
         return; // Exit early - widget updated in place (close button handler already attached above)
       }
       
+      // CRITICAL: Pre-style widget fully BEFORE insertion to prevent blinking
+      // Set all styles and content before DOM insertion to avoid layout shift
+      statusWidget.style.display = 'block';
+      statusWidget.style.visibility = 'visible';
+      statusWidget.style.opacity = '1';
+      statusWidget.style.position = 'relative';
+      statusWidget.style.marginBottom = '20px';
+      statusWidget.style.width = '100%';
+      statusWidget.style.maxWidth = '100%';
+      statusWidget.style.marginLeft = '0';
+      statusWidget.style.marginRight = '0';
+      statusWidget.style.zIndex = '1';
+      
       // Mobile: Insert widgets sequentially so all are visible
       // Find existing widgets and insert after the last one, or before first post if none exist
-      // CRITICAL: Preserve scroll position during mobile widget insertion
-      preserveScrollPosition(() => {
-        try {
-          const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
-          const firstPost = allPosts.length > 0 ? allPosts[0] : null;
-          const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
-          
-          // Find all existing widgets on mobile (they should be before the first post)
-          let lastWidget = null;
-          
-          // Find the last widget that's actually in the DOM and before posts
-          if (firstPost && firstPost.parentNode) {
-            const siblings = Array.from(firstPost.parentNode.children);
-            for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
-              if (siblings[i].classList.contains('tally-status-widget-container')) {
-                lastWidget = siblings[i];
-            break;
+      // CRITICAL: Use requestAnimationFrame to batch DOM insertion and prevent blinking
+      requestAnimationFrame(() => {
+        preserveScrollPosition(() => {
+          try {
+            const allPosts = Array.from(document.querySelectorAll('.topic-post, .post, [data-post-id], article[data-post-id]'));
+            const firstPost = allPosts.length > 0 ? allPosts[0] : null;
+            const topicBody = document.querySelector('.topic-body, .posts-wrapper, .post-stream, .topic-post-stream');
+            
+            // Find all existing widgets on mobile (they should be before the first post)
+            let lastWidget = null;
+            
+            // Find the last widget that's actually in the DOM and before posts
+            if (firstPost && firstPost.parentNode) {
+              const siblings = Array.from(firstPost.parentNode.children);
+              for (let i = siblings.indexOf(firstPost) - 1; i >= 0; i--) {
+                if (siblings[i].classList.contains('tally-status-widget-container')) {
+                  lastWidget = siblings[i];
+              break;
+                }
               }
             }
-          }
-          
-          if (firstPost && firstPost.parentNode) {
-            if (lastWidget) {
-              // Insert after the last widget
-              lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
-              console.log("✅ [MOBILE] Status widget inserted after last widget");
-          } else {
-              // No existing widgets, insert before first post
-              firstPost.parentNode.insertBefore(statusWidget, firstPost);
-              console.log("✅ [MOBILE] Status widget inserted before first post (first widget)");
-            }
-          } else if (topicBody) {
-            // Find last widget in topic body
-            const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
-            if (widgetsInBody.length > 0) {
-              // Insert after the last widget
-              const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
-              if (lastWidgetInBody.nextSibling) {
-                topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
-        } else {
-                topicBody.appendChild(statusWidget);
-              }
-              console.log("✅ [MOBILE] Status widget inserted after last widget in topic body");
+            
+            if (firstPost && firstPost.parentNode) {
+              if (lastWidget) {
+                // Insert after the last widget
+                lastWidget.parentNode.insertBefore(statusWidget, lastWidget.nextSibling);
+                console.log("✅ [MOBILE] Status widget inserted after last widget");
             } else {
-              // No existing widgets, insert at the beginning
-              if (topicBody.firstChild) {
-                topicBody.insertBefore(statusWidget, topicBody.firstChild);
-              } else {
-                topicBody.appendChild(statusWidget);
+                // No existing widgets, insert before first post
+                firstPost.parentNode.insertBefore(statusWidget, firstPost);
+                console.log("✅ [MOBILE] Status widget inserted before first post (first widget)");
               }
-              console.log("✅ [MOBILE] Status widget inserted at top of topic body (first widget)");
-            }
-          } else {
-            // Try to find the main content area
-            const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
-            if (mainContent) {
-              const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
-              if (widgetsInMain.length > 0) {
-                const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
-                if (lastWidgetInMain.nextSibling) {
-                  mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
-                } else {
-                  mainContent.appendChild(statusWidget);
+            } else if (topicBody) {
+              // Find last widget in topic body
+              const widgetsInBody = Array.from(topicBody.querySelectorAll('.tally-status-widget-container'));
+              if (widgetsInBody.length > 0) {
+                // Insert after the last widget
+                const lastWidgetInBody = widgetsInBody[widgetsInBody.length - 1];
+                if (lastWidgetInBody.nextSibling) {
+                  topicBody.insertBefore(statusWidget, lastWidgetInBody.nextSibling);
+            } else {
+                  topicBody.appendChild(statusWidget);
                 }
-                console.log("✅ [MOBILE] Status widget inserted after last widget in main content");
+                console.log("✅ [MOBILE] Status widget inserted after last widget in topic body");
               } else {
-                if (mainContent.firstChild) {
-                  mainContent.insertBefore(statusWidget, mainContent.firstChild);
+                // No existing widgets, insert at the beginning
+                if (topicBody.firstChild) {
+                  topicBody.insertBefore(statusWidget, topicBody.firstChild);
                 } else {
-                  mainContent.appendChild(statusWidget);
+                  topicBody.appendChild(statusWidget);
                 }
-                console.log("✅ [MOBILE] Status widget inserted in main content area (first widget)");
+                console.log("✅ [MOBILE] Status widget inserted at top of topic body (first widget)");
               }
             } else {
-              // Last resort: append to body at top
-              const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
-              if (bodyFirstChild) {
-                document.body.insertBefore(statusWidget, bodyFirstChild);
-          } else {
-            document.body.appendChild(statusWidget);
+              // Try to find the main content area
+              const mainContent = document.querySelector('main, .topic-body, .posts-wrapper, [role="main"]');
+              if (mainContent) {
+                const widgetsInMain = Array.from(mainContent.querySelectorAll('.tally-status-widget-container'));
+                if (widgetsInMain.length > 0) {
+                  const lastWidgetInMain = widgetsInMain[widgetsInMain.length - 1];
+                  if (lastWidgetInMain.nextSibling) {
+                    mainContent.insertBefore(statusWidget, lastWidgetInMain.nextSibling);
+                  } else {
+                    mainContent.appendChild(statusWidget);
+                  }
+                  console.log("✅ [MOBILE] Status widget inserted after last widget in main content");
+                } else {
+                  if (mainContent.firstChild) {
+                    mainContent.insertBefore(statusWidget, mainContent.firstChild);
+                  } else {
+                    mainContent.appendChild(statusWidget);
+                  }
+                  console.log("✅ [MOBILE] Status widget inserted in main content area (first widget)");
+                }
+              } else {
+                // Last resort: append to body at top
+                const bodyFirstChild = document.body.firstElementChild || document.body.firstChild;
+                if (bodyFirstChild) {
+                  document.body.insertBefore(statusWidget, bodyFirstChild);
+            } else {
+              document.body.appendChild(statusWidget);
+                }
+                console.log("✅ [MOBILE] Status widget inserted at top of body");
               }
-              console.log("✅ [MOBILE] Status widget inserted at top of body");
             }
+            
+            // CRITICAL: Widget is already fully styled and visible before insertion
+            // Just ensure it stays visible after DOM insertion
+            if (statusWidget && statusWidget.parentNode) {
+              // Force immediate reflow to ensure smooth rendering
+              void statusWidget.offsetHeight;
+              // CRITICAL: Mark as visible in cache immediately to prevent scroll flickering
+              markWidgetAsVisibleInCache(statusWidget);
+            }
+          } catch (error) {
+            console.error("❌ [MOBILE] Error inserting widget:", error);
           }
-        } catch (error) {
-          console.error("❌ [MOBILE] Error inserting widget:", error);
-        }
+        });
       });
         
         // Ensure widget is visible on mobile - force visibility
@@ -6805,12 +6920,15 @@ export default apiInitializer((api) => {
     }
     
     // CRITICAL: Early return if widget setup already completed and widgets exist
+    // This prevents re-initialization that causes page reload/blinking (especially for Snapshot widgets)
     if (widgetSetupCompleted) {
       const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
       if (existingWidgets.length > 0) {
-        console.log(`🔵 [TOPIC] Widget setup already completed - skipping (${existingWidgets.length} widget(s) exist)`);
+        console.log(`🔵 [TOPIC] Widget setup already completed - skipping to prevent reload (${existingWidgets.length} widget(s) exist)`);
         // Hide loader if widgets already exist
         hideMainWidgetLoader();
+        // CRITICAL: Reset running flag to prevent blocking future legitimate updates
+        isWidgetSetupRunning = false;
         return Promise.resolve();
       }
     }
@@ -6843,12 +6961,24 @@ export default apiInitializer((api) => {
     
     // Render widgets immediately if proposals found
     if (allProposals.snapshot.length > 0 || allProposals.aip.length > 0) {
+      // CRITICAL: Check if widgets already exist before rendering - prevent duplicate rendering
+      const existingWidgetsBeforeRender = document.querySelectorAll('.tally-status-widget-container');
+      if (existingWidgetsBeforeRender.length > 0 && widgetSetupCompleted) {
+        console.log(`🔵 [TOPIC] Widgets already exist before render (${existingWidgetsBeforeRender.length} widget(s)) - skipping to prevent reload`);
+        hideMainWidgetLoader();
+        isWidgetSetupRunning = false;
+        return Promise.resolve();
+      }
+      
       // Mark as completed BEFORE rendering to prevent observer-triggered re-executions
       widgetSetupCompleted = true;
       try {
         setupTopicWidgetWithProposals(allProposals);
       } catch (error) {
         console.error("❌ [TOPIC] Error in setupTopicWidgetWithProposals:", error);
+        // Reset flags on error to allow retry
+        widgetSetupCompleted = false;
+        isWidgetSetupRunning = false;
       }
     }
     
@@ -6863,16 +6993,29 @@ export default apiInitializer((api) => {
     retryDelays.forEach((delay) => {
       setTimeout(() => {
         // CRITICAL: Skip retry if widget setup already completed (prevents re-scanning on scroll)
-        if (widgetSetupCompleted) {
-          const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
-          if (existingWidgets.length > 0) {
-            console.log(`🔵 [TOPIC] Retry ${retryCount + 1} skipped - widget setup already completed`);
-            // Reset running flag when all retries are done
-            if (retryCount === retryDelays.length - 1) {
-              isWidgetSetupRunning = false;
-            }
-            return;
+        // CRITICAL: Also check if widgets exist - if they do, skip retry to prevent reload
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (widgetSetupCompleted && existingWidgets.length > 0) {
+          console.log(`🔵 [TOPIC] Retry ${retryCount + 1} skipped - widget setup already completed (${existingWidgets.length} widget(s) exist)`);
+          // Reset running flag when all retries are done
+          if (retryCount === retryDelays.length - 1) {
+            isWidgetSetupRunning = false;
           }
+          return;
+        }
+        
+        // Also check if widgets exist even if setup not marked as completed
+        // This prevents retries from triggering re-renders when widgets already exist
+        if (existingWidgets.length > 0) {
+          console.log(`🔵 [TOPIC] Retry ${retryCount + 1} skipped - widgets already exist (${existingWidgets.length} widget(s)) - preventing reload`);
+          // Mark as completed since widgets exist
+          widgetSetupCompleted = true;
+          hideMainWidgetLoader();
+          // Reset running flag when all retries are done
+          if (retryCount === retryDelays.length - 1) {
+            isWidgetSetupRunning = false;
+          }
+          return;
         }
         
         retryCount++;
@@ -8211,6 +8354,15 @@ export default apiInitializer((api) => {
       return;
     }
     
+    // CRITICAL: Early exit if widgets already exist - prevent ANY re-rendering that causes reload
+    // This is the most important check to prevent page reloading/blinking
+    const existingWidgetsCheck = document.querySelectorAll('.tally-status-widget-container');
+    if (existingWidgetsCheck.length > 0 && widgetSetupCompleted) {
+      console.log(`🔵 [TOPIC] Widgets already exist (${existingWidgetsCheck.length} widget(s)) and setup completed - EXITING to prevent reload`);
+      hideMainWidgetLoader();
+      return; // CRITICAL: Exit immediately to prevent any re-rendering
+    }
+    
     // Note: Don't check isWidgetSetupRunning here - that flag is for debouncedSetupTopicWidget
     // This function can be called multiple times if proposals change
     
@@ -8260,26 +8412,53 @@ export default apiInitializer((api) => {
       ensureAIPWidgetsVisible();
     }
     
-    // If Snapshot widgets match and we have the expected AIP widgets, skip re-render
+    // CRITICAL: If widgets already exist and match, skip re-render to prevent page reload/blinking
+    // Check both normalized and original URLs to ensure proper matching
+    const normalizeUrlForComparison = (url) => {
+      if (!url) {
+        return '';
+      }
+      return url.trim().replace(/\/+$/, '').split('?')[0].split('#')[0].toLowerCase();
+    };
+    
+    // Normalize all current Snapshot URLs for comparison
+    const normalizedCurrentUrls = new Set(allProposals.snapshot.map(url => normalizeUrlForComparison(url)));
+    const normalizedExistingUrls = new Set();
+    existingSnapshotWidgets.forEach(widget => {
+      const widgetUrl = widget.getAttribute('data-tally-url');
+      if (widgetUrl) {
+        normalizedExistingUrls.add(normalizeUrlForComparison(widgetUrl));
+      }
+    });
+    
+    // Check if normalized URLs match (more reliable than exact match)
+    const normalizedUrlsMatch = normalizedExistingUrls.size === normalizedCurrentUrls.size &&
+                                [...normalizedExistingUrls].every(url => normalizedCurrentUrls.has(url)) &&
+                                [...normalizedCurrentUrls].every(url => normalizedExistingUrls.has(url));
+    
+    // If Snapshot widgets match (by normalized URL) and we have the expected AIP widgets, skip re-render
     // AIP widgets are preserved regardless
-    if (snapshotUrlsMatch && existingSnapshotWidgets.length === allProposals.snapshot.length && 
+    if ((snapshotUrlsMatch || normalizedUrlsMatch) && existingSnapshotWidgets.length === allProposals.snapshot.length && 
         existingAIPWidgets.length >= allProposals.aip.length) {
-      console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s): ${existingSnapshotWidgets.length} Snapshot, ${existingAIPWidgets.length} AIP), skipping re-render`);
+      console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s): ${existingSnapshotWidgets.length} Snapshot, ${existingAIPWidgets.length} AIP), skipping re-render to prevent reload`);
       // Still ensure AIP widgets are visible
       ensureAIPWidgetsVisible();
       // Hide loader since widgets already exist
       hideMainWidgetLoader();
       // Mark as completed since widgets already exist and match
       widgetSetupCompleted = true;
-      return; // Don't re-render if widgets already match
+      // CRITICAL: Reset running flag to allow future updates if needed
+      isWidgetSetupRunning = false;
+      return; // Don't re-render if widgets already match - prevents page reload
     }
     
     // Clear existing widgets only if proposals have changed
     // CRITICAL: Never clear AIP widgets - they are topic-level and should always stay visible
     // CRITICAL: Only clear widgets if URLs don't match - prevents blinking on navigation
+    // CRITICAL: Use normalized URL comparison to prevent false mismatches that cause reload
     if (existingWidgets.length > 0) {
-      // Check if we need to clear widgets - only clear if URLs don't match
-      const needsClearing = !snapshotUrlsMatch || existingSnapshotWidgets.length !== allProposals.snapshot.length;
+      // Check if we need to clear widgets - use normalized URL comparison for reliability
+      const needsClearing = (!snapshotUrlsMatch && !normalizedUrlsMatch) || existingSnapshotWidgets.length !== allProposals.snapshot.length;
       
       if (needsClearing) {
         console.log(`🔵 [TOPIC] Proposals changed - clearing ${existingWidgets.length} existing widget(s) before creating new ones (AIP widgets will be preserved)`);
@@ -8591,8 +8770,32 @@ export default apiInitializer((api) => {
               console.log(`   ⚠️ Note: Selected from ${categorized.arfcs.length} ARFC(s) found in thread`);
             }
             
-            // Create unique widget ID for each proposal
-            const widgetId = `snapshot-widget-${index}-${Date.now()}`;
+            // CRITICAL: Check if widget already exists with this URL before creating new ID
+            // This enables in-place updates to prevent blinking (same as Tally widgets)
+            // If widget exists, use its existing ID; otherwise create stable ID from URL
+            let widgetId;
+            const existingWidgetByUrl = document.querySelector(`.tally-status-widget-container[data-tally-url="${snapshot.url}"]`);
+            if (existingWidgetByUrl) {
+              // Widget exists - extract its ID to enable in-place update
+              const existingWidgetId = existingWidgetByUrl.id;
+              if (existingWidgetId && existingWidgetId.startsWith('aave-governance-widget-')) {
+                // Extract the widget ID from the existing widget's ID
+                widgetId = existingWidgetId.replace('aave-governance-widget-', '');
+                console.log(`🔵 [RENDER] Snapshot widget with URL ${snapshot.url} already exists (ID: ${existingWidgetId}), will update in place to prevent blinking`);
+              } else {
+                // Fallback: use data-widget-id attribute or generate stable ID
+                widgetId = existingWidgetByUrl.getAttribute('data-widget-id') || `snapshot-widget-${Math.abs(snapshot.url.split('').reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0))}`;
+                console.log(`🔵 [RENDER] Snapshot widget exists but ID format unexpected, using: ${widgetId}`);
+              }
+            } else {
+              // No existing widget - create stable widget ID based on URL (not timestamp)
+              // This prevents blinking by allowing the widget to be updated in place on subsequent renders
+              const urlHash = snapshot.url.split('').reduce((acc, char) => {
+                const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+                return hash & hash; // Convert to 32-bit integer
+              }, 0);
+              widgetId = `snapshot-widget-${Math.abs(urlHash)}`;
+            }
             
             // Get validation info (discussion link if not related to current forum)
             const validation = snapshot._validation || { isRelated: true, discussionLink: null };
@@ -9233,7 +9436,14 @@ export default apiInitializer((api) => {
       }
       
       // Only trigger widget setup if there are actual post changes, not widget changes or scroll-related changes
+      // CRITICAL: Also check if widgets already exist - if they do, don't trigger setup to prevent reload
       if (hasNonWidgetChanges) {
+        // Check if widgets already exist before triggering setup
+        const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
+        if (existingWidgets.length > 0 && widgetSetupCompleted) {
+          console.log(`🔵 [OBSERVER] New post detected but widgets already exist (${existingWidgets.length} widget(s)) - skipping setup to prevent reload`);
+          return; // Skip setup if widgets already exist
+        }
         // Use debounced version to prevent multiple rapid calls
         debouncedSetupTopicWidget();
       }
