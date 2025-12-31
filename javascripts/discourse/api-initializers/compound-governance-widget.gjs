@@ -64,7 +64,8 @@ export default apiInitializer((api) => {
 
   // Snapshot API Configuration
   const SNAPSHOT_GRAPHQL_ENDPOINT = "https://hub.snapshot.org/graphql";
-  const SNAPSHOT_URL_REGEX = /https?:\/\/(?:www\.)?snapshot\.org\/#\/[^\s<>"']+/gi;
+  const SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT = "https://testnet.hub.snapshot.org/graphql";
+  const SNAPSHOT_URL_REGEX = /https?:\/\/(?:www\.)?(?:snapshot\.org|testnet\.snapshot\.box)\/#\/[^\s<>"']+/gi;
   
   // Aave Governance Forum Configuration
   // Primary entry point: Aave Governance Forum thread
@@ -158,10 +159,39 @@ export default apiInitializer((api) => {
   // Extract Snapshot proposal info from URL
   // Format: https://snapshot.org/#/{space}/{proposal-id}
   // Example: https://snapshot.org/#/aave.eth/0x1234...
+  // Testnet format: https://testnet.snapshot.box/#/s-tn:{space}/{proposal-id}
+  // Example: https://testnet.snapshot.box/#/s-tn:discoursewidget.eth/proposal/0x1234...
   function extractSnapshotProposalInfo(url) {
     console.log("🔍 Extracting Snapshot proposal info from URL:", url);
     
     try {
+      // Check if it's a testnet URL
+      const isTestnet = url.includes('testnet.snapshot.box');
+      
+      // Match pattern for testnet: testnet.snapshot.box/#/s-tn:{space}/proposal/{proposal-id}
+      if (isTestnet) {
+        const testnetProposalMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
+        if (testnetProposalMatch) {
+          let space = testnetProposalMatch[1];
+          const proposalId = testnetProposalMatch[2];
+          // Handle s-tn: prefix - keep it for API calls
+          console.log("✅ Extracted Snapshot testnet format:", { space, proposalId });
+          return { space, proposalId, type: 'snapshot', isTestnet: true };
+        }
+        
+        // Match pattern: testnet.snapshot.box/#/s-tn:{space}/{proposal-id} (without /proposal/)
+        const testnetDirectMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
+        if (testnetDirectMatch) {
+          let space = testnetDirectMatch[1];
+          const proposalId = testnetDirectMatch[2];
+          // Skip if proposalId is "proposal"
+          if (proposalId.toLowerCase() !== 'proposal') {
+            console.log("✅ Extracted Snapshot testnet format (direct):", { space, proposalId });
+            return { space, proposalId, type: 'snapshot', isTestnet: true };
+          }
+        }
+      }
+      
       // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
       // Also handles: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
       // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
@@ -171,7 +201,7 @@ export default apiInitializer((api) => {
         const space = proposalMatch[1];
         const proposalId = proposalMatch[2];
         console.log("✅ Extracted Snapshot format:", { space, proposalId });
-        return { space, proposalId, type: 'snapshot' };
+        return { space, proposalId, type: 'snapshot', isTestnet: false };
       }
       
       // Match pattern: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
@@ -182,7 +212,7 @@ export default apiInitializer((api) => {
         // Skip if proposalId is "proposal" (means it's the /proposal/ path but regex didn't match correctly)
         if (proposalId.toLowerCase() !== 'proposal') {
           console.log("✅ Extracted Snapshot format (direct):", { space, proposalId });
-          return { space, proposalId, type: 'snapshot' };
+          return { space, proposalId, type: 'snapshot', isTestnet: false };
         }
       }
       
@@ -400,9 +430,13 @@ export default apiInitializer((api) => {
   }
 
   // Fetch Snapshot proposal data
-  async function fetchSnapshotProposal(space, proposalId, cacheKey) {
+  async function fetchSnapshotProposal(space, proposalId, cacheKey, isTestnet = false) {
     try {
-      console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId);
+      console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId, "isTestnet:", isTestnet);
+
+      // Use testnet endpoint if it's a testnet proposal
+      const endpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
+      console.log("🔵 [SNAPSHOT] Using endpoint:", endpoint);
 
       // Query by full ID
       const queryById = `
@@ -446,10 +480,12 @@ export default apiInitializer((api) => {
 
       // Snapshot proposal ID format: {space}/{proposal-id}
       // Try multiple formats as Snapshot API can be inconsistent
+      // For testnet, space might have s-tn: prefix which should be kept
       let cleanSpace = space;
-      if (space.startsWith('s:')) {
-        cleanSpace = space.substring(2); // Remove 's:' prefix for API
+      if (space.startsWith('s:') && !isTestnet) {
+        cleanSpace = space.substring(2); // Remove 's:' prefix for API (mainnet only)
       }
+      // For testnet, keep s-tn: prefix as-is
       
       // Try format 1: {space}/{proposal-id} (most common)
       const fullProposalId1 = `${cleanSpace}/${proposalId}`;
@@ -469,10 +505,10 @@ export default apiInitializer((api) => {
         query: queryById,
         variables: { id: fullProposalId }
       };
-      console.log("🔵 [SNAPSHOT] Making request to:", SNAPSHOT_GRAPHQL_ENDPOINT);
+      console.log("🔵 [SNAPSHOT] Making request to:", endpoint);
       console.log("🔵 [SNAPSHOT] Request body:", JSON.stringify(requestBody, null, 2));
       
-      const response = await fetchWithRetry(SNAPSHOT_GRAPHQL_ENDPOINT, {
+      const response = await fetchWithRetry(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -503,7 +539,7 @@ export default apiInitializer((api) => {
           console.warn("⚠️ [SNAPSHOT] Format 1 failed, trying format 2 (proposal hash only)...");
           
           // Try format 2: Just the proposal hash
-          const retryResponse2 = await fetchWithRetry(SNAPSHOT_GRAPHQL_ENDPOINT, {
+          const retryResponse2 = await fetchWithRetry(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -523,10 +559,10 @@ export default apiInitializer((api) => {
             }
           }
           
-          // Try format 3: With 's:' prefix
-          if (space.startsWith('s:') && cleanSpace !== space) {
-            console.warn("⚠️ [SNAPSHOT] Format 2 failed, trying format 3 (with 's:' prefix)...");
-            const retryResponse3 = await fetchWithRetry(SNAPSHOT_GRAPHQL_ENDPOINT, {
+          // Try format 3: With original space (includes 's:' or 's-tn:' prefix)
+          if ((space.startsWith('s:') || space.startsWith('s-tn:')) && cleanSpace !== space) {
+            console.warn("⚠️ [SNAPSHOT] Format 2 failed, trying format 3 (with original space prefix)...");
+            const retryResponse3 = await fetchWithRetry(endpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -538,7 +574,7 @@ export default apiInitializer((api) => {
             if (retryResponse3.ok) {
               const retryResult3 = await retryResponse3.json();
               if (retryResult3.data?.proposal) {
-                console.log("✅ [SNAPSHOT] Proposal fetched with format 3 ('s:' prefix)");
+                console.log("✅ [SNAPSHOT] Proposal fetched with format 3 (original space prefix)");
                 const transformedProposal = transformSnapshotData(retryResult3.data.proposal, space);
                 transformedProposal._cachedAt = Date.now();
                 proposalCache.set(cacheKey, transformedProposal);
@@ -561,8 +597,9 @@ export default apiInitializer((api) => {
       console.error("❌ [SNAPSHOT] Error fetching proposal:", {
         name: errorName,
         message: errorMessage,
-        url: SNAPSHOT_GRAPHQL_ENDPOINT,
+        url: endpoint,
         proposalId,
+        isTestnet,
         fullError: error
       });
       
@@ -3966,7 +4003,7 @@ export default apiInitializer((api) => {
     
     // Determine type from URL
     let type = null;
-    if (url.includes('snapshot.org')) {
+    if (url.includes('snapshot.org') || url.includes('testnet.snapshot.box')) {
       type = 'snapshot';
     } else if (url.includes('governance.aave.com') || url.includes('vote.onaave.com') || url.includes('app.aave.com/governance')) {
       type = 'aip';
@@ -4001,7 +4038,7 @@ export default apiInitializer((api) => {
         if (!proposalInfo) {
           return null;
         }
-        return await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey);
+        return await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey, proposalInfo.isTestnet || false);
       } else if (type === 'aip') {
         const proposalInfo = extractAIPProposalInfo(url);
         if (!proposalInfo) {
