@@ -1100,8 +1100,7 @@ export default apiInitializer((api) => {
     
     // If widgets are initialized and we found the same proposals, skip re-rendering
     if (widgetsInitialized && existingWidgets.length > 0) {
-      const currentUrls = new Set([...snapshotUrls, ...aipUrls]);
-      // Check if we have widgets for all current URLs
+      // Check if we have widgets for all current URLs (reuse currentUrls from above)
       const allUrlsHaveWidgets = currentUrls.size > 0 && 
                                  [...currentUrls].every(url => {
                                    return Array.from(existingWidgets).some(widget => {
@@ -1466,7 +1465,6 @@ export default apiInitializer((api) => {
     const postObserver = new MutationObserver((mutations) => {
       // Ignore mutations that are only widget-related to prevent flickering
       let hasNewPost = false;
-      let hasNonWidgetChanges = false;
       
       for (const mutation of mutations) {
         // Only check for actual new post elements being added, not attribute changes
@@ -1485,11 +1483,7 @@ export default apiInitializer((api) => {
               
               if (isPost && !isWidget) {
                 hasNewPost = true;
-                hasNonWidgetChanges = true;
                 break;
-              } else if (!isWidget) {
-                // Other non-widget changes (but not new posts)
-                hasNonWidgetChanges = true;
               }
             }
           }
