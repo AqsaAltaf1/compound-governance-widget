@@ -1,7 +1,6 @@
 import { apiInitializer } from "discourse/lib/api";
 import {
   AAVE_FORUM_URL_REGEX,
-  AAVE_V3_SUBGRAPH,
   AIP_URL_REGEX,
   SNAPSHOT_URL_REGEX
 } from "../lib/config/constants";
@@ -11,17 +10,15 @@ import {
   renderProposalWidget,
   showNetworkErrorWidget
 } from "../lib/dom/renderer";
-import { fetchAIPProposal, getStateMapping } from "../lib/services/aip-service";
-import { fetchWithRetry } from "../lib/services/fetch-service";
+import { fetchAIPProposal } from "../lib/services/aip-service";
 import { fetchSnapshotProposal } from "../lib/services/snapshot-service";
-import { calculateTimeRemaining } from "../lib/utils/date-utils";
 import { escapeHtml, formatStatusForDisplay, formatVoteAmount } from "../lib/utils/formatting";
 import {
   extractAIPProposalInfo,
   extractProposalInfo,
   extractSnapshotProposalInfo
 } from "../lib/utils/url-parser";
-import { getStatePriority, selectTopProposals } from "../lib/utils/widget-selection";
+import { selectTopProposals } from "../lib/utils/widget-selection";
 
 console.log("✅ Aave Governance Widget: JavaScript file loaded!");
 
@@ -981,9 +978,6 @@ export default apiInitializer((api) => {
       return foundUrl;
     }
     
-    // Pattern 2: Search for AIP references with proposal numbers
-    // "AIP #123", "AIP 123", "proposal #123", "proposal 123"
-    // Then try to construct URL from governance portal
     const aipNumberPatterns = [
       /AIP\s*[#]?\s*(\d+)/gi,
       /proposal\s*[#]?\s*(\d+)/gi,
@@ -1030,10 +1024,6 @@ export default apiInitializer((api) => {
     return null;
   }
 
-  // Extract previous Snapshot stage URL from current Snapshot proposal (CASCADING SEARCH)
-  // This finds Temp Check from ARFC, or ARFC from a later Snapshot proposal
-  // ARFC proposals often reference the previous Temp Check: "Following the Temp Check [link]"
-  // eslint-disable-next-line no-unused-vars
   function extractPreviousSnapshotStage(snapshotData) {
     if (!snapshotData) {
       return null;
@@ -1103,9 +1093,6 @@ export default apiInitializer((api) => {
     return null;
     }
     
-  // Extract Snapshot URL from AIP proposal metadata/description (CASCADING SEARCH)
-  // This helps find previous stages: AIP → ARFC/Temp Check
-  // eslint-disable-next-line no-unused-vars
   function extractSnapshotUrlFromAIP(aipData) {
     if (!aipData) {
       return null;
@@ -1168,8 +1155,6 @@ export default apiInitializer((api) => {
   }
 
   // Set up separate widgets: Snapshot widget and AIP widget
-  // AIP widget only shows after Snapshot proposals are concluded (not active)
-  // Live vote counts (For, Against, Abstain) are shown for active Snapshot proposals
   function setupTopicWidget() {
     console.log("🔵 [TOPIC] Setting up widgets - one per proposal URL...");
     
