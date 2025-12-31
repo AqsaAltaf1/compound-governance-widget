@@ -486,22 +486,31 @@ export default apiInitializer((api) => {
       if (space.startsWith('s:') && !isTestnet) {
         cleanSpace = space.substring(2); // Remove 's:' prefix for API (mainnet only)
       }
-      // For testnet, keep s-tn: prefix as-is
+      // For testnet, also try without s-tn: prefix
+      let spaceWithoutPrefix = space;
+      if (isTestnet && space.startsWith('s-tn:')) {
+        spaceWithoutPrefix = space.substring(5); // Remove 's-tn:' prefix for testnet alternative format
+      }
       
-      // Try format 1: {space}/{proposal-id} (most common)
-      const fullProposalId1 = `${cleanSpace}/${proposalId}`;
-      // Try format 2: Just the proposal hash (some APIs accept this)
-      const fullProposalId2 = proposalId;
-      // Try format 3: With 's:' prefix
-      const fullProposalId3 = `${space}/${proposalId}`;
+      // Generate all possible proposal ID formats
+      const fullProposalId1 = `${cleanSpace}/${proposalId}`; // With cleaned space
+      const fullProposalId2 = proposalId; // Just the proposal hash (works for testnet)
+      const fullProposalId3 = `${space}/${proposalId}`; // With original space (s-tn: prefix)
+      const fullProposalId4 = isTestnet ? `${spaceWithoutPrefix}/${proposalId}` : null; // Without s-tn: prefix (testnet only)
       
-      console.log("🔵 [SNAPSHOT] Trying proposal ID formats:");
-      console.log("  Format 1 (space/proposal):", fullProposalId1);
-      console.log("  Format 2 (proposal only):", fullProposalId2);
-      console.log("  Format 3 (s:space/proposal):", fullProposalId3);
+      // For testnet, try proposal hash first (based on user's example code)
+      // For mainnet, try space/proposal format first
+      const formatOrder = isTestnet 
+        ? [fullProposalId2, fullProposalId1, fullProposalId3, fullProposalId4].filter(Boolean)
+        : [fullProposalId1, fullProposalId2, fullProposalId3].filter(Boolean);
+      
+      console.log("🔵 [SNAPSHOT] Trying proposal ID formats (testnet:", isTestnet, "):");
+      formatOrder.forEach((fmt, idx) => {
+        console.log(`  Format ${idx + 1}:`, fmt);
+      });
 
-      // Try format 1 first
-      let fullProposalId = fullProposalId1;
+      // Try formats in order
+      let fullProposalId = formatOrder[0];
       const requestBody = {
         query: queryById,
         variables: { id: fullProposalId }
@@ -531,52 +540,31 @@ export default apiInitializer((api) => {
 
         const proposal = result.data?.proposal;
         if (proposal) {
-          console.log("✅ [SNAPSHOT] Proposal fetched successfully with format 1");
+          console.log("✅ [SNAPSHOT] Proposal fetched successfully with format:", formatOrder[0]);
           const transformedProposal = transformSnapshotData(proposal, space);
           transformedProposal._cachedAt = Date.now();
           proposalCache.set(cacheKey, transformedProposal);
           return transformedProposal;
         } else {
-          console.warn("⚠️ [SNAPSHOT] Format 1 failed, trying format 2 (proposal hash only)...");
-          
-          // Try format 2: Just the proposal hash
-          const retryResponse2 = await fetchWithRetry(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              query: queryById,
-              variables: { id: fullProposalId2 }
-            }),
-          });
-          
-          if (retryResponse2.ok) {
-            const retryResult2 = await retryResponse2.json();
-            if (retryResult2.data?.proposal) {
-              console.log("✅ [SNAPSHOT] Proposal fetched with format 2 (hash only)");
-              const transformedProposal = transformSnapshotData(retryResult2.data.proposal, space);
-              transformedProposal._cachedAt = Date.now();
-              proposalCache.set(cacheKey, transformedProposal);
-              return transformedProposal;
-            }
-          }
-          
-          // Try format 3: With original space (includes 's:' or 's-tn:' prefix)
-          if ((space.startsWith('s:') || space.startsWith('s-tn:')) && cleanSpace !== space) {
-            console.warn("⚠️ [SNAPSHOT] Format 2 failed, trying format 3 (with original space prefix)...");
-            const retryResponse3 = await fetchWithRetry(endpoint, {
+          // Try remaining formats in order
+          for (let i = 1; i < formatOrder.length; i++) {
+            const formatId = formatOrder[i];
+            console.warn(`⚠️ [SNAPSHOT] Format ${i} failed, trying format ${i + 1}...`);
+            
+            const retryResponse = await fetchWithRetry(endpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 query: queryById,
-                variables: { id: fullProposalId3 }
+                variables: { id: formatId }
               }),
             });
             
-            if (retryResponse3.ok) {
-              const retryResult3 = await retryResponse3.json();
-              if (retryResult3.data?.proposal) {
-                console.log("✅ [SNAPSHOT] Proposal fetched with format 3 (original space prefix)");
-                const transformedProposal = transformSnapshotData(retryResult3.data.proposal, space);
+            if (retryResponse.ok) {
+              const retryResult = await retryResponse.json();
+              if (retryResult.data?.proposal) {
+                console.log(`✅ [SNAPSHOT] Proposal fetched with format ${i + 1}:`, formatId);
+                const transformedProposal = transformSnapshotData(retryResult.data.proposal, space);
                 transformedProposal._cachedAt = Date.now();
                 proposalCache.set(cacheKey, transformedProposal);
                 return transformedProposal;
