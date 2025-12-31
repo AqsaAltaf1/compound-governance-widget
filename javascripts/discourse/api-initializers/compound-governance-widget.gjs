@@ -6,12 +6,12 @@ import {
   AIP_URL_REGEX,
   SNAPSHOT_URL_REGEX
 } from "../lib/config/constants";
+import { renderMultiStageWidget } from "../lib/dom/multi-stage-widget";
 import {
   hideWidgetIfNoProposal,
   renderProposalWidget,
   showNetworkErrorWidget
 } from "../lib/dom/renderer";
-import { renderMultiStageWidget } from "../lib/dom/multi-stage-widget";
 import { fetchAIPProposal, getStateMapping } from "../lib/services/aip-service";
 import { fetchWithRetry } from "../lib/services/fetch-service";
 import { fetchSnapshotProposal } from "../lib/services/snapshot-service";
