@@ -4,7 +4,9 @@
  * Escape HTML for safe insertion
  */
 export function escapeHtml(unsafe) {
-  if (!unsafe) { return ''; }
+  if (!unsafe) {
+    return '';
+  }
   return String(unsafe)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -17,7 +19,9 @@ export function escapeHtml(unsafe) {
  * Format vote amount for display (e.g., 1.14M, 51.74K)
  */
 export function formatVoteAmount(amount) {
-  if (!amount || amount === 0) { return "0"; }
+  if (!amount || amount === 0) {
+    return "0";
+  }
   
   // Convert from wei (18 decimals) to tokens
   // Always assume amounts are in wei if they're very large
@@ -74,7 +78,7 @@ export function formatStatusForDisplay(statusValue) {
     'quorum not reached': 'Quorum Not Reached',
     'quorumnotreached': 'Quorum Not Reached',
     'pending execution': 'Pending Execution',
-    'pendingexecution': 'Pending Execution'
+    'pendingexecution': 'Pending Execution',
   };
   
   // Check exact match first

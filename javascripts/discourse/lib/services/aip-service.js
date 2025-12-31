@@ -19,7 +19,7 @@ export function getStateMapping(urlSource) {
       4: 'executed',
       5: 'expired',
       6: 'cancelled',
-      7: 'active'
+      7: 'active',
     };
   } else {
     // Default to app.aave.com (Aave Governance V3) enum mapping
@@ -31,7 +31,7 @@ export function getStateMapping(urlSource) {
       4: 'executed',
       5: 'failed',
       6: 'cancelled',
-      7: 'expired'
+      7: 'expired',
     };
   }
 }

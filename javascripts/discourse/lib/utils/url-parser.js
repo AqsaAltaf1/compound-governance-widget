@@ -157,7 +157,9 @@ export function extractAIPProposalInfo(url) {
  * Extract proposal info from URL (wrapper function that detects type)
  */
 export function extractProposalInfo(url) {
-  if (!url) { return null; }
+  if (!url) {
+    return null;
+  }
   
   // Try Snapshot first
   const snapshotInfo = extractSnapshotProposalInfo(url);
