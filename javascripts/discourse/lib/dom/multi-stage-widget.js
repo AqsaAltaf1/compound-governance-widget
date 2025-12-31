@@ -10,7 +10,7 @@ function renderSnapshotStage(
   stageData,
   stageUrl,
   stageName,
-  formatTimeDisplayFn,
+  formatTimeDisplayFn
 ) {
   if (!stageData) {
     return "";
@@ -45,7 +45,7 @@ function renderSnapshotStage(
   }
 
   console.log(
-    `🔵 [RENDER] ${stageName} - For: ${forVotes}, Against: ${againstVotes}, Total: ${totalVotes}, Support: ${supportPercent}%`,
+    `🔵 [RENDER] ${stageName} - For: ${forVotes}, Against: ${againstVotes}, Total: ${totalVotes}, Support: ${supportPercent}%`
   );
 
   // Use actual status from API and format it properly (shows Defeated, Rejected, Failed, etc.)
@@ -94,7 +94,7 @@ function renderSnapshotStage(
                 : "inactive";
   const timeDisplay = formatTimeDisplayFn(
     stageData.daysLeft,
-    stageData.hoursLeft,
+    stageData.hoursLeft
   );
 
   // Calculate percentages for progress bar
@@ -316,12 +316,12 @@ function renderAIPStage(stageData, stageUrl, formatTimeDisplayFn) {
     quorum > 0 && totalVotes !== null && totalVotes >= quorum;
 
   console.log(
-    `🔵 [RENDER] AIP - For: ${forVotes !== null ? forVotes : "N/A"} (${forPercent}%), Against: ${againstVotes !== null ? againstVotes : "N/A"} (${againstPercent}%), Total: ${totalVotes !== null ? totalVotes : "N/A"}, Quorum: ${quorum} (${quorumPercent}%) - Reached: ${quorumReached}`,
+    `🔵 [RENDER] AIP - For: ${forVotes !== null ? forVotes : "N/A"} (${forPercent}%), Against: ${againstVotes !== null ? againstVotes : "N/A"} (${againstPercent}%), Total: ${totalVotes !== null ? totalVotes : "N/A"}, Quorum: ${quorum} (${quorumPercent}%) - Reached: ${quorumReached}`
   );
 
   const timeDisplay = formatTimeDisplayFn(
     stageData.daysLeft,
-    stageData.hoursLeft,
+    stageData.hoursLeft
   );
 
   // Extract AIP number from title if possible
@@ -530,7 +530,7 @@ export function renderMultiStageWidget(
   widgetId,
   proposalOrder,
   renderingUrls,
-  fetchingUrls,
+  fetchingUrls
 ) {
   const statusWidgetId = `aave-governance-widget-${widgetId}`;
 
@@ -550,11 +550,11 @@ export function renderMultiStageWidget(
   // SPECIAL HANDLING FOR AIP: Remove all existing AIP widgets to ensure only one is shown
   if (stages.aip && stages.aipUrl) {
     const existingAipWidgets = document.querySelectorAll(
-      '.tally-status-widget-container[data-proposal-type="aip"]',
+      '.tally-status-widget-container[data-proposal-type="aip"]'
     );
     if (existingAipWidgets.length > 0) {
       console.log(
-        `🔵 [RENDER] Found ${existingAipWidgets.length} existing AIP widget(s), removing to prevent duplicates`,
+        `🔵 [RENDER] Found ${existingAipWidgets.length} existing AIP widget(s), removing to prevent duplicates`
       );
       existingAipWidgets.forEach((widget) => {
         const widgetUrl = widget.getAttribute("data-tally-url");
@@ -571,11 +571,11 @@ export function renderMultiStageWidget(
   // This is the same logic used for snapshot widgets - check DOM before checking renderingUrls
   if (proposalUrl) {
     const existingWidgetsByUrl = document.querySelectorAll(
-      `.tally-status-widget-container[data-tally-url="${proposalUrl}"]`,
+      `.tally-status-widget-container[data-tally-url="${proposalUrl}"]`
     );
     if (existingWidgetsByUrl.length > 0) {
       console.log(
-        `🔵 [RENDER] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, skipping duplicate render`,
+        `🔵 [RENDER] Found ${existingWidgetsByUrl.length} existing widget(s) with same URL, skipping duplicate render`
       );
       return;
     }
@@ -584,7 +584,7 @@ export function renderMultiStageWidget(
   // CRITICAL: Check if this URL is already being rendered (race condition prevention)
   if (proposalUrl && renderingUrls.has(proposalUrl)) {
     console.log(
-      `🔵 [RENDER] URL ${proposalUrl} is already being rendered, skipping duplicate render`,
+      `🔵 [RENDER] URL ${proposalUrl} is already being rendered, skipping duplicate render`
     );
     return;
   }
@@ -600,7 +600,7 @@ export function renderMultiStageWidget(
   if (existingWidget) {
     existingWidget.remove();
     console.log(
-      `🔵 [RENDER] Removed existing widget with ID: ${statusWidgetId}`,
+      `🔵 [RENDER] Removed existing widget with ID: ${statusWidgetId}`
     );
   }
 
@@ -621,7 +621,7 @@ export function renderMultiStageWidget(
   } else {
     // This is normal if only ARFC or only AIP is provided (not a warning)
     console.log(
-      "ℹ️ [RENDER] No Temp Check data - this is normal if only ARFC/AIP is provided",
+      "ℹ️ [RENDER] No Temp Check data - this is normal if only ARFC/AIP is provided"
     );
   }
 
@@ -635,7 +635,7 @@ export function renderMultiStageWidget(
   } else {
     // This is normal if only Temp Check or only AIP is provided (not a warning)
     console.log(
-      "ℹ️ [RENDER] No ARFC data - this is normal if only Temp Check/AIP is provided",
+      "ℹ️ [RENDER] No ARFC data - this is normal if only Temp Check/AIP is provided"
     );
   }
 
@@ -675,7 +675,7 @@ export function renderMultiStageWidget(
         stages.tempCheck,
         stages.tempCheckUrl,
         "Temp Check",
-        formatTimeDisplay,
+        formatTimeDisplay
       )
     : "";
   const arfcHTML = stages.arfc
@@ -683,7 +683,7 @@ export function renderMultiStageWidget(
         stages.arfc,
         stages.arfcUrl,
         "ARFC",
-        formatTimeDisplay,
+        formatTimeDisplay
       )
     : "";
   const aipHTML = stages.aip
@@ -691,7 +691,7 @@ export function renderMultiStageWidget(
     : "";
 
   console.log(
-    `🔵 [RENDER] Generated HTML lengths - Temp Check: ${tempCheckHTML.length}, ARFC: ${arfcHTML.length}, AIP: ${aipHTML.length}`,
+    `🔵 [RENDER] Generated HTML lengths - Temp Check: ${tempCheckHTML.length}, ARFC: ${arfcHTML.length}, AIP: ${aipHTML.length}`
   );
   if (tempCheckHTML.length === 0 && stages.tempCheck) {
     console.error("❌ [RENDER] Temp Check data exists but HTML is empty!");
@@ -766,11 +766,11 @@ export function renderMultiStageWidget(
   const isMobile =
     window.innerWidth <= 1024 ||
     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent,
+      navigator.userAgent
     );
 
   console.log(
-    `🔵 [MOBILE] Detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}`,
+    `🔵 [MOBILE] Detection - window.innerWidth: ${window.innerWidth}, isMobile: ${isMobile}`
   );
 
   // Ensure widget is visible on mobile
@@ -793,10 +793,10 @@ export function renderMultiStageWidget(
     if (statusWidget.parentNode) {
       // Widget is already in DOM - check if it's in a valid location
       const topicBody = document.querySelector(
-        ".topic-body, .posts-wrapper, .post-stream, .topic-post-stream",
+        ".topic-body, .posts-wrapper, .post-stream, .topic-post-stream"
       );
       const firstPost = document.querySelector(
-        ".topic-post, .post, [data-post-id], article[data-post-id]",
+        ".topic-post, .post, [data-post-id], article[data-post-id]"
       );
 
       // If widget is already in a valid location (before posts or in topic body), don't re-insert
@@ -808,7 +808,7 @@ export function renderMultiStageWidget(
             firstPost.parentNode.contains(statusWidget)))
       ) {
         console.log(
-          "✅ [MOBILE] Widget already in correct position, skipping re-insertion",
+          "✅ [MOBILE] Widget already in correct position, skipping re-insertion"
         );
         // Remove URL from rendering set now that widget is confirmed in DOM
         if (proposalUrl) {
@@ -822,10 +822,10 @@ export function renderMultiStageWidget(
     // Insert widget in correct order based on stage (temp-check -> arfc -> aip)
     try {
       const topicBody = document.querySelector(
-        ".topic-body, .posts-wrapper, .post-stream, .topic-post-stream",
+        ".topic-body, .posts-wrapper, .post-stream, .topic-post-stream"
       );
       const firstPost = document.querySelector(
-        ".topic-post, .post, [data-post-id], article[data-post-id]",
+        ".topic-post, .post, [data-post-id], article[data-post-id]"
       );
 
       // Get proposal order for this widget (order in content, not stage order)
@@ -833,7 +833,7 @@ export function renderMultiStageWidget(
         statusWidget.getAttribute("data-proposal-order") ||
           statusWidget.getAttribute("data-stage-order") ||
           "999",
-        10,
+        10
       );
 
       // Find all existing widgets in the insertion area
@@ -847,21 +847,21 @@ export function renderMultiStageWidget(
         existingWidgets = siblings.filter(
           (sibling) =>
             sibling.classList.contains("tally-status-widget-container") &&
-            siblings.indexOf(sibling) < siblings.indexOf(firstPost),
+            siblings.indexOf(sibling) < siblings.indexOf(firstPost)
         );
       } else if (topicBody) {
         widgetsContainer = topicBody;
         existingWidgets = Array.from(
-          topicBody.querySelectorAll(".tally-status-widget-container"),
+          topicBody.querySelectorAll(".tally-status-widget-container")
         );
       } else {
         const mainContent = document.querySelector(
-          'main, .topic-body, .posts-wrapper, [role="main"]',
+          'main, .topic-body, .posts-wrapper, [role="main"]'
         );
         if (mainContent) {
           widgetsContainer = mainContent;
           existingWidgets = Array.from(
-            mainContent.querySelectorAll(".tally-status-widget-container"),
+            mainContent.querySelectorAll(".tally-status-widget-container")
           );
         }
       }
@@ -876,7 +876,7 @@ export function renderMultiStageWidget(
             widget.getAttribute("data-proposal-order") ||
               widget.getAttribute("data-stage-order") ||
               "999",
-            10,
+            10
           );
           if (widgetProposalOrder > thisProposalOrder) {
             insertBefore = widget;
@@ -887,7 +887,7 @@ export function renderMultiStageWidget(
         if (insertBefore) {
           widgetsContainer.insertBefore(statusWidget, insertBefore);
           console.log(
-            `✅ [MOBILE] Widget inserted in correct order (proposal order: ${thisProposalOrder})`,
+            `✅ [MOBILE] Widget inserted in correct order (proposal order: ${thisProposalOrder})`
           );
         } else {
           // No widget with higher order, append at end (new widgets at bottom)
@@ -899,7 +899,7 @@ export function renderMultiStageWidget(
             topicBody.appendChild(statusWidget);
           } else {
             const mainContent = document.querySelector(
-              'main, .topic-body, .posts-wrapper, [role="main"]',
+              'main, .topic-body, .posts-wrapper, [role="main"]'
             );
             if (mainContent) {
               mainContent.appendChild(statusWidget);
@@ -908,7 +908,7 @@ export function renderMultiStageWidget(
             }
           }
           console.log(
-            `✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - new widget at bottom`,
+            `✅ [MOBILE] Widget appended at end (proposal order: ${thisProposalOrder}) - new widget at bottom`
           );
         }
       } else {
@@ -916,7 +916,7 @@ export function renderMultiStageWidget(
         if (firstPost && firstPost.parentNode) {
           firstPost.parentNode.insertBefore(statusWidget, firstPost);
           console.log(
-            "✅ [MOBILE] Widget inserted before first post (first widget)",
+            "✅ [MOBILE] Widget inserted before first post (first widget)"
           );
         } else if (topicBody) {
           if (topicBody.firstChild) {
@@ -925,11 +925,11 @@ export function renderMultiStageWidget(
             topicBody.appendChild(statusWidget);
           }
           console.log(
-            "✅ [MOBILE] Widget inserted in topic body (first widget)",
+            "✅ [MOBILE] Widget inserted in topic body (first widget)"
           );
         } else {
           const mainContent = document.querySelector(
-            'main, .topic-body, .posts-wrapper, [role="main"]',
+            'main, .topic-body, .posts-wrapper, [role="main"]'
           );
           if (mainContent) {
             if (mainContent.firstChild) {
@@ -938,7 +938,7 @@ export function renderMultiStageWidget(
               mainContent.appendChild(statusWidget);
             }
             console.log(
-              "✅ [MOBILE] Widget inserted in main content (first widget)",
+              "✅ [MOBILE] Widget inserted in main content (first widget)"
             );
           } else {
             const bodyFirstChild =
@@ -965,7 +965,7 @@ export function renderMultiStageWidget(
       }
       // Fallback: try to append to a safe location (append at end for new widgets at bottom)
       const topicBody = document.querySelector(
-        ".topic-body, .posts-wrapper, .post-stream, main",
+        ".topic-body, .posts-wrapper, .post-stream, main"
       );
       if (topicBody) {
         topicBody.appendChild(statusWidget);
@@ -991,7 +991,7 @@ export function renderMultiStageWidget(
         statusWidget.getAttribute("data-proposal-order") ||
           statusWidget.getAttribute("data-stage-order") ||
           "999",
-        10,
+        10
       );
 
       // Find the correct position to insert based on proposal order
@@ -1004,7 +1004,7 @@ export function renderMultiStageWidget(
           widget.getAttribute("data-proposal-order") ||
             widget.getAttribute("data-stage-order") ||
             "999",
-          10,
+          10
         );
         if (widgetProposalOrder > thisProposalOrder) {
           insertBefore = widget;
@@ -1015,13 +1015,13 @@ export function renderMultiStageWidget(
       if (insertBefore) {
         widgetsContainer.insertBefore(statusWidget, insertBefore);
         console.log(
-          `✅ [DESKTOP] Widget inserted in correct order (proposal order: ${thisProposalOrder})`,
+          `✅ [DESKTOP] Widget inserted in correct order (proposal order: ${thisProposalOrder})`
         );
       } else {
         // No widget with higher order, append at end
         widgetsContainer.appendChild(statusWidget);
         console.log(
-          `✅ [DESKTOP] Widget appended at end (proposal order: ${thisProposalOrder})`,
+          `✅ [DESKTOP] Widget appended at end (proposal order: ${thisProposalOrder})`
         );
       }
 
@@ -1033,11 +1033,11 @@ export function renderMultiStageWidget(
       // Fallback: if container creation failed, insert inline (shouldn't happen on desktop)
       console.warn("⚠️ [DESKTOP] Container not available, inserting inline");
       const topicBody = document.querySelector(
-        ".topic-body, .posts-wrapper, .post-stream",
+        ".topic-body, .posts-wrapper, .post-stream"
       );
       if (topicBody) {
         const firstPost = document.querySelector(
-          ".topic-post, .post, [data-post-id]",
+          ".topic-post, .post, [data-post-id]"
         );
         if (firstPost && firstPost.parentNode) {
           firstPost.parentNode.insertBefore(statusWidget, firstPost);
@@ -1052,14 +1052,14 @@ export function renderMultiStageWidget(
   // Use requestAnimationFrame to ensure DOM is ready
   requestAnimationFrame(() => {
     const toggleButtons = statusWidget.querySelectorAll(
-      ".stage-toggle-btn[data-stage-id]",
+      ".stage-toggle-btn[data-stage-id]"
     );
     toggleButtons.forEach((button) => {
       const stageId = button.getAttribute("data-stage-id");
       const content = document.getElementById(`${stageId}-content`);
       const icon = document.getElementById(`${stageId}-icon`);
       const collapsedText = document.getElementById(
-        `${stageId}-collapsed-text`,
+        `${stageId}-collapsed-text`
       );
 
       if (!content || !icon) {
@@ -1083,7 +1083,7 @@ export function renderMultiStageWidget(
 
       // Add click handler - when expanded, hide the collapse container completely
       const collapseContainer = document.getElementById(
-        `${stageId}-collapse-container`,
+        `${stageId}-collapse-container`
       );
       newButton.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1113,6 +1113,6 @@ export function renderMultiStageWidget(
   console.log(
     "✅ [WIDGET]",
     widgetType === "aip" ? "AIP" : "Snapshot",
-    "widget rendered",
+    "widget rendered"
   );
 }

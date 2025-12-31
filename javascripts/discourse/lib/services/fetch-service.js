@@ -8,7 +8,7 @@ export async function fetchWithRetry(
   options,
   maxRetries = 3,
   baseDelay = 1000,
-  handledErrors = null,
+  handledErrors = null
 ) {
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -35,7 +35,7 @@ export async function fetchWithRetry(
         if (attempt < maxRetries - 1) {
           const delay = baseDelay * Math.pow(2, attempt);
           console.warn(
-            `⚠️ [FETCH] Request timeout (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
+            `⚠️ [FETCH] Request timeout (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`
           );
           if (handledErrors) {
             handledErrors.add(error);
@@ -59,7 +59,7 @@ export async function fetchWithRetry(
         const delay = baseDelay * Math.pow(2, attempt);
         console.warn(
           `⚠️ [FETCH] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
-          error.message || error.toString(),
+          error.message || error.toString()
         );
         if (handledErrors) {
           handledErrors.add(error);
@@ -75,7 +75,7 @@ export async function fetchWithRetry(
   // If we exhausted all retries, throw the last error with more context
   if (lastError) {
     const enhancedError = new Error(
-      `Failed to fetch after ${maxRetries} attempts: ${lastError.message || lastError.toString()}. URL: ${url}`,
+      `Failed to fetch after ${maxRetries} attempts: ${lastError.message || lastError.toString()}. URL: ${url}`
     );
     enhancedError.name = lastError.name || "NetworkError";
     enhancedError.cause = lastError;

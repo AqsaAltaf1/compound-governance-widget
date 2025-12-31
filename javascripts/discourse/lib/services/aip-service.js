@@ -85,7 +85,7 @@ export function transformAIPDataFromOnChain(
   proposal,
   state,
   proposalId,
-  urlSource = "app.aave.com",
+  urlSource = "app.aave.com"
 ) {
   // Get the correct state mapping based on URL source
   const stateMap = getStateMapping(urlSource);
@@ -120,7 +120,7 @@ export function transformAIPDataFromOnChain(
       "Days left:",
       daysLeft,
       "Hours left:",
-      hoursLeft,
+      hoursLeft
     );
   }
 
@@ -196,7 +196,7 @@ export function transformAIPData(proposal) {
       "Days left:",
       daysLeft,
       "Hours left:",
-      hoursLeft,
+      hoursLeft
     );
   } else if (daysLeft === null && proposal.endTime) {
     // Fallback: use endTime directly if available
@@ -334,12 +334,12 @@ export function transformAIPDataFromJSON(jsonData) {
 export async function fetchAIPMarkdown(
   proposalId,
   handledErrors,
-  aaveVoteSite,
+  aaveVoteSite
 ) {
   try {
     if (!aaveVoteSite) {
       console.debug(
-        "🔵 [AIP] AAVE_VOTE_SITE not configured, skipping markdown fetch",
+        "🔵 [AIP] AAVE_VOTE_SITE not configured, skipping markdown fetch"
       );
       return null;
     }
@@ -355,7 +355,7 @@ export async function fetchAIPMarkdown(
       },
       3,
       1000,
-      handledErrors,
+      handledErrors
     );
 
     if (response.ok) {
@@ -439,20 +439,20 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       },
       3,
       1000,
-      handledErrors,
+      handledErrors
     );
 
     if (response.ok) {
       const result = await response.json();
       console.log(
         "🔵 [AIP] GraphQL Response:",
-        JSON.stringify(result, null, 2),
+        JSON.stringify(result, null, 2)
       );
 
       if (result.errors) {
         console.error(
           "❌ [AIP] GraphQL Errors:",
-          JSON.stringify(result.errors, null, 2),
+          JSON.stringify(result.errors, null, 2)
         );
         return null;
       }
@@ -465,7 +465,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       }
 
       console.log(
-        `✅ [AIP] Found ${proposals.length} proposal(s) with ID: ${proposalId}`,
+        `✅ [AIP] Found ${proposals.length} proposal(s) with ID: ${proposalId}`
       );
 
       const p = proposals[0];
@@ -477,7 +477,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         "🔵 [AIP] Votes type:",
         typeof p.votes,
         "Is array:",
-        Array.isArray(p.votes),
+        Array.isArray(p.votes)
       );
 
       // Handle votes - could be object, array, or null
@@ -497,10 +497,10 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       } else {
         console.warn(
           "⚠️ [AIP] No votes data found in subgraph for proposal",
-          proposalId,
+          proposalId
         );
         console.warn(
-          "⚠️ [AIP] This is common for failed/cancelled proposals - votes may not be indexed",
+          "⚠️ [AIP] This is common for failed/cancelled proposals - votes may not be indexed"
         );
         votesAvailable = false;
       }
@@ -509,13 +509,13 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         "🔵 [AIP] forVotes raw:",
         votesData?.forVotes,
         "type:",
-        typeof votesData?.forVotes,
+        typeof votesData?.forVotes
       );
       console.log(
         "🔵 [AIP] againstVotes raw:",
         votesData?.againstVotes,
         "type:",
-        typeof votesData?.againstVotes,
+        typeof votesData?.againstVotes
       );
 
       // Convert votes from wei to AAVE (exact same as ava.mjs)
@@ -530,7 +530,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         "🔵 [AIP] Extracted - forVotesRaw:",
         forVotesRaw,
         "againstVotesRaw:",
-        againstVotesRaw,
+        againstVotesRaw
       );
 
       // Convert to BigInt - exact same logic as ava.mjs: BigInt(p.votes?.forVotes || 0)
@@ -551,7 +551,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         "🔵 [AIP] BigInt values - For:",
         forVotesBigInt?.toString() || "null",
         "Against:",
-        againstVotesBigInt?.toString() || "null",
+        againstVotesBigInt?.toString() || "null"
       );
       console.log("🔵 [AIP] Decimals:", decimals.toString());
 
@@ -572,7 +572,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         "Against:",
         againstVotes || "null (not available)",
         "Abstain:",
-        abstainVotes,
+        abstainVotes
       );
 
       // Map state to status string - use default app.aave.com mapping for subgraph
@@ -591,7 +591,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         votingActivationTimestamp = Number(p.transactions.active.timestamp);
         console.log(
           "🔵 [AIP] Found votingActivationTimestamp from transactions.active:",
-          votingActivationTimestamp,
+          votingActivationTimestamp
         );
       } else if (
         p.transactions?.created?.timestamp &&
@@ -607,7 +607,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
           ") + cooldown (",
           cooldown,
           ") =",
-          votingActivationTimestamp,
+          votingActivationTimestamp
         );
       }
 
@@ -629,17 +629,17 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
           "Days left:",
           daysLeft,
           "Hours left:",
-          hoursLeft,
+          hoursLeft
         );
       } else {
         console.log(
-          "⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing",
+          "⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing"
         );
         console.log(
           "   votingActivationTimestamp:",
           votingActivationTimestamp,
           "votingDuration:",
-          p.votingDuration,
+          p.votingDuration
         );
       }
 
@@ -666,7 +666,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       console.error(
         "❌ [AIP] Subgraph response not OK:",
         response.status,
-        response.statusText,
+        response.statusText
       );
       return null;
     }
@@ -686,24 +686,24 @@ export async function fetchAIPFromOnChain(
   ensureEthersLoaded,
   ethRpcUrl,
   aaveGovernanceV3Address,
-  aaveGovernanceV3Abi,
+  aaveGovernanceV3Abi
 ) {
   try {
     // Ensure ethers.js is loaded
     const ethers = await ensureEthersLoaded();
     if (!ethers) {
       console.error(
-        "❌ [AIP] ethers.js not available - on-chain fetch disabled",
+        "❌ [AIP] ethers.js not available - on-chain fetch disabled"
       );
       console.error(
-        "❌ [AIP] This is the PRIMARY method - ethers.js must be loaded!",
+        "❌ [AIP] This is the PRIMARY method - ethers.js must be loaded!"
       );
       return null;
     }
 
     if (!ethRpcUrl || !aaveGovernanceV3Address || !aaveGovernanceV3Abi) {
       console.error(
-        "❌ [AIP] On-chain configuration missing - RPC URL, contract address, or ABI not provided",
+        "❌ [AIP] On-chain configuration missing - RPC URL, contract address, or ABI not provided"
       );
       return null;
     }
@@ -726,7 +726,7 @@ export async function fetchAIPFromOnChain(
     if (isNaN(proposalId) || proposalId <= 0) {
       console.debug(
         "🔵 [AIP] Invalid proposal ID for on-chain fetch:",
-        topicId,
+        topicId
       );
       return null;
     }
@@ -736,7 +736,7 @@ export async function fetchAIPFromOnChain(
     const governanceContract = new ethers.Contract(
       aaveGovernanceV3Address,
       aaveGovernanceV3Abi,
-      provider,
+      provider
     );
 
     // Fetch proposal data using simplified ABI
@@ -769,11 +769,11 @@ export async function fetchAIPFromOnChain(
       // Enhanced error logging - on-chain is PRIMARY, so log errors clearly
       console.error(
         "❌ [AIP] Error fetching proposal from chain:",
-        error.message,
+        error.message
       );
       if (error.message?.includes("ABI decoding")) {
         console.error(
-          "❌ [AIP] ABI decoding error - contract address or ABI may be incorrect",
+          "❌ [AIP] ABI decoding error - contract address or ABI may be incorrect"
         );
         console.error("❌ [AIP] Contract:", aaveGovernanceV3Address);
       }
@@ -783,7 +783,7 @@ export async function fetchAIPFromOnChain(
       ) {
         console.error(
           "❌ [AIP] RPC connection error - check ETH_RPC_URL:",
-          ethRpcUrl,
+          ethRpcUrl
         );
       }
       return null;
@@ -794,10 +794,10 @@ export async function fetchAIPFromOnChain(
   } catch (error) {
     console.error(
       "❌ [AIP] On-chain fetch error (outer catch):",
-      error.message,
+      error.message
     );
     console.error(
-      "❌ [AIP] This is the PRIMARY method - errors should be investigated",
+      "❌ [AIP] This is the PRIMARY method - errors should be investigated"
     );
     return null;
   }
@@ -814,14 +814,14 @@ export async function fetchAIPProposal(
   proposalCache,
   handledErrors,
   ensureEthersLoaded,
-  config = {},
+  config = {}
 ) {
   try {
     console.log(
       "🔵 [AIP] Fetching proposal from The Graph API - proposalId:",
       proposalId,
       "URL Source:",
-      urlSource,
+      urlSource
     );
 
     const result = await fetchAIPFromSubgraph(proposalId, handledErrors);
@@ -841,7 +841,7 @@ export async function fetchAIPProposal(
       ensureEthersLoaded,
       config.ethRpcUrl,
       config.aaveGovernanceV3Address,
-      config.aaveGovernanceV3Abi,
+      config.aaveGovernanceV3Abi
     );
     if (onChainResult) {
       console.log("✅ [AIP] Successfully fetched from on-chain");
@@ -853,7 +853,7 @@ export async function fetchAIPProposal(
     }
 
     console.warn(
-      "⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain",
+      "⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain"
     );
     return null;
   } catch (error) {

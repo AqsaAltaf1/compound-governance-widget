@@ -12,7 +12,7 @@ import { fetchWithRetry } from "./fetch-service";
 export function transformSnapshotData(proposal, space) {
   console.log(
     "🔵 [TRANSFORM] Raw proposal data from API:",
-    JSON.stringify(proposal, null, 2),
+    JSON.stringify(proposal, null, 2)
   );
 
   // Determine proposal stage (Temp Check or ARFC) based on title/tags
@@ -99,7 +99,7 @@ export function transformSnapshotData(proposal, space) {
       "Against:",
       againstIndex,
       "Abstain:",
-      abstainIndex,
+      abstainIndex
     );
 
     if (forIndex >= 0 && forIndex < scores.length) {
@@ -115,7 +115,7 @@ export function transformSnapshotData(proposal, space) {
     // If we didn't find specific choices, use first two as For/Against
     if (forIndex < 0 && againstIndex < 0 && scores.length >= 2) {
       console.log(
-        "🔵 [TRANSFORM] No matching choices found, using first two scores as For/Against",
+        "🔵 [TRANSFORM] No matching choices found, using first two scores as For/Against"
       );
       forVotes = Number(scores[0]) || 0;
       againstVotes = Number(scores[1]) || 0;
@@ -123,7 +123,7 @@ export function transformSnapshotData(proposal, space) {
   } else if (scores.length >= 2) {
     // Fallback: assume first is For, second is Against
     console.log(
-      "🔵 [TRANSFORM] No choices array, using first two scores as For/Against",
+      "🔵 [TRANSFORM] No choices array, using first two scores as For/Against"
     );
     forVotes = Number(scores[0]) || 0;
     againstVotes = Number(scores[1]) || 0;
@@ -132,7 +132,7 @@ export function transformSnapshotData(proposal, space) {
   // Calculate total votes (sum of all scores if scoresTotal is 0 or missing)
   const calculatedTotal = scores.reduce(
     (sum, score) => sum + (Number(score) || 0),
-    0,
+    0
   );
   const totalVotes = scoresTotal > 0 ? scoresTotal : calculatedTotal;
 
@@ -144,7 +144,7 @@ export function transformSnapshotData(proposal, space) {
     "Abstain:",
     abstainVotes,
     "Total:",
-    totalVotes,
+    totalVotes
   );
 
   const forPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
@@ -157,7 +157,7 @@ export function transformSnapshotData(proposal, space) {
     "Against:",
     againstPercent,
     "Abstain:",
-    abstainPercent,
+    abstainPercent
   );
 
   // Calculate time remaining
@@ -203,7 +203,7 @@ export function transformSnapshotData(proposal, space) {
     "🔵 [TRANSFORM] Proposal state:",
     proposal.state,
     "→ Final status:",
-    status,
+    status
   );
 
   // Calculate support percentage (For votes / Total votes)
@@ -250,7 +250,7 @@ export async function fetchSnapshotProposal(
   cacheKey,
   isTestnet = false,
   proposalCache,
-  handledErrors,
+  handledErrors
 ) {
   const endpoint = isTestnet
     ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT
@@ -263,7 +263,7 @@ export async function fetchSnapshotProposal(
       "proposalId:",
       proposalId,
       "isTestnet:",
-      isTestnet,
+      isTestnet
     );
     console.log("🔵 [SNAPSHOT] Using endpoint:", endpoint);
 
@@ -340,7 +340,7 @@ export async function fetchSnapshotProposal(
     console.log(
       "🔵 [SNAPSHOT] Trying proposal ID formats (testnet:",
       isTestnet,
-      "):",
+      "):"
     );
     formatOrder.forEach((fmt, idx) => {
       console.log(`  Format ${idx + 1}:`, fmt);
@@ -355,7 +355,7 @@ export async function fetchSnapshotProposal(
     console.log("🔵 [SNAPSHOT] Making request to:", endpoint);
     console.log(
       "🔵 [SNAPSHOT] Request body:",
-      JSON.stringify(requestBody, null, 2),
+      JSON.stringify(requestBody, null, 2)
     );
 
     const response = await fetchWithRetry(
@@ -369,13 +369,13 @@ export async function fetchSnapshotProposal(
       },
       3,
       1000,
-      handledErrors,
+      handledErrors
     );
 
     console.log(
       "🔵 [SNAPSHOT] Response status:",
       response.status,
-      response.statusText,
+      response.statusText
     );
     console.log("🔵 [SNAPSHOT] Response ok:", response.ok);
 
@@ -383,7 +383,7 @@ export async function fetchSnapshotProposal(
       const result = await response.json();
       console.log(
         "🔵 [SNAPSHOT] API Response:",
-        JSON.stringify(result, null, 2),
+        JSON.stringify(result, null, 2)
       );
 
       if (result.errors) {
@@ -395,7 +395,7 @@ export async function fetchSnapshotProposal(
       if (proposal) {
         console.log(
           "✅ [SNAPSHOT] Proposal fetched successfully with format:",
-          formatOrder[0],
+          formatOrder[0]
         );
         const transformedProposal = transformSnapshotData(proposal, space);
         transformedProposal._cachedAt = Date.now();
@@ -406,7 +406,7 @@ export async function fetchSnapshotProposal(
         for (let i = 1; i < formatOrder.length; i++) {
           const formatId = formatOrder[i];
           console.warn(
-            `⚠️ [SNAPSHOT] Format ${i} failed, trying format ${i + 1}...`,
+            `⚠️ [SNAPSHOT] Format ${i} failed, trying format ${i + 1}...`
           );
 
           const retryResponse = await fetchWithRetry(
@@ -421,7 +421,7 @@ export async function fetchSnapshotProposal(
             },
             3,
             1000,
-            handledErrors,
+            handledErrors
           );
 
           if (retryResponse.ok) {
@@ -429,11 +429,11 @@ export async function fetchSnapshotProposal(
             if (retryResult.data?.proposal) {
               console.log(
                 `✅ [SNAPSHOT] Proposal fetched with format ${i + 1}:`,
-                formatId,
+                formatId
               );
               const transformedProposal = transformSnapshotData(
                 retryResult.data.proposal,
-                space,
+                space
               );
               transformedProposal._cachedAt = Date.now();
               proposalCache.set(cacheKey, transformedProposal);
@@ -444,7 +444,7 @@ export async function fetchSnapshotProposal(
 
         console.error(
           "❌ [SNAPSHOT] All proposal ID formats failed. Last response:",
-          result.data,
+          result.data
         );
       }
     } else {
@@ -468,7 +468,7 @@ export async function fetchSnapshotProposal(
     // Provide specific guidance based on error type
     if (errorName === "AbortError" || errorMessage.includes("aborted")) {
       console.error(
-        "❌ [SNAPSHOT] Request timed out after 10 seconds. The Snapshot API may be slow or unavailable.",
+        "❌ [SNAPSHOT] Request timed out after 10 seconds. The Snapshot API may be slow or unavailable."
       );
     } else if (
       errorName === "TypeError" ||
@@ -487,11 +487,11 @@ export async function fetchSnapshotProposal(
       errorMessage.includes("ERR_QUIC")
     ) {
       console.error(
-        "❌ [SNAPSHOT] Network protocol error (QUIC) - this may be a temporary issue. Please try again later.",
+        "❌ [SNAPSHOT] Network protocol error (QUIC) - this may be a temporary issue. Please try again later."
       );
     } else {
       console.error(
-        "❌ [SNAPSHOT] Unexpected error occurred. Please check the console for details.",
+        "❌ [SNAPSHOT] Unexpected error occurred. Please check the console for details."
       );
     }
   }

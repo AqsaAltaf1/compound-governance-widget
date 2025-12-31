@@ -159,7 +159,7 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
   const executedStatuses = ["executed", "crosschainexecuted", "completed"];
   const isActive = activeStatuses.includes(proposalData.status?.toLowerCase());
   const isExecuted = executedStatuses.includes(
-    proposalData.status?.toLowerCase(),
+    proposalData.status?.toLowerCase()
   );
 
   const voteStats = proposalData.voteStats || {};
@@ -267,7 +267,7 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
 export function showNetworkErrorWidget(
   count,
   type,
-  getOrCreateWidgetsContainerFn,
+  getOrCreateWidgetsContainerFn
 ) {
   const errorWidgetId = "governance-error-widget";
   const existingError = document.getElementById(errorWidgetId);
@@ -301,7 +301,7 @@ export function showNetworkErrorWidget(
     document.body.appendChild(errorWidget);
   }
   console.log(
-    `⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`,
+    `⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`
   );
 }
 
@@ -310,7 +310,7 @@ export function showNetworkErrorWidget(
  */
 export function hideWidgetIfNoProposal() {
   const allWidgets = document.querySelectorAll(
-    ".tally-status-widget-container",
+    ".tally-status-widget-container"
   );
   const widgetCount = allWidgets.length;
   allWidgets.forEach((widget) => {
@@ -340,7 +340,7 @@ export function hideWidgetIfNoProposal() {
     console.log(
       "🔵 [WIDGET] Removed",
       widgetCount,
-      "widget(s) - no proposal in current post",
+      "widget(s) - no proposal in current post"
     );
   }
 }
@@ -350,7 +350,7 @@ export function hideWidgetIfNoProposal() {
  */
 export function showWidget() {
   const allWidgets = document.querySelectorAll(
-    ".tally-status-widget-container",
+    ".tally-status-widget-container"
   );
   allWidgets.forEach((widget) => {
     widget.style.display = "";

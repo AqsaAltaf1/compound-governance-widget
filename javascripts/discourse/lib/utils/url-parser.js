@@ -16,7 +16,7 @@ export function extractSnapshotProposalInfo(url) {
     // Match pattern for testnet: testnet.snapshot.box/#/s-tn:{space}/proposal/{proposal-id}
     if (isTestnet) {
       const testnetProposalMatch = url.match(
-        /testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i,
+        /testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i
       );
       if (testnetProposalMatch) {
         let space = testnetProposalMatch[1];
@@ -31,7 +31,7 @@ export function extractSnapshotProposalInfo(url) {
 
       // Match pattern: testnet.snapshot.box/#/s-tn:{space}/{proposal-id} (without /proposal/)
       const testnetDirectMatch = url.match(
-        /testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i,
+        /testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i
       );
       if (testnetDirectMatch) {
         let space = testnetDirectMatch[1];
@@ -49,7 +49,7 @@ export function extractSnapshotProposalInfo(url) {
 
     // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
     const proposalMatch = url.match(
-      /snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i,
+      /snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i
     );
     if (proposalMatch) {
       const space = proposalMatch[1];
@@ -60,7 +60,7 @@ export function extractSnapshotProposalInfo(url) {
 
     // Match pattern: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
     const directMatch = url.match(
-      /snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i,
+      /snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i
     );
     if (directMatch) {
       const space = directMatch[1];
@@ -117,7 +117,7 @@ export function extractAIPProposalInfo(url) {
             "✅ Extracted proposalId from query parameter:",
             proposalId,
             "Source:",
-            urlSource,
+            urlSource
           );
           return { proposalId, type: "aip", urlSource };
         }
@@ -128,7 +128,7 @@ export function extractAIPProposalInfo(url) {
 
     // Step 2: Try regex patterns for various URL formats
     const voteMatch = url.match(
-      /vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i,
+      /vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i
     );
     if (voteMatch) {
       proposalId = voteMatch[1];
@@ -138,7 +138,7 @@ export function extractAIPProposalInfo(url) {
     }
 
     const appV3Match = url.match(
-      /app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i,
+      /app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i
     );
     if (appV3Match) {
       proposalId = appV3Match[1];
@@ -156,7 +156,7 @@ export function extractAIPProposalInfo(url) {
     }
 
     const appMatch = url.match(
-      /app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i,
+      /app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i
     );
     if (appMatch) {
       proposalId = appMatch[1];
