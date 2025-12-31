@@ -1,5 +1,4 @@
 import { apiInitializer } from "discourse/lib/api";
-
 import {
   AAVE_FORUM_URL_REGEX,
   AAVE_V3_SUBGRAPH,
