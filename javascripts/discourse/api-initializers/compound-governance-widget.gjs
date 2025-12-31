@@ -431,11 +431,12 @@ export default apiInitializer((api) => {
 
   // Fetch Snapshot proposal data
   async function fetchSnapshotProposal(space, proposalId, cacheKey, isTestnet = false) {
+    // Use testnet endpoint if it's a testnet proposal
+    // Declare outside try block so it's accessible in catch block
+    const endpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
+    
     try {
       console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId, "isTestnet:", isTestnet);
-
-      // Use testnet endpoint if it's a testnet proposal
-      const endpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
       console.log("🔵 [SNAPSHOT] Using endpoint:", endpoint);
 
       // Query by full ID
