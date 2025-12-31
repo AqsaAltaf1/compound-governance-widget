@@ -1,6 +1,6 @@
 // Multi-stage widget renderer (Temp Check, ARFC, AIP)
 
-import { formatVoteAmount, formatStatusForDisplay } from "../utils/formatting";
+import { formatStatusForDisplay, formatVoteAmount } from "../utils/formatting";
 import { formatTimeDisplay, getOrCreateWidgetsContainer } from "./renderer";
 
 /**

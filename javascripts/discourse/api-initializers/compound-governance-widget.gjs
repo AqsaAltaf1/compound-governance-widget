@@ -2,7 +2,6 @@ import { apiInitializer } from "discourse/lib/api";
 
 import {
   AAVE_FORUM_URL_REGEX,
-  AAVE_GOVERNANCE_PORTAL,
   AAVE_V3_SUBGRAPH,
   AIP_URL_REGEX,
   SNAPSHOT_URL_REGEX
@@ -13,7 +12,7 @@ import {
   showNetworkErrorWidget
 } from "../lib/dom/renderer";
 import { renderMultiStageWidget } from "../lib/dom/multi-stage-widget";
-import { fetchAIPProposal } from "../lib/services/aip-service";
+import { fetchAIPProposal, getStateMapping } from "../lib/services/aip-service";
 import { fetchWithRetry } from "../lib/services/fetch-service";
 import { fetchSnapshotProposal } from "../lib/services/snapshot-service";
 import { calculateTimeRemaining } from "../lib/utils/date-utils";
@@ -151,12 +150,16 @@ export default apiInitializer((api) => {
   // AIP service is now imported from ../lib/services/aip-service
 
   // Wrapper function to call AIP service with shared state and config
-  async function fetchAIPProposalLocal(proposalId, cacheKey, chain = 'mainnet', urlSource = 'app.aave.com') {
+  async function fetchAIPProposalLocal(proposalId, cacheKey, _chain = 'mainnet', urlSource = 'app.aave.com') {
     // Get config from global variables (if available)
+    // These are expected to be defined as global variables in the Discourse theme settings
     // eslint-disable-next-line no-undef
     const config = {
+      // eslint-disable-next-line no-undef
       ethRpcUrl: typeof ETH_RPC_URL !== 'undefined' ? ETH_RPC_URL : null,
+      // eslint-disable-next-line no-undef
       aaveGovernanceV3Address: typeof AAVE_GOVERNANCE_V3_ADDRESS !== 'undefined' ? AAVE_GOVERNANCE_V3_ADDRESS : null,
+      // eslint-disable-next-line no-undef
       aaveGovernanceV3Abi: typeof AAVE_GOVERNANCE_V3_ABI !== 'undefined' ? AAVE_GOVERNANCE_V3_ABI : null
     };
     
@@ -1695,9 +1698,9 @@ export default apiInitializer((api) => {
      * Select top 3 proposals based on priority, with type variety consideration
      * Strategy: Prioritize by state, but try to show variety of types if possible
      */
-    function selectTopProposals(allProposals) {
+    function selectTopProposals(proposalsList) {
       // Sort all proposals by priority (lower priority number = higher priority)
-      const sorted = allProposals.sort((a, b) => {
+      const sorted = proposalsList.sort((a, b) => {
         const priorityA = getStatePriority(a.status);
         const priorityB = getStatePriority(b.status);
         
@@ -1716,7 +1719,9 @@ export default apiInitializer((api) => {
       const maxPerType = 2; // Max 2 of same type
       
       for (const proposal of sorted) {
-        if (selected.length >= 3) break;
+        if (selected.length >= 3) {
+          break;
+        }
         
         const proposalType = proposal.stage || proposal.type || 'arfc';
         const typeKey = proposalType === 'temp-check' ? 'tempcheck' : 
@@ -1746,17 +1751,17 @@ export default apiInitializer((api) => {
      */
     function renderSelectedProposals(snapshotProposals, aipProposals) {
       // Combine all proposals
-      const allProposals = [...snapshotProposals, ...aipProposals];
+      const combinedProposals = [...snapshotProposals, ...aipProposals];
       
-      if (allProposals.length === 0) {
+      if (combinedProposals.length === 0) {
         console.log("🔵 [RENDER] No valid proposals to render");
         return;
       }
       
       // Select top 3 based on priority
-      const selected = selectTopProposals(allProposals);
+      const selected = selectTopProposals(combinedProposals);
       
-      console.log(`🔵 [RENDER] Rendering ${selected.length} selected widget(s) out of ${allProposals.length} total proposal(s)`);
+      console.log(`🔵 [RENDER] Rendering ${selected.length} selected widget(s) out of ${combinedProposals.length} total proposal(s)`);
       
       // Render each selected proposal
       selected.forEach((proposal, index) => {
@@ -1924,7 +1929,7 @@ export default apiInitializer((api) => {
           console.log(`🔵 [TOPIC] Found ${validAips.length} valid AIP proposal(s) out of ${aipUrlsToFetch.length} unique URL(s)`);
           
           // Store AIP results
-          window._aipProposals = validAips.map((aip, index) => {
+          window._aipProposals = validAips.map((aip) => {
             return {
               url: aip.url,
               data: aip.data,
