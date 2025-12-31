@@ -3705,7 +3705,8 @@ export default apiInitializer((api) => {
       const post = allPosts[i];
       
       // Method 1: Find Snapshot link in this post (check href attribute)
-      const snapshotLink = post.querySelector('a[href*="snapshot.org"]');
+      // Check for both mainnet and testnet Snapshot URLs
+      const snapshotLink = post.querySelector('a[href*="snapshot.org"], a[href*="testnet.snapshot.box"]');
       if (snapshotLink) {
         const url = snapshotLink.href || snapshotLink.getAttribute('href');
         if (url) {
@@ -3776,11 +3777,13 @@ export default apiInitializer((api) => {
       const snapshotMatches = combinedContent.match(SNAPSHOT_URL_REGEX);
       if (snapshotMatches) {
         snapshotMatches.forEach(url => {
-          // Only include Aave Snapshot space links (aave.eth or s:aavedao.eth)
-          if (url.includes('aave.eth') || url.includes('aavedao.eth')) {
+          // Include Aave Snapshot space links (mainnet) OR testnet URLs
+          const isAaveSpace = url.includes('aave.eth') || url.includes('aavedao.eth');
+          const isTestnet = url.includes('testnet.snapshot.box');
+          if (isAaveSpace || isTestnet) {
             if (!extractedLinks.snapshot.includes(url)) {
               extractedLinks.snapshot.push(url);
-              console.log("✅ [FORUM] Found Snapshot link:", url);
+              console.log("✅ [FORUM] Found Snapshot link:", url, isTestnet ? "(testnet)" : "(mainnet)");
             }
           }
         });
@@ -3862,10 +3865,13 @@ export default apiInitializer((api) => {
       const snapshotMatches = combinedContent.match(SNAPSHOT_URL_REGEX);
       if (snapshotMatches) {
         snapshotMatches.forEach(url => {
-          // Only include Aave Snapshot space links
-          if (url.includes('aave.eth') || url.includes('aavedao.eth')) {
+          // Include Aave Snapshot space links (mainnet) OR testnet URLs
+          const isAaveSpace = url.includes('aave.eth') || url.includes('aavedao.eth');
+          const isTestnet = url.includes('testnet.snapshot.box');
+          if (isAaveSpace || isTestnet) {
             if (!proposals.snapshot.includes(url)) {
               proposals.snapshot.push(url);
+              console.log("✅ [TOPIC] Added Snapshot URL:", url, isTestnet ? "(testnet)" : "(mainnet)");
             }
           }
         });
