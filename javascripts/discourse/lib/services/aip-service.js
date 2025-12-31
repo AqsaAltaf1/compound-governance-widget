@@ -64,7 +64,7 @@ export function parseFrontMatter(text) {
       const key = line.substring(0, colonIndex).trim();
       let value = line.substring(colonIndex + 1).trim();
       // Remove quotes if present
-      if ((value.startsWith('"') && value.endsWith('"')) || 
+      if ((value.startsWith('"') && value.endsWith('"')) ||
           (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1);
       }
@@ -91,22 +91,22 @@ export function transformAIPDataFromOnChain(proposal, state, proposalId, urlSour
   // The simplified ABI returns: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
   const startTime = proposal.startTime ? Number(proposal.startTime) : null;
   const endTime = proposal.endTime ? Number(proposal.endTime) : null;
-  
+
   // Calculate daysLeft and hoursLeft from startTime and endTime
   // startTime is the votingActivationTimestamp (when voting opens)
   // endTime is when voting ends (startTime + votingDuration)
   let daysLeft = null;
   let hoursLeft = null;
-  
+
   if (endTime && endTime > 0) {
     // endTime is in seconds (Unix timestamp)
     const timeRemaining = calculateTimeRemaining(endTime);
     daysLeft = timeRemaining.daysLeft;
     hoursLeft = timeRemaining.hoursLeft;
-    
+
     console.log("🔵 [AIP] Calculated dates from on-chain - Start:", startTime ? new Date(startTime * 1000).toISOString() : 'N/A', "End:", new Date(endTime * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
   }
-  
+
   return {
     id: proposalId.toString(),
     title: `Proposal ${proposalId}`, // On-chain doesn't have title, will be enriched from markdown/subgraph
@@ -138,29 +138,29 @@ export function transformAIPData(proposal) {
   const againstVotes = parseInt(proposal.againstVotes || "0", 10);
   const abstainVotes = parseInt(proposal.abstainVotes || "0", 10);
   const totalVotes = forVotes + againstVotes + abstainVotes;
-  
+
   const forPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
   const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
   const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
-  
+
   // Use daysLeft and hoursLeft if already calculated from subgraph (with votingActivationTimestamp)
   // Otherwise, calculate from votingActivationTimestamp + votingDuration
   let daysLeft = proposal.daysLeft !== undefined ? proposal.daysLeft : null;
   let hoursLeft = proposal.hoursLeft !== undefined ? proposal.hoursLeft : null;
-  
+
   // If dates weren't already calculated (from subgraph), try to calculate from available data
   if (daysLeft === null && proposal.votingActivationTimestamp && proposal.votingDuration) {
     // votingActivationTimestamp is in seconds (Unix timestamp)
     const activationTimestamp = Number(proposal.votingActivationTimestamp);
     const votingDuration = Number(proposal.votingDuration); // in seconds
-    
+
     // Calculate end timestamp: activation + duration
     const endTimestamp = activationTimestamp + votingDuration;
-    
+
     const timeRemaining = calculateTimeRemaining(endTimestamp);
     daysLeft = timeRemaining.daysLeft;
     hoursLeft = timeRemaining.hoursLeft;
-    
+
     console.log("🔵 [AIP] Calculated dates in transformAIPData - Activation:", new Date(activationTimestamp * 1000).toISOString(), "End:", new Date(endTimestamp * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
   } else if (daysLeft === null && proposal.endTime) {
     // Fallback: use endTime directly if available
@@ -168,7 +168,7 @@ export function transformAIPData(proposal) {
     daysLeft = timeRemaining.daysLeft;
     hoursLeft = timeRemaining.hoursLeft;
   }
-  
+
   // Determine status
   let status = 'unknown';
   if (proposal.status) {
@@ -185,7 +185,7 @@ export function transformAIPData(proposal) {
       status = 'canceled';
     }
   }
-  
+
   return {
     id: proposal.id,
     title: proposal.title || 'Untitled AIP',
@@ -228,7 +228,7 @@ export function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
     merged.title = subgraphMetadata.title || merged.title;
     merged.description = subgraphMetadata.description || merged.description;
     merged._contentSource = 'subgraph';
-    
+
     // If on-chain votes are missing, use subgraph votes as fallback
     if (!merged.forVotes && subgraphMetadata.forVotes) {
       merged.forVotes = subgraphMetadata.forVotes;
@@ -236,7 +236,7 @@ export function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
     if (!merged.againstVotes && subgraphMetadata.againstVotes) {
       merged.againstVotes = subgraphMetadata.againstVotes;
     }
-    
+
     // Enrich with additional subgraph data
     if (subgraphMetadata.creator && !merged.creator) {
       merged.creator = subgraphMetadata.creator;
@@ -297,7 +297,7 @@ export async function fetchAIPMarkdown(proposalId, handledErrors, aaveVoteSite) 
       console.debug("🔵 [AIP] AAVE_VOTE_SITE not configured, skipping markdown fetch");
       return null;
     }
-    
+
     const apiUrl = `${aaveVoteSite}?proposalId=${proposalId}`;
     const response = await fetchWithRetry(apiUrl, {
       method: "GET",
@@ -309,7 +309,7 @@ export async function fetchAIPMarkdown(proposalId, handledErrors, aaveVoteSite) 
     if (response.ok) {
       const text = await response.text();
       const parsed = parseFrontMatter(text);
-      
+
       return {
         title: parsed.metadata.title || parsed.metadata.name || null,
         description: parsed.metadata.description || parsed.markdown.substring(0, 200) || null,
@@ -333,7 +333,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
     // Convert proposalId to string and ensure it's a number
     const proposalIdStr = String(proposalId).trim();
     console.log("🔵 [AIP] Fetching proposal with ID:", proposalIdStr);
-    
+
     const query = `
       {
         proposals(where: { proposalId: "${proposalIdStr}" }) {
@@ -370,7 +370,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         }
       }
     `;
-    
+
     console.log("🔵 [AIP] GraphQL Query:", query);
 
     const response = await fetchWithRetry(AAVE_V3_SUBGRAPH, {
@@ -384,7 +384,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
     if (response.ok) {
       const result = await response.json();
       console.log("🔵 [AIP] GraphQL Response:", JSON.stringify(result, null, 2));
-      
+
       if (result.errors) {
         console.error("❌ [AIP] GraphQL Errors:", JSON.stringify(result.errors, null, 2));
         return null;
@@ -396,20 +396,20 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         console.log("🔵 [AIP] Full response data:", result.data);
         return null;
       }
-      
+
       console.log(`✅ [AIP] Found ${proposals.length} proposal(s) with ID: ${proposalId}`);
 
       const p = proposals[0];
-      
+
       // Debug: Log the raw proposal data
       console.log("🔵 [AIP] Raw proposal data:", JSON.stringify(p, null, 2));
       console.log("🔵 [AIP] Raw votes object:", p.votes);
       console.log("🔵 [AIP] Votes type:", typeof p.votes, "Is array:", Array.isArray(p.votes));
-      
+
       // Handle votes - could be object, array, or null
       let votesData = null;
       let votesAvailable = false;
-      
+
       if (p.votes) {
         votesAvailable = true;
         // If votes is an array, take the first element (or aggregate)
@@ -425,36 +425,36 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         console.warn("⚠️ [AIP] This is common for failed/cancelled proposals - votes may not be indexed");
         votesAvailable = false;
       }
-      
+
       console.log("🔵 [AIP] forVotes raw:", votesData?.forVotes, "type:", typeof votesData?.forVotes);
       console.log("🔵 [AIP] againstVotes raw:", votesData?.againstVotes, "type:", typeof votesData?.againstVotes);
-      
+
       // Convert votes from wei to AAVE (exact same as ava.mjs)
       const decimals = BigInt(10 ** 18);
-      
+
       // Get raw vote values - handle null/undefined
       // NOTE: Aave V3 subgraph does NOT have abstainVotes field - only forVotes and againstVotes
       const forVotesRaw = votesData?.forVotes || p.forVotes || null;
       const againstVotesRaw = votesData?.againstVotes || p.againstVotes || null;
-      
+
       console.log("🔵 [AIP] Extracted - forVotesRaw:", forVotesRaw, "againstVotesRaw:", againstVotesRaw);
-      
+
       // Convert to BigInt - exact same logic as ava.mjs: BigInt(p.votes?.forVotes || 0)
       // Handle string numbers and null/undefined
       // If votes are not available, set to null (not 0) so UI can show "N/A" or similar
       const forVotesBigInt = forVotesRaw ? BigInt(String(forVotesRaw)) : (votesAvailable ? BigInt(0) : null);
       const againstVotesBigInt = againstVotesRaw ? BigInt(String(againstVotesRaw)) : (votesAvailable ? BigInt(0) : null);
-      
+
       console.log("🔵 [AIP] BigInt values - For:", forVotesBigInt?.toString() || 'null', "Against:", againstVotesBigInt?.toString() || 'null');
       console.log("🔵 [AIP] Decimals:", decimals.toString());
-      
+
       // Divide by decimals to get AAVE amount (BigInt division truncates, which is correct)
       // If votes are null (not available), keep as null string for UI to handle
       const forVotes = forVotesBigInt !== null ? (forVotesBigInt / decimals).toString() : null;
       const againstVotes = againstVotesBigInt !== null ? (againstVotesBigInt / decimals).toString() : null;
       // Aave V3 doesn't support abstain - always 0
       const abstainVotes = '0';
-      
+
       console.log("🔵 [AIP] Final converted votes - For:", forVotes || 'null (not available)', "Against:", againstVotes || 'null (not available)', "Abstain:", abstainVotes);
 
       // Map state to status string - use default app.aave.com mapping for subgraph
@@ -467,7 +467,7 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       let votingActivationTimestamp = null;
       let daysLeft = null;
       let hoursLeft = null;
-      
+
       // Try to get votingActivationTimestamp from transactions.active
       if (p.transactions?.active?.timestamp) {
         votingActivationTimestamp = Number(p.transactions.active.timestamp);
@@ -479,17 +479,17 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         votingActivationTimestamp = createdTimestamp + cooldown;
         console.log("🔵 [AIP] Calculated votingActivationTimestamp: created (", createdTimestamp, ") + cooldown (", cooldown, ") =", votingActivationTimestamp);
       }
-      
+
       // Calculate end date: votingActivationTimestamp + votingDuration
       // Then calculate daysLeft and hoursLeft
       if (votingActivationTimestamp && p.votingDuration) {
         const votingDuration = Number(p.votingDuration);
         const endTimestamp = votingActivationTimestamp + votingDuration;
-        
+
         const timeRemaining = calculateTimeRemaining(endTimestamp);
         daysLeft = timeRemaining.daysLeft;
         hoursLeft = timeRemaining.hoursLeft;
-        
+
         console.log("🔵 [AIP] Calculated dates - Activation:", new Date(votingActivationTimestamp * 1000).toISOString(), "End:", new Date(endTimestamp * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
       } else {
         console.log("⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing");
@@ -558,7 +558,7 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
     } else {
       proposalId = parseInt(topicId, 10);
     }
-    
+
     if (isNaN(proposalId) || proposalId <= 0) {
       console.debug("🔵 [AIP] Invalid proposal ID for on-chain fetch:", topicId);
       return null;
@@ -575,17 +575,17 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
     // Fetch proposal data using simplified ABI
     let proposal;
     let state = 0;
-    
+
     try {
       // Call getProposal with simplified return structure
       proposal = await governanceContract.getProposal(proposalId);
-      
+
       // Check if proposal exists (id should match proposalId)
       if (!proposal || !proposal.id || proposal.id.toString() !== proposalId.toString()) {
         console.debug("🔵 [AIP] Proposal does not exist on-chain:", proposalId);
         return null;
       }
-      
+
       // Get proposal state
       try {
         state = await governanceContract.getProposalState(proposalId);
@@ -623,7 +623,7 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
 export async function fetchAIPProposal(proposalId, cacheKey, urlSource, proposalCache, handledErrors, ensureEthersLoaded, config = {}) {
   try {
     console.log("🔵 [AIP] Fetching proposal from The Graph API - proposalId:", proposalId, "URL Source:", urlSource);
-    
+
     const result = await fetchAIPFromSubgraph(proposalId, handledErrors);
     if (result) {
       console.log("✅ [AIP] Successfully fetched from The Graph API");
@@ -633,11 +633,11 @@ export async function fetchAIPProposal(proposalId, cacheKey, urlSource, proposal
       proposalCache.set(cacheKey, result);
       return result;
     }
-    
+
     // Try on-chain fetch as fallback
     const onChainResult = await fetchAIPFromOnChain(
-      proposalId, 
-      urlSource, 
+      proposalId,
+      urlSource,
       ensureEthersLoaded,
       config.ethRpcUrl,
       config.aaveGovernanceV3Address,
@@ -651,7 +651,7 @@ export async function fetchAIPProposal(proposalId, cacheKey, urlSource, proposal
       proposalCache.set(cacheKey, onChainResult);
       return onChainResult;
     }
-    
+
     console.warn("⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain");
     return null;
   } catch (error) {

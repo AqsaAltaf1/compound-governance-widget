@@ -18,7 +18,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
         mode: 'cors',
         credentials: 'omit',
       });
-      
+
       clearTimeout(timeoutId);
       return response;
     } catch (error) {
@@ -38,14 +38,14 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
         break;
       }
 
-      const isNetworkError = error.name === 'TypeError' || 
+      const isNetworkError = error.name === 'TypeError' ||
                             error.name === 'NetworkError' ||
                             error.message?.includes('Failed to fetch') ||
                             error.message?.includes('QUIC') ||
                             error.message?.includes('ERR_QUIC') ||
                             error.message?.includes('NetworkError') ||
                             error.message?.includes('network');
-      
+
       if (isNetworkError && attempt < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, attempt);
         console.warn(`⚠️ [FETCH] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message || error.toString());
@@ -55,7 +55,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
-      
+
       break;
     }
   }
@@ -73,7 +73,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
     }
     throw enhancedError;
   }
-  
+
   const unknownError = new Error(`Failed to fetch: Unknown error. URL: ${url}`);
   if (handledErrors) {
     handledErrors.add(unknownError);

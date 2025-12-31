@@ -12,7 +12,7 @@ export function extractSnapshotProposalInfo(url) {
   try {
     // Check if it's a testnet URL
     const isTestnet = url.includes('testnet.snapshot.box');
-    
+
     // Match pattern for testnet: testnet.snapshot.box/#/s-tn:{space}/proposal/{proposal-id}
     if (isTestnet) {
       const testnetProposalMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
@@ -57,7 +57,7 @@ export function extractSnapshotProposalInfo(url) {
         return { space, proposalId, type: 'snapshot', isTestnet: false };
       }
     }
-    
+
     console.warn("❌ Could not extract Snapshot proposal info from URL:", url);
     return null;
   } catch (e) {
@@ -81,7 +81,7 @@ export function extractAIPProposalInfo(url) {
   try {
     let proposalId = null;
     let urlSource = 'app.aave.com'; // Default to app.aave.com (Aave V3 enum mapping)
-    
+
     // Step 1: Try to extract from query parameter (most reliable)
     try {
       const urlObj = new URL(url);
@@ -112,7 +112,7 @@ export function extractAIPProposalInfo(url) {
       console.log("✅ Extracted from vote.onaave.com:", proposalId);
       return { proposalId, type: 'aip', urlSource };
     }
-    
+
     const appV3Match = url.match(/app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i);
     if (appV3Match) {
       proposalId = appV3Match[1];
@@ -120,7 +120,7 @@ export function extractAIPProposalInfo(url) {
       console.log("✅ Extracted from app.aave.com/governance/v3:", proposalId);
       return { proposalId, type: 'aip', urlSource };
     }
-    
+
     const forumMatch = url.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
     if (forumMatch) {
       proposalId = forumMatch[1];
@@ -128,7 +128,7 @@ export function extractAIPProposalInfo(url) {
       console.log("✅ Extracted from governance.aave.com forum:", proposalId);
       return { proposalId, type: 'aip', urlSource };
     }
-    
+
     const appMatch = url.match(/app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i);
     if (appMatch) {
       proposalId = appMatch[1];
@@ -136,7 +136,7 @@ export function extractAIPProposalInfo(url) {
       console.log("✅ Extracted from app.aave.com/governance:", proposalId);
       return { proposalId, type: 'aip', urlSource };
     }
-    
+
     const aipMatch = url.match(/governance\.aave\.com\/aip\/(\d+)/i);
     if (aipMatch) {
       proposalId = aipMatch[1];
@@ -144,7 +144,7 @@ export function extractAIPProposalInfo(url) {
       console.log("✅ Extracted from governance.aave.com/aip:", proposalId);
       return { proposalId, type: 'aip', urlSource };
     }
-    
+
     console.warn("❌ Could not extract proposalId from URL:", url);
     return null;
   } catch (e) {
@@ -160,7 +160,7 @@ export function extractProposalInfo(url) {
   if (!url) {
     return null;
   }
-  
+
   // Try Snapshot first
   const snapshotInfo = extractSnapshotProposalInfo(url);
   if (snapshotInfo) {
@@ -170,7 +170,7 @@ export function extractProposalInfo(url) {
       internalId: snapshotInfo.proposalId
     };
   }
-  
+
   // Try AIP
   const aipInfo = extractAIPProposalInfo(url);
   if (aipInfo) {
@@ -182,7 +182,7 @@ export function extractProposalInfo(url) {
       topicId: aipInfo.proposalId
     };
   }
-  
+
   console.warn("❌ Could not extract proposal info from URL:", url);
   return null;
 }

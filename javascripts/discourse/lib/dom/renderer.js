@@ -12,7 +12,7 @@ export function getOrCreateWidgetsContainer() {
     console.log("🔵 [CONTAINER] Mobile detected - skipping container creation");
     return null;
   }
-  
+
   let container = document.getElementById('governance-widgets-wrapper');
   if (!container) {
     container = document.createElement('div');
@@ -27,13 +27,13 @@ export function getOrCreateWidgetsContainer() {
     container.style.maxWidth = '320px';
     container.style.maxHeight = 'calc(100vh - 100px)';
     container.style.overflowY = 'auto';
-    
+
     // Position container like tally widget - fixed on right side
     updateContainerPosition(container);
-    
+
     document.body.appendChild(container);
     console.log("✅ [CONTAINER] Created widgets container for column layout");
-    
+
     // Update position on resize only (not scroll) to keep widgets fixed
     let updateTimeout;
     const updatePosition = () => {
@@ -48,10 +48,10 @@ export function getOrCreateWidgetsContainer() {
         }
       }, 100);
     };
-    
+
     // Only update on resize, not scroll - keeps widgets fixed during scroll
     window.addEventListener('resize', updatePosition);
-    
+
     // Initial position update after a short delay to ensure DOM is ready
     setTimeout(() => updateContainerPosition(container), 100);
   }
@@ -69,7 +69,7 @@ export function updateContainerPosition(container) {
   // Ensure container is always visible
   container.style.display = 'flex';
   container.style.visibility = 'visible';
-  
+
   // Log position data for debugging
   const rect = container.getBoundingClientRect();
   console.log("📍 [POSITION DATA] Container position:", {
@@ -149,7 +149,7 @@ export function formatTimeDisplay(daysLeft, hoursLeft) {
  */
 export function renderProposalWidget(container, proposalData, originalUrl) {
   console.log("🎨 [RENDER] Rendering widget with data:", proposalData);
-  
+
   if (!container) {
     console.error("❌ [RENDER] Container is null!");
     return;
@@ -248,12 +248,12 @@ export function showNetworkErrorWidget(count, type, getOrCreateWidgetsContainerF
   if (existingError) {
     existingError.remove();
   }
-  
+
   const errorWidget = document.createElement("div");
   errorWidget.id = errorWidgetId;
   errorWidget.className = "tally-status-widget-container";
   errorWidget.setAttribute("data-widget-type", "error");
-  
+
   errorWidget.innerHTML = `
     <div class="tally-status-widget" style="background: #fff; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px;">
       <div style="font-weight: 700; font-size: 1em; margin-bottom: 12px; color: #dc2626;">⚠️ Network Error</div>
@@ -265,7 +265,7 @@ export function showNetworkErrorWidget(count, type, getOrCreateWidgetsContainerF
       </div>
     </div>
   `;
-  
+
   // Add to container if it exists, otherwise create one
   const container = getOrCreateWidgetsContainerFn();
   if (container) {
@@ -298,14 +298,14 @@ export function hideWidgetIfNoProposal() {
       }
     }
   });
-  
+
   // Clean up empty container
   const container = document.getElementById('governance-widgets-wrapper');
   if (container && container.children.length === 0) {
     container.remove();
     console.log("🔵 [CONTAINER] Removed empty widgets container");
   }
-  
+
   if (widgetCount > 0) {
     console.log("🔵 [WIDGET] Removed", widgetCount, "widget(s) - no proposal in current post");
   }

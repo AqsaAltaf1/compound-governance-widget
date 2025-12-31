@@ -30,7 +30,7 @@ export function formatVoteAmount(amount) {
     // Convert from wei to tokens (divide by 10^18)
     tokens = amount / 1000000000000000000;
   }
-  
+
   // Format numbers: 1.14M, 0.03, 51.74K, etc.
   if (tokens >= 1000000) {
     const millions = tokens / 1000000;
@@ -54,7 +54,7 @@ export function formatStatusForDisplay(statusValue) {
   }
 
   const normalized = (statusValue || '').toLowerCase().trim();
-  
+
   const statusMap = {
     'defeated': 'Defeated',
     'defeat': 'Defeated',
@@ -85,14 +85,14 @@ export function formatStatusForDisplay(statusValue) {
   if (statusMap[normalized]) {
     return statusMap[normalized];
   }
-  
+
   // Check for partial matches
   for (const [key, display] of Object.entries(statusMap)) {
     if (normalized.includes(key) || key.includes(normalized)) {
       return display;
     }
   }
-  
+
   // Default: capitalize first letter, preserve rest
   return statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 }

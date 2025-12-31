@@ -13,7 +13,7 @@ export function calculateTimeRemaining(endTimestampSeconds) {
   const now = Date.now();
   const diffTime = endTimestampMs - now;
   const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
-  
+
   // Use Math.floor for positive values (remaining full days)
   // Use Math.ceil for negative values (past dates)
   let diffDays;
@@ -22,7 +22,7 @@ export function calculateTimeRemaining(endTimestampSeconds) {
   } else {
     diffDays = Math.ceil(diffTimeInDays);
   }
-  
+
   // Validate that diffDays is a valid number
   if (!isNaN(diffDays) && isFinite(diffDays)) {
     const daysLeft = diffDays;
@@ -33,10 +33,10 @@ export function calculateTimeRemaining(endTimestampSeconds) {
       const diffTimeInHours = diffTime / (1000 * 60 * 60);
       hoursLeft = Math.floor(diffTimeInHours);
     }
-    
+
     return { daysLeft, hoursLeft };
   }
-  
+
   return { daysLeft: null, hoursLeft: null };
 }
 
