@@ -1,8 +1,8 @@
 // AIP (Aave Improvement Proposal) data fetching service
 
-import { fetchWithRetry } from "./fetch-service";
-import { AAVE_V3_SUBGRAPH, AAVE_GOVERNANCE_PORTAL } from "../config/constants";
+import { AAVE_GOVERNANCE_PORTAL, AAVE_V3_SUBGRAPH } from "../config/constants";
 import { calculateTimeRemaining } from "../utils/date-utils";
+import { fetchWithRetry } from "./fetch-service";
 
 /**
  * Get state mapping based on URL source

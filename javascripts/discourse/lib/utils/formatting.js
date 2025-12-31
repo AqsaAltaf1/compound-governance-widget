@@ -45,7 +45,9 @@ export function formatVoteAmount(amount) {
  * Format status for display - works for all proposal types
  */
 export function formatStatusForDisplay(statusValue) {
-  if (!statusValue) return 'Unknown';
+  if (!statusValue) {
+    return 'Unknown';
+  }
   
   const normalized = (statusValue || '').toLowerCase().trim();
   

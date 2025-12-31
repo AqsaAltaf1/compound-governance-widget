@@ -1,6 +1,6 @@
 // DOM manipulation and widget rendering functions
 
-import { formatVoteAmount, formatStatusForDisplay } from "../utils/formatting";
+import { formatVoteAmount } from "../utils/formatting";
 
 /**
  * Get or create the widgets container for column layout

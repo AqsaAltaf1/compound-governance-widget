@@ -1,8 +1,7 @@
 // Snapshot proposal data fetching service
 
-import { fetchWithRetry } from "./fetch-service";
 import { SNAPSHOT_GRAPHQL_ENDPOINT, SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT } from "../config/constants";
-import { calculateTimeRemaining } from "../utils/date-utils";
+import { fetchWithRetry } from "./fetch-service";
 
 /**
  * Transform Snapshot proposal data to widget format
