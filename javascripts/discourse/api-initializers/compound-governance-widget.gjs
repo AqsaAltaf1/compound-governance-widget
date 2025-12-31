@@ -1090,9 +1090,30 @@ export default apiInitializer((api) => {
     
     // IMPORTANT: If widgets exist but no proposals are found, keep the widgets
     // This prevents widgets from disappearing when scrolling (proposals might not be in viewport/DOM)
+    // OR if proposals were already found and widgets created on initial load
     if (snapshotUrls.length === 0 && aipUrls.length === 0 && existingWidgets.length > 0) {
-      console.log(`🔵 [TOPIC] No proposals found but ${existingWidgets.length} widget(s) already exist - keeping widgets (they may be for proposals not currently in viewport)`);
+      console.log(`🔵 [TOPIC] No proposals found but ${existingWidgets.length} widget(s) already exist - keeping widgets (they may be for proposals not currently in viewport or already rendered)`);
+      // Mark as initialized if we have widgets, even if proposals aren't found now
+      widgetsInitialized = true;
       return; // Keep existing widgets, don't remove them
+    }
+    
+    // If widgets are initialized and we found the same proposals, skip re-rendering
+    if (widgetsInitialized && existingWidgets.length > 0) {
+      const currentUrls = new Set([...snapshotUrls, ...aipUrls]);
+      // Check if we have widgets for all current URLs
+      const allUrlsHaveWidgets = currentUrls.size > 0 && 
+                                 [...currentUrls].every(url => {
+                                   return Array.from(existingWidgets).some(widget => {
+                                     const widgetUrl = widget.getAttribute('data-tally-url');
+                                     return widgetUrl === url || widgetUrl?.includes(url) || url.includes(widgetUrl);
+                                   });
+                                 });
+      
+      if (allUrlsHaveWidgets) {
+        console.log(`🔵 [TOPIC] Widgets already initialized and match current proposals, skipping re-render`);
+        return;
+      }
     }
     
     // Clear all existing widgets only if proposals have changed
@@ -1219,6 +1240,31 @@ export default apiInitializer((api) => {
         
         console.log(`✅ [RENDER] Widget ${index + 1} rendered`);
       });
+      
+      // Mark widgets as initialized after successful rendering
+      // Use a small delay to ensure widgets are actually in the DOM
+      if (selected.length > 0) {
+        setTimeout(() => {
+          // Verify widgets actually exist in DOM before marking as initialized
+          const renderedWidgets = document.querySelectorAll('.tally-status-widget-container');
+          if (renderedWidgets.length > 0) {
+            widgetsInitialized = true;
+            // Store initial URLs for comparison (use the deduplicated unique URLs)
+            // Safety check: ensure variables are defined (they should be via closure)
+            if (typeof uniqueSnapshotUrls !== 'undefined' && typeof uniqueAipUrls !== 'undefined') {
+              const allUrls = [...uniqueSnapshotUrls, ...uniqueAipUrls];
+              initialProposalUrls = new Set(allUrls);
+            } else {
+              // Fallback: extract URLs from rendered proposals
+              const allUrls = [...snapshotProposals.map(p => p.url), ...aipProposals.map(p => p.url)];
+              initialProposalUrls = new Set(allUrls);
+            }
+            console.log(`✅ [TOPIC] Widgets initialized successfully with ${renderedWidgets.length} widget(s) in DOM`);
+          } else {
+            console.warn(`⚠️ [TOPIC] Expected ${selected.length} widget(s) but found ${renderedWidgets.length} in DOM, not marking as initialized`);
+          }
+        }, 100);
+      }
     }
     
     // ===== SNAPSHOT WIDGETS - One per URL =====
@@ -1376,12 +1422,23 @@ export default apiInitializer((api) => {
   let widgetSetupTimeout = null;
   let isWidgetSetupRunning = false;
   
+  // Track if widgets have been successfully initialized (prevents re-rendering on scroll)
+  let widgetsInitialized = false;
+  // Track the initial set of proposal URLs to detect actual changes
+  let initialProposalUrls = new Set();
+  
   // Track URLs currently being rendered to prevent race conditions
   const renderingUrls = new Set();
   // Track URLs currently being fetched to prevent duplicate fetches
   const fetchingUrls = new Set();
   
-  function debouncedSetupTopicWidget() {
+  function debouncedSetupTopicWidget(force = false) {
+    // If widgets are already initialized and we're not forcing, skip
+    if (widgetsInitialized && !force) {
+      console.log("🔵 [TOPIC] Widgets already initialized, skipping re-render (use force=true to override)");
+      return;
+    }
+    
     // Clear any pending setup
     if (widgetSetupTimeout) {
       clearTimeout(widgetSetupTimeout);
@@ -1393,6 +1450,8 @@ export default apiInitializer((api) => {
         isWidgetSetupRunning = true;
         setupTopicWidget().finally(() => {
           isWidgetSetupRunning = false;
+          // Don't set widgetsInitialized here - it should only be set when widgets are actually created
+          // The flag is set in renderSelectedProposals after DOM verification
         });
       }
     }, 500);
@@ -1400,48 +1459,87 @@ export default apiInitializer((api) => {
   
   // Watch for new posts being added to the topic and re-check for proposals
   function setupTopicWatcher() {
+    // Track previous post count to detect actual new posts
+    let previousPostCount = document.querySelectorAll('.topic-post, .post, [data-post-id]').length;
+    
     // Watch for new posts being added
     const postObserver = new MutationObserver((mutations) => {
       // Ignore mutations that are only widget-related to prevent flickering
+      let hasNewPost = false;
       let hasNonWidgetChanges = false;
+      
       for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          // Check if the added node is a widget or inside a widget
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            const isWidget = node.classList?.contains('tally-status-widget-container') ||
-                           node.classList?.contains('governance-widgets-wrapper') ||
-                           node.closest?.('.tally-status-widget-container') ||
-                           node.closest?.('.governance-widgets-wrapper');
-            if (!isWidget) {
-              hasNonWidgetChanges = true;
-              break;
+        // Only check for actual new post elements being added, not attribute changes
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          for (const node of mutation.addedNodes) {
+            // Check if the added node is a widget or inside a widget
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const isWidget = node.classList?.contains('tally-status-widget-container') ||
+                             node.classList?.contains('governance-widgets-wrapper') ||
+                             node.closest?.('.tally-status-widget-container') ||
+                             node.closest?.('.governance-widgets-wrapper');
+              
+              // Check if it's a new post element
+              const isPost = node.matches?.('.topic-post, .post, [data-post-id]') ||
+                           node.querySelector?.('.topic-post, .post, [data-post-id]');
+              
+              if (isPost && !isWidget) {
+                hasNewPost = true;
+                hasNonWidgetChanges = true;
+                break;
+              } else if (!isWidget) {
+                // Other non-widget changes (but not new posts)
+                hasNonWidgetChanges = true;
+              }
             }
           }
         }
-        if (hasNonWidgetChanges) {
+        
+        // Ignore attribute changes (like class changes from scrolling) - these are not new posts
+        if (mutation.type === 'attributes') {
+          continue;
+        }
+        
+        if (hasNewPost) {
           break;
         }
       }
       
-      // Only trigger widget setup if there are actual post changes, not widget changes
-      if (hasNonWidgetChanges) {
-        // Use debounced version to prevent multiple rapid calls
-        debouncedSetupTopicWidget();
+      // Only trigger widget setup if there are actual NEW POSTS added, not just DOM mutations
+      if (hasNewPost) {
+        const currentPostCount = document.querySelectorAll('.topic-post, .post, [data-post-id]').length;
+        if (currentPostCount > previousPostCount) {
+          previousPostCount = currentPostCount;
+          console.log(`🔵 [TOPIC] New post detected (total: ${currentPostCount}), re-checking for proposals`);
+          // Force re-initialization when new posts are added
+          widgetsInitialized = false;
+          debouncedSetupTopicWidget(true);
+        }
       }
     });
 
     const postStream = document.querySelector('.post-stream, .topic-body, .posts-wrapper');
     if (postStream) {
+      // Only observe childList changes (new posts), not attributes (scroll-related changes)
       postObserver.observe(postStream, { childList: true, subtree: true });
-      console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget changes)");
+      console.log("✅ [TOPIC] Watching for new posts in topic (ignoring widget changes and attribute mutations)");
     }
     
-    // Initial setup - use debounced version
-    debouncedSetupTopicWidget();
+    // Initial setup - force initialization on page load
+    widgetsInitialized = false;
+    debouncedSetupTopicWidget(true);
     
-    // Also check after delays to catch late-loading content (but only once)
-    setTimeout(() => debouncedSetupTopicWidget(), 500);
-    setTimeout(() => debouncedSetupTopicWidget(), 1500);
+    // Also check after delays to catch late-loading content (but only if not initialized yet)
+    setTimeout(() => {
+      if (!widgetsInitialized) {
+        debouncedSetupTopicWidget(true);
+      }
+    }, 500);
+    setTimeout(() => {
+      if (!widgetsInitialized) {
+        debouncedSetupTopicWidget(true);
+      }
+    }, 1500);
     
     console.log("✅ [TOPIC] Topic widget setup complete");
   }
@@ -2338,6 +2436,9 @@ export default apiInitializer((api) => {
   api.onPageChange(() => {
     // Reset current proposal so we can detect the first one again
     currentVisibleProposal = null;
+    // Reset initialization flag on page change
+    widgetsInitialized = false;
+    initialProposalUrls.clear();
     setTimeout(() => {
       setupTopicWatcher();
       setupGlobalComposerDetection();
