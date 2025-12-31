@@ -17,7 +17,11 @@ import { fetchWithRetry } from "../lib/services/fetch-service";
 import { fetchSnapshotProposal } from "../lib/services/snapshot-service";
 import { calculateTimeRemaining } from "../lib/utils/date-utils";
 import { escapeHtml, formatStatusForDisplay, formatVoteAmount } from "../lib/utils/formatting";
-import { extractAIPProposalInfo, extractProposalInfo, extractSnapshotProposalInfo } from "../lib/utils/url-parser";
+import {
+  extractAIPProposalInfo,
+  extractProposalInfo,
+  extractSnapshotProposalInfo
+} from "../lib/utils/url-parser";
 
 console.log("✅ Aave Governance Widget: JavaScript file loaded!");
 
@@ -150,10 +154,9 @@ export default apiInitializer((api) => {
   // AIP service is now imported from ../lib/services/aip-service
 
   // Wrapper function to call AIP service with shared state and config
-  async function fetchAIPProposalLocal(proposalId, cacheKey, _chain = 'mainnet', urlSource = 'app.aave.com') {
+  async function fetchAIPProposalLocal(proposalId, cacheKey, urlSource = 'app.aave.com') {
     // Get config from global variables (if available)
     // These are expected to be defined as global variables in the Discourse theme settings
-    // eslint-disable-next-line no-undef
     const config = {
       // eslint-disable-next-line no-undef
       ethRpcUrl: typeof ETH_RPC_URL !== 'undefined' ? ETH_RPC_URL : null,
@@ -1866,7 +1869,7 @@ export default apiInitializer((api) => {
           console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
           
           // Store snapshot results for later selection (don't render yet)
-          const snapshotProposals = validSnapshots.map((snapshot, index) => {
+          const snapshotProposals = validSnapshots.map((snapshot) => {
             const stage = snapshot.data.stage || 'snapshot';
             return {
               url: snapshot.url,
