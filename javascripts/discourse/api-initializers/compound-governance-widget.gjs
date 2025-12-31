@@ -1055,6 +1055,15 @@ export default apiInitializer((api) => {
   // Separate function to set up widget with proposals (to allow re-running after extraction)
   // Render widgets - one per proposal URL
   function setupTopicWidgetWithProposals(allProposals) {
+    // Safety check: ensure allProposals is valid
+    if (!allProposals || typeof allProposals !== 'object') {
+      console.warn("⚠️ [TOPIC] Invalid allProposals object, skipping widget setup");
+      return;
+    }
+    
+    // Ensure snapshot and aip are arrays (defensive programming)
+    const snapshotUrls = Array.isArray(allProposals.snapshot) ? allProposals.snapshot : [];
+    const aipUrls = Array.isArray(allProposals.aip) ? allProposals.aip : [];
     
     // Check if widgets already exist and match current proposals - if so, don't clear them
     const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
@@ -1067,7 +1076,7 @@ export default apiInitializer((api) => {
     });
     
     // Get all proposal URLs from current proposals
-    const currentUrls = new Set([...allProposals.snapshot, ...allProposals.aip]);
+    const currentUrls = new Set([...snapshotUrls, ...aipUrls]);
     
     // Only clear widgets if the proposals have changed (different URLs)
     const urlsMatch = existingUrls.size === currentUrls.size && 
@@ -1077,6 +1086,13 @@ export default apiInitializer((api) => {
     if (urlsMatch && existingWidgets.length > 0) {
       console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s)), skipping re-render`);
       return; // Don't re-render if widgets already match
+    }
+    
+    // IMPORTANT: If widgets exist but no proposals are found, keep the widgets
+    // This prevents widgets from disappearing when scrolling (proposals might not be in viewport/DOM)
+    if (snapshotUrls.length === 0 && aipUrls.length === 0 && existingWidgets.length > 0) {
+      console.log(`🔵 [TOPIC] No proposals found but ${existingWidgets.length} widget(s) already exist - keeping widgets (they may be for proposals not currently in viewport)`);
+      return; // Keep existing widgets, don't remove them
     }
     
     // Clear all existing widgets only if proposals have changed
@@ -1105,21 +1121,22 @@ export default apiInitializer((api) => {
     renderingUrls.clear();
     fetchingUrls.clear();
     
-    if (allProposals.snapshot.length === 0 && allProposals.aip.length === 0) {
-      console.log("🔵 [TOPIC] No proposals found - removing widgets");
+    // Only remove widgets if no proposals found AND no widgets exist
+    if (snapshotUrls.length === 0 && aipUrls.length === 0) {
+      console.log("🔵 [TOPIC] No proposals found and no existing widgets - removing any remaining widgets");
       hideWidgetIfNoProposal();
       return;
     }
     
     // Deduplicate URLs to prevent creating multiple widgets for the same proposal
-    const uniqueSnapshotUrls = [...new Set(allProposals.snapshot)];
-    const uniqueAipUrls = [...new Set(allProposals.aip)];
+    const uniqueSnapshotUrls = [...new Set(snapshotUrls)];
+    const uniqueAipUrls = [...new Set(aipUrls)];
     
-    if (uniqueSnapshotUrls.length !== allProposals.snapshot.length) {
-      console.log(`🔵 [TOPIC] Deduplicated ${allProposals.snapshot.length} Snapshot URLs to ${uniqueSnapshotUrls.length} unique URLs`);
+    if (uniqueSnapshotUrls.length !== snapshotUrls.length) {
+      console.log(`🔵 [TOPIC] Deduplicated ${snapshotUrls.length} Snapshot URLs to ${uniqueSnapshotUrls.length} unique URLs`);
     }
-    if (uniqueAipUrls.length !== allProposals.aip.length) {
-      console.log(`🔵 [TOPIC] Deduplicated ${allProposals.aip.length} AIP URLs to ${uniqueAipUrls.length} unique URLs`);
+    if (uniqueAipUrls.length !== aipUrls.length) {
+      console.log(`🔵 [TOPIC] Deduplicated ${aipUrls.length} AIP URLs to ${uniqueAipUrls.length} unique URLs`);
     }
     
     const totalProposals = uniqueSnapshotUrls.length + uniqueAipUrls.length;
