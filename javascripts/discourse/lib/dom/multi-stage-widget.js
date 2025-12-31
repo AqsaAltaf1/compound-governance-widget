@@ -582,11 +582,25 @@ export function renderMultiStageWidget(
   }
 
   // CRITICAL: Check if this URL is already being rendered (race condition prevention)
+  // But also verify the widget actually exists in DOM - if not, allow render to proceed
   if (proposalUrl && renderingUrls.has(proposalUrl)) {
-    console.log(
-      `🔵 [RENDER] URL ${proposalUrl} is already being rendered, skipping duplicate render`
+    // Check if widget actually exists in DOM
+    const existingWidgetInDom = document.querySelector(
+      `.tally-status-widget-container[data-tally-url="${proposalUrl}"]`
     );
-    return;
+    if (existingWidgetInDom) {
+      console.log(
+        `🔵 [RENDER] URL ${proposalUrl} is already being rendered and exists in DOM, skipping duplicate render`
+      );
+      return;
+    } else {
+      // Widget was marked as rendering but doesn't exist in DOM - previous render likely failed
+      // Clear it from renderingUrls and allow this render to proceed
+      console.log(
+        `⚠️ [RENDER] URL ${proposalUrl} was marked as rendering but widget not found in DOM, clearing and retrying`
+      );
+      renderingUrls.delete(proposalUrl);
+    }
   }
 
   // Mark this URL as being rendered
@@ -1043,6 +1057,17 @@ export function renderMultiStageWidget(
           firstPost.parentNode.insertBefore(statusWidget, firstPost);
         } else {
           topicBody.insertBefore(statusWidget, topicBody.firstChild);
+        }
+        // Remove URL from rendering set after fallback insert
+        if (proposalUrl) {
+          renderingUrls.delete(proposalUrl);
+        }
+      } else {
+        // Last resort: append to body
+        document.body.appendChild(statusWidget);
+        // Remove URL from rendering set after fallback insert
+        if (proposalUrl) {
+          renderingUrls.delete(proposalUrl);
         }
       }
     }
