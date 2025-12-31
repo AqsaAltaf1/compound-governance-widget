@@ -22,7 +22,7 @@ export function formatVoteAmount(amount) {
   if (!amount || amount === 0) {
     return "0";
   }
-  
+
   // Convert from wei (18 decimals) to tokens
   // Always assume amounts are in wei if they're very large
   let tokens = amount;
@@ -52,7 +52,7 @@ export function formatStatusForDisplay(statusValue) {
   if (!statusValue) {
     return 'Unknown';
   }
-  
+
   const normalized = (statusValue || '').toLowerCase().trim();
   
   const statusMap = {
@@ -80,7 +80,7 @@ export function formatStatusForDisplay(statusValue) {
     'pending execution': 'Pending Execution',
     'pendingexecution': 'Pending Execution',
   };
-  
+
   // Check exact match first
   if (statusMap[normalized]) {
     return statusMap[normalized];

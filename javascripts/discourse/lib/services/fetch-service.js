@@ -10,7 +10,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
       // Add timeout to prevent hanging
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
+
       const response = await fetch(url, {
         ...options,
         signal: controller.signal,
@@ -23,7 +23,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
       return response;
     } catch (error) {
       lastError = error;
-      
+
       // Handle AbortError gracefully (timeout)
       if (error.name === 'AbortError') {
         if (attempt < maxRetries - 1) {
@@ -37,7 +37,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
         }
         break;
       }
-      
+
       const isNetworkError = error.name === 'TypeError' || 
                             error.name === 'NetworkError' ||
                             error.message?.includes('Failed to fetch') ||
@@ -59,7 +59,7 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
       break;
     }
   }
-  
+
   // If we exhausted all retries, throw the last error with more context
   if (lastError) {
     const enhancedError = new Error(
