@@ -1099,15 +1099,16 @@ export default apiInitializer((api) => {
     }
     
     // If widgets are initialized and we found the same proposals, skip re-rendering
-    if (widgetsInitialized && existingWidgets.length > 0) {
-      // Check if we have widgets for all current URLs (reuse currentUrls from above)
-      const allUrlsHaveWidgets = currentUrls.size > 0 && 
-                                 [...currentUrls].every(url => {
-                                   return Array.from(existingWidgets).some(widget => {
-                                     const widgetUrl = widget.getAttribute('data-tally-url');
-                                     return widgetUrl === url || widgetUrl?.includes(url) || url.includes(widgetUrl);
-                                   });
-                                 });
+    // Check if we have widgets for all current URLs
+    if (widgetsInitialized && existingWidgets.length > 0 && currentUrls.size > 0) {
+      // Check if all current URLs have corresponding widgets
+      const urlArray = Array.from(currentUrls);
+      const allUrlsHaveWidgets = urlArray.every(url => {
+        return Array.from(existingWidgets).some(widget => {
+          const widgetUrl = widget.getAttribute('data-tally-url');
+          return widgetUrl === url || widgetUrl?.includes(url) || url.includes(widgetUrl);
+        });
+      });
       
       if (allUrlsHaveWidgets) {
         console.log(`🔵 [TOPIC] Widgets already initialized and match current proposals, skipping re-render`);
