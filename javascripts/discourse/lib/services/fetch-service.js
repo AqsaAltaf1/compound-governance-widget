@@ -3,7 +3,13 @@
 /**
  * Helper function to fetch with retry logic and exponential backoff
  */
-export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1000, handledErrors = null) {
+export async function fetchWithRetry(
+  url,
+  options,
+  maxRetries = 3,
+  baseDelay = 1000,
+  handledErrors = null,
+) {
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -14,9 +20,9 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
       const response = await fetch(url, {
         ...options,
         signal: controller.signal,
-        cache: 'no-cache',
-        mode: 'cors',
-        credentials: 'omit',
+        cache: "no-cache",
+        mode: "cors",
+        credentials: "omit",
       });
 
       clearTimeout(timeoutId);
@@ -25,34 +31,40 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
       lastError = error;
 
       // Handle AbortError gracefully (timeout)
-      if (error.name === 'AbortError') {
+      if (error.name === "AbortError") {
         if (attempt < maxRetries - 1) {
           const delay = baseDelay * Math.pow(2, attempt);
-          console.warn(`⚠️ [FETCH] Request timeout (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
+          console.warn(
+            `⚠️ [FETCH] Request timeout (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
+          );
           if (handledErrors) {
             handledErrors.add(error);
           }
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
         break;
       }
 
-      const isNetworkError = error.name === 'TypeError' ||
-                            error.name === 'NetworkError' ||
-                            error.message?.includes('Failed to fetch') ||
-                            error.message?.includes('QUIC') ||
-                            error.message?.includes('ERR_QUIC') ||
-                            error.message?.includes('NetworkError') ||
-                            error.message?.includes('network');
+      const isNetworkError =
+        error.name === "TypeError" ||
+        error.name === "NetworkError" ||
+        error.message?.includes("Failed to fetch") ||
+        error.message?.includes("QUIC") ||
+        error.message?.includes("ERR_QUIC") ||
+        error.message?.includes("NetworkError") ||
+        error.message?.includes("network");
 
       if (isNetworkError && attempt < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, attempt);
-        console.warn(`⚠️ [FETCH] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message || error.toString());
+        console.warn(
+          `⚠️ [FETCH] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
+          error.message || error.toString(),
+        );
         if (handledErrors) {
           handledErrors.add(error);
         }
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
 
@@ -63,9 +75,9 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
   // If we exhausted all retries, throw the last error with more context
   if (lastError) {
     const enhancedError = new Error(
-      `Failed to fetch after ${maxRetries} attempts: ${lastError.message || lastError.toString()}. URL: ${url}`
+      `Failed to fetch after ${maxRetries} attempts: ${lastError.message || lastError.toString()}. URL: ${url}`,
     );
-    enhancedError.name = lastError.name || 'NetworkError';
+    enhancedError.name = lastError.name || "NetworkError";
     enhancedError.cause = lastError;
     if (handledErrors) {
       handledErrors.add(enhancedError);
@@ -80,4 +92,3 @@ export async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1
   }
   throw unknownError;
 }
-

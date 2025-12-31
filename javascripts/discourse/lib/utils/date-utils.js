@@ -39,4 +39,3 @@ export function calculateTimeRemaining(endTimestampSeconds) {
 
   return { daysLeft: null, hoursLeft: null };
 }
-

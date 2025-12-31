@@ -13,20 +13,20 @@ export function getOrCreateWidgetsContainer() {
     return null;
   }
 
-  let container = document.getElementById('governance-widgets-wrapper');
+  let container = document.getElementById("governance-widgets-wrapper");
   if (!container) {
-    container = document.createElement('div');
-    container.id = 'governance-widgets-wrapper';
-    container.className = 'governance-widgets-wrapper';
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
-    container.style.gap = '16px';
-    container.style.position = 'fixed';
-    container.style.zIndex = '500';
-    container.style.width = '320px';
-    container.style.maxWidth = '320px';
-    container.style.maxHeight = 'calc(100vh - 100px)';
-    container.style.overflowY = 'auto';
+    container = document.createElement("div");
+    container.id = "governance-widgets-wrapper";
+    container.className = "governance-widgets-wrapper";
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.gap = "16px";
+    container.style.position = "fixed";
+    container.style.zIndex = "500";
+    container.style.width = "320px";
+    container.style.maxWidth = "320px";
+    container.style.maxHeight = "calc(100vh - 100px)";
+    container.style.overflowY = "auto";
 
     // Position container like tally widget - fixed on right side
     updateContainerPosition(container);
@@ -50,7 +50,7 @@ export function getOrCreateWidgetsContainer() {
     };
 
     // Only update on resize, not scroll - keeps widgets fixed during scroll
-    window.addEventListener('resize', updatePosition);
+    window.addEventListener("resize", updatePosition);
 
     // Initial position update after a short delay to ensure DOM is ready
     setTimeout(() => updateContainerPosition(container), 100);
@@ -63,18 +63,18 @@ export function getOrCreateWidgetsContainer() {
  */
 export function updateContainerPosition(container) {
   // Position like tally widget - fixed on right side, same position
-  container.style.right = '50px';
-  container.style.left = 'auto';
-  container.style.top = '180px';
+  container.style.right = "50px";
+  container.style.left = "auto";
+  container.style.top = "180px";
   // Ensure container is always visible
-  container.style.display = 'flex';
-  container.style.visibility = 'visible';
+  container.style.display = "flex";
+  container.style.visibility = "visible";
 
   // Log position data for debugging
   const rect = container.getBoundingClientRect();
   console.log("📍 [POSITION DATA] Container position:", {
-    right: '50px',
-    top: '180px',
+    right: "50px",
+    top: "180px",
     actualLeft: `${rect.left}px`,
     actualTop: `${rect.top}px`,
     actualRight: `${rect.right}px`,
@@ -82,7 +82,7 @@ export function updateContainerPosition(container) {
     width: `${rect.width}px`,
     height: `${rect.height}px`,
     windowWidth: window.innerWidth,
-    windowHeight: window.innerHeight
+    windowHeight: window.innerHeight,
   });
 }
 
@@ -91,7 +91,7 @@ export function updateContainerPosition(container) {
  */
 export function formatTimeDisplay(daysLeft, hoursLeft) {
   if (daysLeft === null || daysLeft === undefined) {
-    return 'Date unknown';
+    return "Date unknown";
   }
   if (daysLeft < 0) {
     const daysAgo = Math.abs(daysLeft);
@@ -101,26 +101,26 @@ export function formatTimeDisplay(daysLeft, hoursLeft) {
       const remainingDays = daysAgo % 365;
       const monthsAgo = Math.floor(remainingDays / 30);
       if (monthsAgo > 0) {
-        return `Ended ${yearsAgo} ${yearsAgo === 1 ? 'year' : 'years'}, ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'} ago`;
+        return `Ended ${yearsAgo} ${yearsAgo === 1 ? "year" : "years"}, ${monthsAgo} ${monthsAgo === 1 ? "month" : "months"} ago`;
       }
-      return `Ended ${yearsAgo} ${yearsAgo === 1 ? 'year' : 'years'} ago`;
+      return `Ended ${yearsAgo} ${yearsAgo === 1 ? "year" : "years"} ago`;
     }
     // Show months if more than 30 days ago
     if (daysAgo >= 30) {
       const monthsAgo = Math.floor(daysAgo / 30);
       const remainingDays = daysAgo % 30;
       if (remainingDays > 0) {
-        return `Ended ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} ago`;
+        return `Ended ${monthsAgo} ${monthsAgo === 1 ? "month" : "months"}, ${remainingDays} ${remainingDays === 1 ? "day" : "days"} ago`;
       }
-      return `Ended ${monthsAgo} ${monthsAgo === 1 ? 'month' : 'months'} ago`;
+      return `Ended ${monthsAgo} ${monthsAgo === 1 ? "month" : "months"} ago`;
     }
-    return `Ended ${daysAgo} ${daysAgo === 1 ? 'day' : 'days'} ago`;
+    return `Ended ${daysAgo} ${daysAgo === 1 ? "day" : "days"} ago`;
   }
   if (daysLeft === 0 && hoursLeft !== null) {
-    return `Ends in ${hoursLeft} ${hoursLeft === 1 ? 'hour' : 'hours'}!`;
+    return `Ends in ${hoursLeft} ${hoursLeft === 1 ? "hour" : "hours"}!`;
   }
   if (daysLeft === 0) {
-    return 'Ends today';
+    return "Ends today";
   }
   // Show years if more than 365 days left
   if (daysLeft >= 365) {
@@ -128,20 +128,20 @@ export function formatTimeDisplay(daysLeft, hoursLeft) {
     const remainingDays = daysLeft % 365;
     const monthsLeft = Math.floor(remainingDays / 30);
     if (monthsLeft > 0) {
-      return `${yearsLeft} ${yearsLeft === 1 ? 'year' : 'years'}, ${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'} left`;
+      return `${yearsLeft} ${yearsLeft === 1 ? "year" : "years"}, ${monthsLeft} ${monthsLeft === 1 ? "month" : "months"} left`;
     }
-    return `${yearsLeft} ${yearsLeft === 1 ? 'year' : 'years'} left`;
+    return `${yearsLeft} ${yearsLeft === 1 ? "year" : "years"} left`;
   }
   // Show months if more than 30 days left
   if (daysLeft >= 30) {
     const monthsLeft = Math.floor(daysLeft / 30);
     const remainingDays = daysLeft % 30;
     if (remainingDays > 0) {
-      return `${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'}, ${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} left`;
+      return `${monthsLeft} ${monthsLeft === 1 ? "month" : "months"}, ${remainingDays} ${remainingDays === 1 ? "day" : "days"} left`;
     }
-    return `${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'} left`;
+    return `${monthsLeft} ${monthsLeft === 1 ? "month" : "months"} left`;
   }
-  return `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`;
+  return `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`;
 }
 
 /**
@@ -158,7 +158,9 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
   const activeStatuses = ["active", "pending", "open"];
   const executedStatuses = ["executed", "crosschainexecuted", "completed"];
   const isActive = activeStatuses.includes(proposalData.status?.toLowerCase());
-  const isExecuted = executedStatuses.includes(proposalData.status?.toLowerCase());
+  const isExecuted = executedStatuses.includes(
+    proposalData.status?.toLowerCase(),
+  );
 
   const voteStats = proposalData.voteStats || {};
   const votesFor = voteStats.for?.count || 0;
@@ -166,9 +168,21 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
   const votesAbstain = voteStats.abstain?.count || 0;
   const totalVotes = voteStats.total || 0;
 
-  const percentFor = voteStats.for?.percent ? Number(voteStats.for.percent).toFixed(2) : (totalVotes > 0 ? ((votesFor / totalVotes) * 100).toFixed(2) : "0.00");
-  const percentAgainst = voteStats.against?.percent ? Number(voteStats.against.percent).toFixed(2) : (totalVotes > 0 ? ((votesAgainst / totalVotes) * 100).toFixed(2) : "0.00");
-  const percentAbstain = voteStats.abstain?.percent ? Number(voteStats.abstain.percent).toFixed(2) : (totalVotes > 0 ? ((votesAbstain / totalVotes) * 100).toFixed(2) : "0.00");
+  const percentFor = voteStats.for?.percent
+    ? Number(voteStats.for.percent).toFixed(2)
+    : totalVotes > 0
+      ? ((votesFor / totalVotes) * 100).toFixed(2)
+      : "0.00";
+  const percentAgainst = voteStats.against?.percent
+    ? Number(voteStats.against.percent).toFixed(2)
+    : totalVotes > 0
+      ? ((votesAgainst / totalVotes) * 100).toFixed(2)
+      : "0.00";
+  const percentAbstain = voteStats.abstain?.percent
+    ? Number(voteStats.abstain.percent).toFixed(2)
+    : totalVotes > 0
+      ? ((votesAbstain / totalVotes) * 100).toFixed(2)
+      : "0.00";
 
   // Use title from API, not ID
   const displayTitle = proposalData.title || "Snapshot Proposal";
@@ -182,19 +196,25 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
             ${displayTitle}
           </a>
         </h4>
-        ${proposalData.description ? (() => {
-          const descLines = proposalData.description.split('\n');
-          const preview = descLines.slice(0, 5).join('\n');
-          const hasMore = descLines.length > 5;
-          return `<div class="proposal-description">${preview.replace(/`/g, '\\`').replace(/\${/g, '\\${')}${hasMore ? '...' : ''}</div>`;
-        })() : ""}
-        ${proposalData.proposer?.name ? `<div class="proposal-author"><span class="author-label">Author:</span><span class="author-name">${(proposalData.proposer.name || '').replace(/`/g, '\\`')}</span></div>` : ""}
+        ${
+          proposalData.description
+            ? (() => {
+                const descLines = proposalData.description.split("\n");
+                const preview = descLines.slice(0, 5).join("\n");
+                const hasMore = descLines.length > 5;
+                return `<div class="proposal-description">${preview.replace(/`/g, "\\`").replace(/\${/g, "\\${")}${hasMore ? "..." : ""}</div>`;
+              })()
+            : ""
+        }
+        ${proposalData.proposer?.name ? `<div class="proposal-author"><span class="author-label">Author:</span><span class="author-name">${(proposalData.proposer.name || "").replace(/`/g, "\\`")}</span></div>` : ""}
       </div>
       <div class="proposal-sidebar">
-        <div class="status-badge ${isActive ? 'active' : isExecuted ? 'executed' : 'inactive'}">
-          ${isActive ? 'ACTIVE' : isExecuted ? 'EXECUTED' : 'INACTIVE'}
+        <div class="status-badge ${isActive ? "active" : isExecuted ? "executed" : "inactive"}">
+          ${isActive ? "ACTIVE" : isExecuted ? "EXECUTED" : "INACTIVE"}
         </div>
-        ${totalVotes > 0 ? `
+        ${
+          totalVotes > 0
+            ? `
           <div class="voting-section">
             <div class="voting-bar">
               <div class="vote-option vote-for">
@@ -229,11 +249,13 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
               Vote on Snapshot
             </a>
           </div>
-        ` : `
+        `
+            : `
           <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
             View on Snapshot
           </a>
-        `}
+        `
+        }
       </div>
     </div>
   `;
@@ -242,8 +264,12 @@ export function renderProposalWidget(container, proposalData, originalUrl) {
 /**
  * Show network error widget
  */
-export function showNetworkErrorWidget(count, type, getOrCreateWidgetsContainerFn) {
-  const errorWidgetId = 'governance-error-widget';
+export function showNetworkErrorWidget(
+  count,
+  type,
+  getOrCreateWidgetsContainerFn,
+) {
+  const errorWidgetId = "governance-error-widget";
   const existingError = document.getElementById(errorWidgetId);
   if (existingError) {
     existingError.remove();
@@ -274,20 +300,24 @@ export function showNetworkErrorWidget(count, type, getOrCreateWidgetsContainerF
     // Fallback: append to body if no container
     document.body.appendChild(errorWidget);
   }
-  console.log(`⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`);
+  console.log(
+    `⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`,
+  );
 }
 
 /**
  * Hide widget if no proposal
  */
 export function hideWidgetIfNoProposal() {
-  const allWidgets = document.querySelectorAll('.tally-status-widget-container');
+  const allWidgets = document.querySelectorAll(
+    ".tally-status-widget-container",
+  );
   const widgetCount = allWidgets.length;
-  allWidgets.forEach(widget => {
+  allWidgets.forEach((widget) => {
     // Remove widget from DOM completely, not just hide it
     widget.remove();
     // Clean up stored data
-    const widgetId = widget.getAttribute('data-tally-status-id');
+    const widgetId = widget.getAttribute("data-tally-status-id");
     if (widgetId) {
       delete window[`tallyWidget_${widgetId}`];
       // Clear any auto-refresh intervals
@@ -300,14 +330,18 @@ export function hideWidgetIfNoProposal() {
   });
 
   // Clean up empty container
-  const container = document.getElementById('governance-widgets-wrapper');
+  const container = document.getElementById("governance-widgets-wrapper");
   if (container && container.children.length === 0) {
     container.remove();
     console.log("🔵 [CONTAINER] Removed empty widgets container");
   }
 
   if (widgetCount > 0) {
-    console.log("🔵 [WIDGET] Removed", widgetCount, "widget(s) - no proposal in current post");
+    console.log(
+      "🔵 [WIDGET] Removed",
+      widgetCount,
+      "widget(s) - no proposal in current post",
+    );
   }
 }
 
@@ -315,10 +349,11 @@ export function hideWidgetIfNoProposal() {
  * Show widget
  */
 export function showWidget() {
-  const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-  allWidgets.forEach(widget => {
-    widget.style.display = '';
-    widget.style.visibility = '';
+  const allWidgets = document.querySelectorAll(
+    ".tally-status-widget-container",
+  );
+  allWidgets.forEach((widget) => {
+    widget.style.display = "";
+    widget.style.visibility = "";
   });
 }
-

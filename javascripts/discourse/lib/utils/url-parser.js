@@ -11,50 +11,67 @@ export function extractSnapshotProposalInfo(url) {
 
   try {
     // Check if it's a testnet URL
-    const isTestnet = url.includes('testnet.snapshot.box');
+    const isTestnet = url.includes("testnet.snapshot.box");
 
     // Match pattern for testnet: testnet.snapshot.box/#/s-tn:{space}/proposal/{proposal-id}
     if (isTestnet) {
-      const testnetProposalMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
+      const testnetProposalMatch = url.match(
+        /testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i,
+      );
       if (testnetProposalMatch) {
         let space = testnetProposalMatch[1];
         const proposalId = testnetProposalMatch[2];
         // Handle s-tn: prefix - keep it for API calls
-        console.log("✅ Extracted Snapshot testnet format:", { space, proposalId });
-        return { space, proposalId, type: 'snapshot', isTestnet: true };
+        console.log("✅ Extracted Snapshot testnet format:", {
+          space,
+          proposalId,
+        });
+        return { space, proposalId, type: "snapshot", isTestnet: true };
       }
 
       // Match pattern: testnet.snapshot.box/#/s-tn:{space}/{proposal-id} (without /proposal/)
-      const testnetDirectMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
+      const testnetDirectMatch = url.match(
+        /testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i,
+      );
       if (testnetDirectMatch) {
         let space = testnetDirectMatch[1];
         const proposalId = testnetDirectMatch[2];
         // Skip if proposalId is "proposal"
-        if (proposalId.toLowerCase() !== 'proposal') {
-          console.log("✅ Extracted Snapshot testnet format (direct):", { space, proposalId });
-          return { space, proposalId, type: 'snapshot', isTestnet: true };
+        if (proposalId.toLowerCase() !== "proposal") {
+          console.log("✅ Extracted Snapshot testnet format (direct):", {
+            space,
+            proposalId,
+          });
+          return { space, proposalId, type: "snapshot", isTestnet: true };
         }
       }
     }
 
     // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
-    const proposalMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
+    const proposalMatch = url.match(
+      /snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i,
+    );
     if (proposalMatch) {
       const space = proposalMatch[1];
       const proposalId = proposalMatch[2];
       console.log("✅ Extracted Snapshot format:", { space, proposalId });
-      return { space, proposalId, type: 'snapshot', isTestnet: false };
+      return { space, proposalId, type: "snapshot", isTestnet: false };
     }
 
     // Match pattern: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
-    const directMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
+    const directMatch = url.match(
+      /snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i,
+    );
     if (directMatch) {
       const space = directMatch[1];
       const proposalId = directMatch[2];
       // Skip if proposalId is "proposal"
-      if (proposalId.toLowerCase() !== 'proposal') {
-        console.log("✅ Extracted Snapshot format (direct):", { space, proposalId });
-        return { space, proposalId, type: 'snapshot', isTestnet: false };
+      if (proposalId.toLowerCase() !== "proposal") {
+        console.log("✅ Extracted Snapshot format (direct):", {
+          space,
+          proposalId,
+        });
+        return { space, proposalId, type: "snapshot", isTestnet: false };
       }
     }
 
@@ -80,7 +97,7 @@ export function extractAIPProposalInfo(url) {
 
   try {
     let proposalId = null;
-    let urlSource = 'app.aave.com'; // Default to app.aave.com (Aave V3 enum mapping)
+    let urlSource = "app.aave.com"; // Default to app.aave.com (Aave V3 enum mapping)
 
     // Step 1: Try to extract from query parameter (most reliable)
     try {
@@ -91,13 +108,18 @@ export function extractAIPProposalInfo(url) {
         if (!isNaN(numericId) && numericId > 0) {
           proposalId = numericId.toString();
           // Detect URL source for state enum mapping
-          if (url.includes('vote.onaave.com')) {
-            urlSource = 'vote.onaave.com';
-          } else if (url.includes('app.aave.com')) {
-            urlSource = 'app.aave.com';
+          if (url.includes("vote.onaave.com")) {
+            urlSource = "vote.onaave.com";
+          } else if (url.includes("app.aave.com")) {
+            urlSource = "app.aave.com";
           }
-          console.log("✅ Extracted proposalId from query parameter:", proposalId, "Source:", urlSource);
-          return { proposalId, type: 'aip', urlSource };
+          console.log(
+            "✅ Extracted proposalId from query parameter:",
+            proposalId,
+            "Source:",
+            urlSource,
+          );
+          return { proposalId, type: "aip", urlSource };
         }
       }
     } catch {
@@ -105,44 +127,50 @@ export function extractAIPProposalInfo(url) {
     }
 
     // Step 2: Try regex patterns for various URL formats
-    const voteMatch = url.match(/vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i);
+    const voteMatch = url.match(
+      /vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i,
+    );
     if (voteMatch) {
       proposalId = voteMatch[1];
-      urlSource = 'vote.onaave.com';
+      urlSource = "vote.onaave.com";
       console.log("✅ Extracted from vote.onaave.com:", proposalId);
-      return { proposalId, type: 'aip', urlSource };
+      return { proposalId, type: "aip", urlSource };
     }
 
-    const appV3Match = url.match(/app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i);
+    const appV3Match = url.match(
+      /app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i,
+    );
     if (appV3Match) {
       proposalId = appV3Match[1];
-      urlSource = 'app.aave.com';
+      urlSource = "app.aave.com";
       console.log("✅ Extracted from app.aave.com/governance/v3:", proposalId);
-      return { proposalId, type: 'aip', urlSource };
+      return { proposalId, type: "aip", urlSource };
     }
 
     const forumMatch = url.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
     if (forumMatch) {
       proposalId = forumMatch[1];
-      urlSource = 'app.aave.com';
+      urlSource = "app.aave.com";
       console.log("✅ Extracted from governance.aave.com forum:", proposalId);
-      return { proposalId, type: 'aip', urlSource };
+      return { proposalId, type: "aip", urlSource };
     }
 
-    const appMatch = url.match(/app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i);
+    const appMatch = url.match(
+      /app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i,
+    );
     if (appMatch) {
       proposalId = appMatch[1];
-      urlSource = 'app.aave.com';
+      urlSource = "app.aave.com";
       console.log("✅ Extracted from app.aave.com/governance:", proposalId);
-      return { proposalId, type: 'aip', urlSource };
+      return { proposalId, type: "aip", urlSource };
     }
 
     const aipMatch = url.match(/governance\.aave\.com\/aip\/(\d+)/i);
     if (aipMatch) {
       proposalId = aipMatch[1];
-      urlSource = 'app.aave.com';
+      urlSource = "app.aave.com";
       console.log("✅ Extracted from governance.aave.com/aip:", proposalId);
-      return { proposalId, type: 'aip', urlSource };
+      return { proposalId, type: "aip", urlSource };
     }
 
     console.warn("❌ Could not extract proposalId from URL:", url);
@@ -167,7 +195,7 @@ export function extractProposalInfo(url) {
     return {
       ...snapshotInfo,
       urlProposalNumber: snapshotInfo.proposalId,
-      internalId: snapshotInfo.proposalId
+      internalId: snapshotInfo.proposalId,
     };
   }
 
@@ -179,11 +207,10 @@ export function extractProposalInfo(url) {
       proposalId: aipInfo.proposalId,
       urlProposalNumber: aipInfo.proposalId,
       internalId: aipInfo.proposalId,
-      topicId: aipInfo.proposalId
+      topicId: aipInfo.proposalId,
     };
   }
 
   console.warn("❌ Could not extract proposal info from URL:", url);
   return null;
 }
-

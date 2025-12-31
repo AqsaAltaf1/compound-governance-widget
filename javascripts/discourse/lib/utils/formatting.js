@@ -5,7 +5,7 @@
  */
 export function escapeHtml(unsafe) {
   if (!unsafe) {
-    return '';
+    return "";
   }
   return String(unsafe)
     .replace(/&/g, "&amp;")
@@ -50,35 +50,35 @@ export function formatVoteAmount(amount) {
  */
 export function formatStatusForDisplay(statusValue) {
   if (!statusValue) {
-    return 'Unknown';
+    return "Unknown";
   }
 
-  const normalized = (statusValue || '').toLowerCase().trim();
+  const normalized = (statusValue || "").toLowerCase().trim();
 
   const statusMap = {
-    'defeated': 'Defeated',
-    'defeat': 'Defeated',
-    'rejected': 'Rejected',
-    'failed': 'Failed',
-    'cancelled': 'Cancelled',
-    'canceled': 'Cancelled',
-    'expired': 'Expired',
-    'executed': 'Executed',
-    'crosschainexecuted': 'Executed',
-    'completed': 'Completed',
-    'passed': 'Passed',
-    'active': 'Active',
-    'open': 'Active',
-    'voting': 'Active',
-    'created': 'Created',
-    'pending': 'Pending',
-    'queued': 'Queued',
-    'closed': 'Closed',
-    'ended': 'Ended',
-    'quorum not reached': 'Quorum Not Reached',
-    'quorumnotreached': 'Quorum Not Reached',
-    'pending execution': 'Pending Execution',
-    'pendingexecution': 'Pending Execution',
+    defeated: "Defeated",
+    defeat: "Defeated",
+    rejected: "Rejected",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    canceled: "Cancelled",
+    expired: "Expired",
+    executed: "Executed",
+    crosschainexecuted: "Executed",
+    completed: "Completed",
+    passed: "Passed",
+    active: "Active",
+    open: "Active",
+    voting: "Active",
+    created: "Created",
+    pending: "Pending",
+    queued: "Queued",
+    closed: "Closed",
+    ended: "Ended",
+    "quorum not reached": "Quorum Not Reached",
+    quorumnotreached: "Quorum Not Reached",
+    "pending execution": "Pending Execution",
+    pendingexecution: "Pending Execution",
   };
 
   // Check exact match first
@@ -96,4 +96,3 @@ export function formatStatusForDisplay(statusValue) {
   // Default: capitalize first letter, preserve rest
   return statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 }
-

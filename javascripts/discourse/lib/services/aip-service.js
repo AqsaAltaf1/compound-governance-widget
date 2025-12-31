@@ -10,28 +10,28 @@ import { fetchWithRetry } from "./fetch-service";
  * app.aave.com uses: 0='null', 1='created', 2='active', 3='queued', 4='executed', 5='failed', 6='cancelled', 7='expired'
  */
 export function getStateMapping(urlSource) {
-  if (urlSource === 'vote.onaave.com') {
+  if (urlSource === "vote.onaave.com") {
     return {
-      0: 'created',
-      1: 'voting',
-      2: 'passed',
-      3: 'failed',
-      4: 'executed',
-      5: 'expired',
-      6: 'cancelled',
-      7: 'active',
+      0: "created",
+      1: "voting",
+      2: "passed",
+      3: "failed",
+      4: "executed",
+      5: "expired",
+      6: "cancelled",
+      7: "active",
     };
   } else {
     // Default to app.aave.com (Aave Governance V3) enum mapping
     return {
-      0: 'null',
-      1: 'created',
-      2: 'active',
-      3: 'queued',
-      4: 'executed',
-      5: 'failed',
-      6: 'cancelled',
-      7: 'expired',
+      0: "null",
+      1: "created",
+      2: "active",
+      3: "queued",
+      4: "executed",
+      5: "failed",
+      6: "cancelled",
+      7: "expired",
     };
   }
 }
@@ -41,12 +41,12 @@ export function getStateMapping(urlSource) {
  * Handles YAML front-matter in markdown files
  */
 export function parseFrontMatter(text) {
-  if (!text || !text.startsWith('---')) {
+  if (!text || !text.startsWith("---")) {
     return { metadata: {}, markdown: text, raw: text };
   }
 
   // Find the end of front-matter (second ---)
-  const endIndex = text.indexOf('\n---', 4);
+  const endIndex = text.indexOf("\n---", 4);
   if (endIndex === -1) {
     return { metadata: {}, markdown: text, raw: text };
   }
@@ -57,15 +57,17 @@ export function parseFrontMatter(text) {
 
   // Simple YAML parser for basic key-value pairs
   const metadata = {};
-  const lines = frontMatterText.split('\n');
+  const lines = frontMatterText.split("\n");
   for (const line of lines) {
-    const colonIndex = line.indexOf(':');
+    const colonIndex = line.indexOf(":");
     if (colonIndex > 0) {
       const key = line.substring(0, colonIndex).trim();
       let value = line.substring(colonIndex + 1).trim();
       // Remove quotes if present
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
         value = value.slice(1, -1);
       }
       metadata[key] = value;
@@ -79,13 +81,19 @@ export function parseFrontMatter(text) {
  * Transform on-chain proposal data to our expected format
  * Using simplified ABI structure: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
  */
-export function transformAIPDataFromOnChain(proposal, state, proposalId, urlSource = 'app.aave.com') {
+export function transformAIPDataFromOnChain(
+  proposal,
+  state,
+  proposalId,
+  urlSource = "app.aave.com",
+) {
   // Get the correct state mapping based on URL source
   const stateMap = getStateMapping(urlSource);
 
   // Use state from parameter or from proposal object
-  const proposalState = state || (proposal.state !== undefined ? Number(proposal.state) : 0);
-  const status = stateMap[proposalState] || 'unknown';
+  const proposalState =
+    state || (proposal.state !== undefined ? Number(proposal.state) : 0);
+  const status = stateMap[proposalState] || "unknown";
 
   // Safely extract values from proposal object
   // The simplified ABI returns: (id, creator, startTime, endTime, forVotes, againstVotes, state, executed, canceled)
@@ -104,7 +112,16 @@ export function transformAIPDataFromOnChain(proposal, state, proposalId, urlSour
     daysLeft = timeRemaining.daysLeft;
     hoursLeft = timeRemaining.hoursLeft;
 
-    console.log("🔵 [AIP] Calculated dates from on-chain - Start:", startTime ? new Date(startTime * 1000).toISOString() : 'N/A', "End:", new Date(endTime * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
+    console.log(
+      "🔵 [AIP] Calculated dates from on-chain - Start:",
+      startTime ? new Date(startTime * 1000).toISOString() : "N/A",
+      "End:",
+      new Date(endTime * 1000).toISOString(),
+      "Days left:",
+      daysLeft,
+      "Hours left:",
+      hoursLeft,
+    );
   }
 
   return {
@@ -112,13 +129,19 @@ export function transformAIPDataFromOnChain(proposal, state, proposalId, urlSour
     title: `Proposal ${proposalId}`, // On-chain doesn't have title, will be enriched from markdown/subgraph
     description: `Aave Governance Proposal ${proposalId}`, // On-chain doesn't have description, will be enriched
     status,
-    forVotes: proposal.forVotes ? proposal.forVotes.toString() : '0',
-    againstVotes: proposal.againstVotes ? proposal.againstVotes.toString() : '0',
-    abstainVotes: '0', // Aave V3 doesn't have abstain votes
+    forVotes: proposal.forVotes ? proposal.forVotes.toString() : "0",
+    againstVotes: proposal.againstVotes
+      ? proposal.againstVotes.toString()
+      : "0",
+    abstainVotes: "0", // Aave V3 doesn't have abstain votes
     quorum: null, // Would need to calculate from strategy
     proposer: proposal.creator || null,
     createdAt: startTime ? new Date(startTime * 1000).toISOString() : null,
-    executedAt: proposal.executed ? (endTime ? new Date(endTime * 1000).toISOString() : null) : null,
+    executedAt: proposal.executed
+      ? endTime
+        ? new Date(endTime * 1000).toISOString()
+        : null
+      : null,
     startTime,
     endTime,
     votingActivationTimestamp: startTime, // startTime is the voting activation timestamp
@@ -149,7 +172,11 @@ export function transformAIPData(proposal) {
   let hoursLeft = proposal.hoursLeft !== undefined ? proposal.hoursLeft : null;
 
   // If dates weren't already calculated (from subgraph), try to calculate from available data
-  if (daysLeft === null && proposal.votingActivationTimestamp && proposal.votingDuration) {
+  if (
+    daysLeft === null &&
+    proposal.votingActivationTimestamp &&
+    proposal.votingDuration
+  ) {
     // votingActivationTimestamp is in seconds (Unix timestamp)
     const activationTimestamp = Number(proposal.votingActivationTimestamp);
     const votingDuration = Number(proposal.votingDuration); // in seconds
@@ -161,7 +188,16 @@ export function transformAIPData(proposal) {
     daysLeft = timeRemaining.daysLeft;
     hoursLeft = timeRemaining.hoursLeft;
 
-    console.log("🔵 [AIP] Calculated dates in transformAIPData - Activation:", new Date(activationTimestamp * 1000).toISOString(), "End:", new Date(endTimestamp * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
+    console.log(
+      "🔵 [AIP] Calculated dates in transformAIPData - Activation:",
+      new Date(activationTimestamp * 1000).toISOString(),
+      "End:",
+      new Date(endTimestamp * 1000).toISOString(),
+      "Days left:",
+      daysLeft,
+      "Hours left:",
+      hoursLeft,
+    );
   } else if (daysLeft === null && proposal.endTime) {
     // Fallback: use endTime directly if available
     const timeRemaining = calculateTimeRemaining(Number(proposal.endTime));
@@ -170,28 +206,28 @@ export function transformAIPData(proposal) {
   }
 
   // Determine status
-  let status = 'unknown';
+  let status = "unknown";
   if (proposal.status) {
     const statusLower = proposal.status.toLowerCase();
-    if (statusLower === 'active' || statusLower === 'pending') {
-      status = 'active';
-    } else if (statusLower === 'executed' || statusLower === 'succeeded') {
-      status = 'executed';
-    } else if (statusLower === 'defeated' || statusLower === 'failed') {
-      status = 'defeated';
-    } else if (statusLower === 'queued') {
-      status = 'queued';
-    } else if (statusLower === 'canceled' || statusLower === 'cancelled') {
-      status = 'canceled';
+    if (statusLower === "active" || statusLower === "pending") {
+      status = "active";
+    } else if (statusLower === "executed" || statusLower === "succeeded") {
+      status = "executed";
+    } else if (statusLower === "defeated" || statusLower === "failed") {
+      status = "defeated";
+    } else if (statusLower === "queued") {
+      status = "queued";
+    } else if (statusLower === "canceled" || statusLower === "cancelled") {
+      status = "canceled";
     }
   }
 
   return {
     id: proposal.id,
-    title: proposal.title || 'Untitled AIP',
-    description: proposal.description || '',
+    title: proposal.title || "Untitled AIP",
+    description: proposal.description || "",
     status,
-    stage: 'aip',
+    stage: "aip",
     quorum: proposal.quorum || null,
     daysLeft,
     hoursLeft,
@@ -202,7 +238,7 @@ export function transformAIPData(proposal) {
       total: totalVotes,
     },
     url: `${AAVE_GOVERNANCE_PORTAL}/t/${proposal.id}`,
-    type: 'aip',
+    type: "aip",
   };
 }
 
@@ -222,12 +258,12 @@ export function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
     merged.description = markdownData.description || merged.description;
     merged.markdown = markdownData.markdown;
     merged.markdownMetadata = markdownData.metadata;
-    merged._contentSource = 'markdown';
+    merged._contentSource = "markdown";
   } else if (subgraphMetadata) {
     // Fallback to subgraph if no markdown
     merged.title = subgraphMetadata.title || merged.title;
     merged.description = subgraphMetadata.description || merged.description;
-    merged._contentSource = 'subgraph';
+    merged._contentSource = "subgraph";
 
     // If on-chain votes are missing, use subgraph votes as fallback
     if (!merged.forVotes && subgraphMetadata.forVotes) {
@@ -260,7 +296,11 @@ export function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
   if (onChainData.status !== undefined) {
     merged.status = onChainData.status; // On-chain state is authoritative
   }
-  merged._dataSource = onChainData ? 'on-chain' : (subgraphMetadata ? 'subgraph' : 'unknown');
+  merged._dataSource = onChainData
+    ? "on-chain"
+    : subgraphMetadata
+      ? "subgraph"
+      : "unknown";
 
   return merged;
 }
@@ -291,20 +331,32 @@ export function transformAIPDataFromJSON(jsonData) {
  * This provides rich content: title, description, full markdown body
  * Returns markdown with front-matter parsed
  */
-export async function fetchAIPMarkdown(proposalId, handledErrors, aaveVoteSite) {
+export async function fetchAIPMarkdown(
+  proposalId,
+  handledErrors,
+  aaveVoteSite,
+) {
   try {
     if (!aaveVoteSite) {
-      console.debug("🔵 [AIP] AAVE_VOTE_SITE not configured, skipping markdown fetch");
+      console.debug(
+        "🔵 [AIP] AAVE_VOTE_SITE not configured, skipping markdown fetch",
+      );
       return null;
     }
 
     const apiUrl = `${aaveVoteSite}?proposalId=${proposalId}`;
-    const response = await fetchWithRetry(apiUrl, {
-      method: "GET",
-      headers: {
-        "Content-Type": "text/plain",
+    const response = await fetchWithRetry(
+      apiUrl,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "text/plain",
+        },
       },
-    }, 3, 1000, handledErrors);
+      3,
+      1000,
+      handledErrors,
+    );
 
     if (response.ok) {
       const text = await response.text();
@@ -312,10 +364,13 @@ export async function fetchAIPMarkdown(proposalId, handledErrors, aaveVoteSite) 
 
       return {
         title: parsed.metadata.title || parsed.metadata.name || null,
-        description: parsed.metadata.description || parsed.markdown.substring(0, 200) || null,
+        description:
+          parsed.metadata.description ||
+          parsed.markdown.substring(0, 200) ||
+          null,
         markdown: parsed.markdown,
         metadata: parsed.metadata,
-        raw: parsed.raw
+        raw: parsed.raw,
       };
     }
     return null;
@@ -373,20 +428,32 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
 
     console.log("🔵 [AIP] GraphQL Query:", query);
 
-    const response = await fetchWithRetry(AAVE_V3_SUBGRAPH, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithRetry(
+      AAVE_V3_SUBGRAPH,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query }),
       },
-      body: JSON.stringify({ query }),
-    }, 3, 1000, handledErrors);
+      3,
+      1000,
+      handledErrors,
+    );
 
     if (response.ok) {
       const result = await response.json();
-      console.log("🔵 [AIP] GraphQL Response:", JSON.stringify(result, null, 2));
+      console.log(
+        "🔵 [AIP] GraphQL Response:",
+        JSON.stringify(result, null, 2),
+      );
 
       if (result.errors) {
-        console.error("❌ [AIP] GraphQL Errors:", JSON.stringify(result.errors, null, 2));
+        console.error(
+          "❌ [AIP] GraphQL Errors:",
+          JSON.stringify(result.errors, null, 2),
+        );
         return null;
       }
 
@@ -397,14 +464,21 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         return null;
       }
 
-      console.log(`✅ [AIP] Found ${proposals.length} proposal(s) with ID: ${proposalId}`);
+      console.log(
+        `✅ [AIP] Found ${proposals.length} proposal(s) with ID: ${proposalId}`,
+      );
 
       const p = proposals[0];
 
       // Debug: Log the raw proposal data
       console.log("🔵 [AIP] Raw proposal data:", JSON.stringify(p, null, 2));
       console.log("🔵 [AIP] Raw votes object:", p.votes);
-      console.log("🔵 [AIP] Votes type:", typeof p.votes, "Is array:", Array.isArray(p.votes));
+      console.log(
+        "🔵 [AIP] Votes type:",
+        typeof p.votes,
+        "Is array:",
+        Array.isArray(p.votes),
+      );
 
       // Handle votes - could be object, array, or null
       let votesData = null;
@@ -421,13 +495,28 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
           console.log("🔵 [AIP] Votes is object:", votesData);
         }
       } else {
-        console.warn("⚠️ [AIP] No votes data found in subgraph for proposal", proposalId);
-        console.warn("⚠️ [AIP] This is common for failed/cancelled proposals - votes may not be indexed");
+        console.warn(
+          "⚠️ [AIP] No votes data found in subgraph for proposal",
+          proposalId,
+        );
+        console.warn(
+          "⚠️ [AIP] This is common for failed/cancelled proposals - votes may not be indexed",
+        );
         votesAvailable = false;
       }
 
-      console.log("🔵 [AIP] forVotes raw:", votesData?.forVotes, "type:", typeof votesData?.forVotes);
-      console.log("🔵 [AIP] againstVotes raw:", votesData?.againstVotes, "type:", typeof votesData?.againstVotes);
+      console.log(
+        "🔵 [AIP] forVotes raw:",
+        votesData?.forVotes,
+        "type:",
+        typeof votesData?.forVotes,
+      );
+      console.log(
+        "🔵 [AIP] againstVotes raw:",
+        votesData?.againstVotes,
+        "type:",
+        typeof votesData?.againstVotes,
+      );
 
       // Convert votes from wei to AAVE (exact same as ava.mjs)
       const decimals = BigInt(10 ** 18);
@@ -437,30 +526,59 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       const forVotesRaw = votesData?.forVotes || p.forVotes || null;
       const againstVotesRaw = votesData?.againstVotes || p.againstVotes || null;
 
-      console.log("🔵 [AIP] Extracted - forVotesRaw:", forVotesRaw, "againstVotesRaw:", againstVotesRaw);
+      console.log(
+        "🔵 [AIP] Extracted - forVotesRaw:",
+        forVotesRaw,
+        "againstVotesRaw:",
+        againstVotesRaw,
+      );
 
       // Convert to BigInt - exact same logic as ava.mjs: BigInt(p.votes?.forVotes || 0)
       // Handle string numbers and null/undefined
       // If votes are not available, set to null (not 0) so UI can show "N/A" or similar
-      const forVotesBigInt = forVotesRaw ? BigInt(String(forVotesRaw)) : (votesAvailable ? BigInt(0) : null);
-      const againstVotesBigInt = againstVotesRaw ? BigInt(String(againstVotesRaw)) : (votesAvailable ? BigInt(0) : null);
+      const forVotesBigInt = forVotesRaw
+        ? BigInt(String(forVotesRaw))
+        : votesAvailable
+          ? BigInt(0)
+          : null;
+      const againstVotesBigInt = againstVotesRaw
+        ? BigInt(String(againstVotesRaw))
+        : votesAvailable
+          ? BigInt(0)
+          : null;
 
-      console.log("🔵 [AIP] BigInt values - For:", forVotesBigInt?.toString() || 'null', "Against:", againstVotesBigInt?.toString() || 'null');
+      console.log(
+        "🔵 [AIP] BigInt values - For:",
+        forVotesBigInt?.toString() || "null",
+        "Against:",
+        againstVotesBigInt?.toString() || "null",
+      );
       console.log("🔵 [AIP] Decimals:", decimals.toString());
 
       // Divide by decimals to get AAVE amount (BigInt division truncates, which is correct)
       // If votes are null (not available), keep as null string for UI to handle
-      const forVotes = forVotesBigInt !== null ? (forVotesBigInt / decimals).toString() : null;
-      const againstVotes = againstVotesBigInt !== null ? (againstVotesBigInt / decimals).toString() : null;
+      const forVotes =
+        forVotesBigInt !== null ? (forVotesBigInt / decimals).toString() : null;
+      const againstVotes =
+        againstVotesBigInt !== null
+          ? (againstVotesBigInt / decimals).toString()
+          : null;
       // Aave V3 doesn't support abstain - always 0
-      const abstainVotes = '0';
+      const abstainVotes = "0";
 
-      console.log("🔵 [AIP] Final converted votes - For:", forVotes || 'null (not available)', "Against:", againstVotes || 'null (not available)', "Abstain:", abstainVotes);
+      console.log(
+        "🔵 [AIP] Final converted votes - For:",
+        forVotes || "null (not available)",
+        "Against:",
+        againstVotes || "null (not available)",
+        "Abstain:",
+        abstainVotes,
+      );
 
       // Map state to status string - use default app.aave.com mapping for subgraph
       // (Subgraph uses Aave V3 enum, but we'll allow override if urlSource is provided)
-      const stateMap = getStateMapping('app.aave.com'); // Subgraph always uses Aave V3 enum
-      const status = stateMap[p.state] || 'unknown';
+      const stateMap = getStateMapping("app.aave.com"); // Subgraph always uses Aave V3 enum
+      const status = stateMap[p.state] || "unknown";
 
       // Calculate votingActivationTimestamp from transactions.active.timestamp
       // This is when the proposal moves to 'Active' state (voting starts)
@@ -471,13 +589,26 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
       // Try to get votingActivationTimestamp from transactions.active
       if (p.transactions?.active?.timestamp) {
         votingActivationTimestamp = Number(p.transactions.active.timestamp);
-        console.log("🔵 [AIP] Found votingActivationTimestamp from transactions.active:", votingActivationTimestamp);
-      } else if (p.transactions?.created?.timestamp && p.votingConfig?.cooldownBeforeVotingStart) {
+        console.log(
+          "🔵 [AIP] Found votingActivationTimestamp from transactions.active:",
+          votingActivationTimestamp,
+        );
+      } else if (
+        p.transactions?.created?.timestamp &&
+        p.votingConfig?.cooldownBeforeVotingStart
+      ) {
         // Calculate: created timestamp + cooldown period = activation timestamp
         const createdTimestamp = Number(p.transactions.created.timestamp);
         const cooldown = Number(p.votingConfig.cooldownBeforeVotingStart);
         votingActivationTimestamp = createdTimestamp + cooldown;
-        console.log("🔵 [AIP] Calculated votingActivationTimestamp: created (", createdTimestamp, ") + cooldown (", cooldown, ") =", votingActivationTimestamp);
+        console.log(
+          "🔵 [AIP] Calculated votingActivationTimestamp: created (",
+          createdTimestamp,
+          ") + cooldown (",
+          cooldown,
+          ") =",
+          votingActivationTimestamp,
+        );
       }
 
       // Calculate end date: votingActivationTimestamp + votingDuration
@@ -490,10 +621,26 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         daysLeft = timeRemaining.daysLeft;
         hoursLeft = timeRemaining.hoursLeft;
 
-        console.log("🔵 [AIP] Calculated dates - Activation:", new Date(votingActivationTimestamp * 1000).toISOString(), "End:", new Date(endTimestamp * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
+        console.log(
+          "🔵 [AIP] Calculated dates - Activation:",
+          new Date(votingActivationTimestamp * 1000).toISOString(),
+          "End:",
+          new Date(endTimestamp * 1000).toISOString(),
+          "Days left:",
+          daysLeft,
+          "Hours left:",
+          hoursLeft,
+        );
       } else {
-        console.log("⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing");
-        console.log("   votingActivationTimestamp:", votingActivationTimestamp, "votingDuration:", p.votingDuration);
+        console.log(
+          "⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing",
+        );
+        console.log(
+          "   votingActivationTimestamp:",
+          votingActivationTimestamp,
+          "votingDuration:",
+          p.votingDuration,
+        );
       }
 
       return {
@@ -516,7 +663,11 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
         hoursLeft,
       };
     } else {
-      console.error("❌ [AIP] Subgraph response not OK:", response.status, response.statusText);
+      console.error(
+        "❌ [AIP] Subgraph response not OK:",
+        response.status,
+        response.statusText,
+      );
       return null;
     }
   } catch (error) {
@@ -529,25 +680,38 @@ export async function fetchAIPFromSubgraph(proposalId, handledErrors) {
  * Fetch AIP proposal data directly from Ethereum blockchain (source of truth)
  * This is the most reliable method - no CORS, no backend, will never randomly break
  */
-export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded, ethRpcUrl, aaveGovernanceV3Address, aaveGovernanceV3Abi) {
+export async function fetchAIPFromOnChain(
+  topicId,
+  urlSource,
+  ensureEthersLoaded,
+  ethRpcUrl,
+  aaveGovernanceV3Address,
+  aaveGovernanceV3Abi,
+) {
   try {
     // Ensure ethers.js is loaded
     const ethers = await ensureEthersLoaded();
     if (!ethers) {
-      console.error("❌ [AIP] ethers.js not available - on-chain fetch disabled");
-      console.error("❌ [AIP] This is the PRIMARY method - ethers.js must be loaded!");
+      console.error(
+        "❌ [AIP] ethers.js not available - on-chain fetch disabled",
+      );
+      console.error(
+        "❌ [AIP] This is the PRIMARY method - ethers.js must be loaded!",
+      );
       return null;
     }
 
     if (!ethRpcUrl || !aaveGovernanceV3Address || !aaveGovernanceV3Abi) {
-      console.error("❌ [AIP] On-chain configuration missing - RPC URL, contract address, or ABI not provided");
+      console.error(
+        "❌ [AIP] On-chain configuration missing - RPC URL, contract address, or ABI not provided",
+      );
       return null;
     }
 
     // Parse proposal ID (should be a number)
     // Handle both string and number inputs, extract numeric part if needed
     let proposalId;
-    if (typeof topicId === 'string') {
+    if (typeof topicId === "string") {
       // Extract numeric part from string (e.g., "420" or "proposal-420")
       const numericMatch = topicId.match(/\d+/);
       if (numericMatch) {
@@ -560,7 +724,10 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
     }
 
     if (isNaN(proposalId) || proposalId <= 0) {
-      console.debug("🔵 [AIP] Invalid proposal ID for on-chain fetch:", topicId);
+      console.debug(
+        "🔵 [AIP] Invalid proposal ID for on-chain fetch:",
+        topicId,
+      );
       return null;
     }
 
@@ -569,7 +736,7 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
     const governanceContract = new ethers.Contract(
       aaveGovernanceV3Address,
       aaveGovernanceV3Abi,
-      provider
+      provider,
     );
 
     // Fetch proposal data using simplified ABI
@@ -581,7 +748,11 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
       proposal = await governanceContract.getProposal(proposalId);
 
       // Check if proposal exists (id should match proposalId)
-      if (!proposal || !proposal.id || proposal.id.toString() !== proposalId.toString()) {
+      if (
+        !proposal ||
+        !proposal.id ||
+        proposal.id.toString() !== proposalId.toString()
+      ) {
         console.debug("🔵 [AIP] Proposal does not exist on-chain:", proposalId);
         return null;
       }
@@ -596,13 +767,24 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
       }
     } catch (error) {
       // Enhanced error logging - on-chain is PRIMARY, so log errors clearly
-      console.error("❌ [AIP] Error fetching proposal from chain:", error.message);
+      console.error(
+        "❌ [AIP] Error fetching proposal from chain:",
+        error.message,
+      );
       if (error.message?.includes("ABI decoding")) {
-        console.error("❌ [AIP] ABI decoding error - contract address or ABI may be incorrect");
+        console.error(
+          "❌ [AIP] ABI decoding error - contract address or ABI may be incorrect",
+        );
         console.error("❌ [AIP] Contract:", aaveGovernanceV3Address);
       }
-      if (error.message?.includes("network") || error.message?.includes("timeout")) {
-        console.error("❌ [AIP] RPC connection error - check ETH_RPC_URL:", ethRpcUrl);
+      if (
+        error.message?.includes("network") ||
+        error.message?.includes("timeout")
+      ) {
+        console.error(
+          "❌ [AIP] RPC connection error - check ETH_RPC_URL:",
+          ethRpcUrl,
+        );
       }
       return null;
     }
@@ -610,8 +792,13 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
     // Transform on-chain data to our format (use URL source for correct state mapping)
     return transformAIPDataFromOnChain(proposal, state, proposalId, urlSource);
   } catch (error) {
-    console.error("❌ [AIP] On-chain fetch error (outer catch):", error.message);
-    console.error("❌ [AIP] This is the PRIMARY method - errors should be investigated");
+    console.error(
+      "❌ [AIP] On-chain fetch error (outer catch):",
+      error.message,
+    );
+    console.error(
+      "❌ [AIP] This is the PRIMARY method - errors should be investigated",
+    );
     return null;
   }
 }
@@ -620,15 +807,28 @@ export async function fetchAIPFromOnChain(topicId, urlSource, ensureEthersLoaded
  * Fetch AIP proposal data
  * Main entry point - tries subgraph first, then on-chain as fallback
  */
-export async function fetchAIPProposal(proposalId, cacheKey, urlSource, proposalCache, handledErrors, ensureEthersLoaded, config = {}) {
+export async function fetchAIPProposal(
+  proposalId,
+  cacheKey,
+  urlSource,
+  proposalCache,
+  handledErrors,
+  ensureEthersLoaded,
+  config = {},
+) {
   try {
-    console.log("🔵 [AIP] Fetching proposal from The Graph API - proposalId:", proposalId, "URL Source:", urlSource);
+    console.log(
+      "🔵 [AIP] Fetching proposal from The Graph API - proposalId:",
+      proposalId,
+      "URL Source:",
+      urlSource,
+    );
 
     const result = await fetchAIPFromSubgraph(proposalId, handledErrors);
     if (result) {
       console.log("✅ [AIP] Successfully fetched from The Graph API");
       result._cachedAt = Date.now();
-      result.chain = 'thegraph';
+      result.chain = "thegraph";
       result.urlSource = urlSource; // Store URL source for state mapping
       proposalCache.set(cacheKey, result);
       return result;
@@ -641,22 +841,23 @@ export async function fetchAIPProposal(proposalId, cacheKey, urlSource, proposal
       ensureEthersLoaded,
       config.ethRpcUrl,
       config.aaveGovernanceV3Address,
-      config.aaveGovernanceV3Abi
+      config.aaveGovernanceV3Abi,
     );
     if (onChainResult) {
       console.log("✅ [AIP] Successfully fetched from on-chain");
       onChainResult._cachedAt = Date.now();
-      onChainResult.chain = 'onchain';
+      onChainResult.chain = "onchain";
       onChainResult.urlSource = urlSource; // Store URL source for state mapping
       proposalCache.set(cacheKey, onChainResult);
       return onChainResult;
     }
 
-    console.warn("⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain");
+    console.warn(
+      "⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain",
+    );
     return null;
   } catch (error) {
     console.error("❌ [AIP] Error fetching proposal:", error);
     return null;
   }
 }
-
