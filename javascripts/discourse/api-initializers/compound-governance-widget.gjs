@@ -36,8 +36,6 @@ export default apiInitializer((api) => {
   // CRITICAL: Force scroll to top (0, 0) on page load
   // User wants to stay at top, no auto-scroll to proposals
   // This prevents Discourse from auto-scrolling to posts/proposals
-  let initialScrollX = 0;
-  let initialScrollY = 0;
   
   // Immediately force scroll to top
   window.scrollTo(0, 0);
