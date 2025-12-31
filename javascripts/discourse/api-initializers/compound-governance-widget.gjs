@@ -1,4 +1,40 @@
 import { apiInitializer } from "discourse/lib/api";
+import { extractSnapshotProposalInfo, extractAIPProposalInfo, extractProposalInfo } from "../lib/utils/url-parser";
+import { calculateTimeRemaining } from "../lib/utils/date-utils";
+import { escapeHtml, formatVoteAmount, formatStatusForDisplay } from "../lib/utils/formatting";
+import { fetchWithRetry } from "../lib/services/fetch-service";
+import { fetchSnapshotProposal, transformSnapshotData } from "../lib/services/snapshot-service";
+import {
+  fetchAIPProposal,
+  fetchAIPFromSubgraph,
+  fetchAIPFromOnChain,
+  transformAIPData,
+  transformAIPDataFromOnChain,
+  mergeProposalData,
+  parseFrontMatter,
+  fetchAIPMarkdown,
+  getStateMapping,
+  transformAIPDataFromJSON
+} from "../lib/services/aip-service";
+import {
+  renderProposalWidget,
+  getOrCreateWidgetsContainer,
+  updateContainerPosition,
+  formatTimeDisplay,
+  showNetworkErrorWidget,
+  hideWidgetIfNoProposal,
+  showWidget
+} from "../lib/dom/renderer";
+import { renderMultiStageWidget } from "../lib/dom/multi-stage-widget";
+import {
+  SNAPSHOT_GRAPHQL_ENDPOINT,
+  SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT,
+  SNAPSHOT_URL_REGEX,
+  AAVE_FORUM_URL_REGEX,
+  AAVE_GOVERNANCE_PORTAL,
+  AIP_URL_REGEX,
+  AAVE_V3_SUBGRAPH
+} from "../lib/config/constants";
 
 console.log("✅ Aave Governance Widget: JavaScript file loaded!");
 
@@ -62,26 +98,7 @@ export default apiInitializer((api) => {
     // Let other unhandled rejections through
   });
 
-  // Snapshot API Configuration
-  const SNAPSHOT_GRAPHQL_ENDPOINT = "https://hub.snapshot.org/graphql";
-  const SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT = "https://testnet.hub.snapshot.org/graphql";
-  const SNAPSHOT_URL_REGEX = /https?:\/\/(?:www\.)?(?:snapshot\.org|testnet\.snapshot\.box)\/#\/[^\s<>"']+/gi;
-  
-  // Aave Governance Forum Configuration
-  // Primary entry point: Aave Governance Forum thread
-  const AAVE_FORUM_URL_REGEX = /https?:\/\/(?:www\.)?governance\.aave\.com\/t\/[^\s<>"']+/gi;
-  
-  // Aave AIP Configuration
-  // Support both governance.aave.com and app.aave.com/governance/
-  const AAVE_GOVERNANCE_PORTAL = "https://app.aave.com/governance";
-  
-  // Aave Governance V3 - Using The Graph API with API key (method from ava.mjs)
-  const GRAPH_API_KEY = "9e7b4a29889ac6c358b235230a5fe940";
-  const SUBGRAPH_ID = "A7QMszgomC9cnnfpAcqZVLr2DffvkGNfimD8iUSMiurK";
-  const AAVE_V3_SUBGRAPH = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraphs/id/${SUBGRAPH_ID}`;
-  
-  // REMOVED: All fallback methods (on-chain, Data API, markdown) - using only The Graph API
-  // REMOVED: ethers.js loading, ABI definitions, on-chain configuration
+  // Configuration constants are now imported from ../lib/config/constants
   
   // Function to ensure ethers.js is loaded
   async function ensureEthersLoaded() {
@@ -90,15 +107,8 @@ export default apiInitializer((api) => {
       return window.ethers;
     }
     
-    // If already loading, return the existing promise
-    let ethersPromise = null;
-    
-    if (ethersPromise) {
-      return ethersPromise;
-    }
-    
     // Start loading ethers.js v5 (stable version)
-    ethersPromise = new Promise((resolve, reject) => {
+    let ethersPromise = new Promise((resolve, reject) => {
       try {
         const script = document.createElement('script');
         // Use jsDelivr CDN for reliable loading
@@ -137,652 +147,45 @@ export default apiInitializer((api) => {
   // const AAVE_SUBGRAPH_POLYGON = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-polygon"; // REMOVED
   // const AAVE_SUBGRAPH_AVALANCHE = "https://api.thegraph.com/subgraphs/name/aave/governance-v3-voting-avalanche"; // REMOVED
   
-  // Match governance.aave.com, app.aave.com/governance/, and vote.onaave.com URLs
-  const AIP_URL_REGEX = /https?:\/\/(?:www\.)?(?:governance\.aave\.com|app\.aave\.com\/governance|vote\.onaave\.com)\/[^\s<>"']+/gi;
-  
+  // Constants are now imported from ../lib/config/constants
   const proposalCache = new Map();
 
   // Removed unused truncate function
 
-  // Helper to escape HTML for safe insertion
-  function escapeHtml(unsafe) {
-    if (!unsafe) {return '';}
-    return String(unsafe)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  // Utility functions are now imported from ../lib/utils/*
+
+
+  // URL parsing functions are now imported from ../lib/utils/url-parser
+  // Fetch with retry is now imported from ../lib/services/fetch-service
+  // Snapshot service is now imported from ../lib/services/snapshot-service
+
+  // Wrapper function to call Snapshot service with shared state (proposalCache, handledErrors)
+  async function fetchSnapshotProposalLocal(space, proposalId, cacheKey, isTestnet = false) {
+    return await fetchSnapshotProposal(space, proposalId, cacheKey, isTestnet, proposalCache, handledErrors);
   }
 
+  // AIP service is now imported from ../lib/services/aip-service
 
-  // Extract Snapshot proposal info from URL
-  // Format: https://snapshot.org/#/{space}/{proposal-id}
-  // Example: https://snapshot.org/#/aave.eth/0x1234...
-  // Testnet format: https://testnet.snapshot.box/#/s-tn:{space}/{proposal-id}
-  // Example: https://testnet.snapshot.box/#/s-tn:discoursewidget.eth/proposal/0x1234...
-  function extractSnapshotProposalInfo(url) {
-    console.log("🔍 Extracting Snapshot proposal info from URL:", url);
+  // Wrapper function to call AIP service with shared state and config
+  async function fetchAIPProposalLocal(proposalId, cacheKey, chain = 'mainnet', urlSource = 'app.aave.com') {
+    // Get config from global variables (if available)
+    // eslint-disable-next-line no-undef
+    const config = {
+      ethRpcUrl: typeof ETH_RPC_URL !== 'undefined' ? ETH_RPC_URL : null,
+      aaveGovernanceV3Address: typeof AAVE_GOVERNANCE_V3_ADDRESS !== 'undefined' ? AAVE_GOVERNANCE_V3_ADDRESS : null,
+      aaveGovernanceV3Abi: typeof AAVE_GOVERNANCE_V3_ABI !== 'undefined' ? AAVE_GOVERNANCE_V3_ABI : null
+    };
     
-    try {
-      // Check if it's a testnet URL
-      const isTestnet = url.includes('testnet.snapshot.box');
-      
-      // Match pattern for testnet: testnet.snapshot.box/#/s-tn:{space}/proposal/{proposal-id}
-      if (isTestnet) {
-        const testnetProposalMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
-        if (testnetProposalMatch) {
-          let space = testnetProposalMatch[1];
-          const proposalId = testnetProposalMatch[2];
-          // Handle s-tn: prefix - keep it for API calls
-          console.log("✅ Extracted Snapshot testnet format:", { space, proposalId });
-          return { space, proposalId, type: 'snapshot', isTestnet: true };
-        }
-        
-        // Match pattern: testnet.snapshot.box/#/s-tn:{space}/{proposal-id} (without /proposal/)
-        const testnetDirectMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
-        if (testnetDirectMatch) {
-          let space = testnetDirectMatch[1];
-          const proposalId = testnetDirectMatch[2];
-          // Skip if proposalId is "proposal"
-          if (proposalId.toLowerCase() !== 'proposal') {
-            console.log("✅ Extracted Snapshot testnet format (direct):", { space, proposalId });
-            return { space, proposalId, type: 'snapshot', isTestnet: true };
-          }
-        }
-      }
-      
-      // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
-      // Also handles: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
-      // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
-      // Handles: snapshot.org/#/s:aavedao.eth/proposal/0x1234...
-      const proposalMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
-      if (proposalMatch) {
-        const space = proposalMatch[1];
-        const proposalId = proposalMatch[2];
-        console.log("✅ Extracted Snapshot format:", { space, proposalId });
-        return { space, proposalId, type: 'snapshot', isTestnet: false };
-      }
-      
-      // Match pattern: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
-      const directMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
-      if (directMatch) {
-        const space = directMatch[1];
-        const proposalId = directMatch[2];
-        // Skip if proposalId is "proposal" (means it's the /proposal/ path but regex didn't match correctly)
-        if (proposalId.toLowerCase() !== 'proposal') {
-          console.log("✅ Extracted Snapshot format (direct):", { space, proposalId });
-          return { space, proposalId, type: 'snapshot', isTestnet: false };
-        }
-      }
-      
-      console.warn("❌ Could not extract Snapshot proposal info from URL:", url);
-      return null;
-    } catch (e) {
-      console.warn("❌ Error extracting Snapshot proposal info:", e);
-      return null;
-    }
+    return await fetchAIPProposal(proposalId, cacheKey, urlSource, proposalCache, handledErrors, ensureEthersLoaded, config);
   }
 
-  // Extract AIP proposal ID from URL (robust approach)
-  // The URL is NOT the data source - it's only an identifier carrier
-  // Flow: URL → extract proposalId → fetch from canonical source (on-chain)
-  // Supports:
-  // - app.aave.com/governance/v3/proposal/?proposalId=420
-  // - app.aave.com/governance/?proposalId=420
-  // - vote.onaave.com/proposal/?proposalId=420
-  // - governance.aave.com/t/{slug}/{id} (extract numeric ID from path)
-  // - app.aave.com/governance/{id} (extract numeric ID from path)
-  function extractAIPProposalInfo(url) {
-    console.log("🔍 Extracting AIP proposal ID from URL:", url);
-    
-    try {
-      let proposalId = null;
-      let urlSource = 'app.aave.com'; // Default to app.aave.com (Aave V3 enum mapping)
-      
-      // Step 1: Try to extract from query parameter (most reliable)
-      // This works for: app.aave.com/governance/v3/proposal/?proposalId=420
-      try {
-        const urlObj = new URL(url);
-        const queryParam = urlObj.searchParams.get("proposalId");
-        if (queryParam) {
-          const numericId = parseInt(queryParam, 10);
-          if (!isNaN(numericId) && numericId > 0) {
-            proposalId = numericId.toString();
-            // Detect URL source for state enum mapping
-            if (url.includes('vote.onaave.com')) {
-              urlSource = 'vote.onaave.com';
-            } else if (url.includes('app.aave.com')) {
-              urlSource = 'app.aave.com';
-            }
-            console.log("✅ Extracted proposalId from query parameter:", proposalId, "Source:", urlSource);
-            return { proposalId, type: 'aip', urlSource };
-          }
-        }
-      } catch {
-        // URL parsing failed, try regex fallback
-      }
-      
-      // Step 2: Try regex patterns for various URL formats
-      // Pattern: vote.onaave.com/proposal/?proposalId={id}
-      const voteMatch = url.match(/vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i);
-      if (voteMatch) {
-        proposalId = voteMatch[1];
-        urlSource = 'vote.onaave.com';
-        console.log("✅ Extracted from vote.onaave.com:", proposalId);
-        return { proposalId, type: 'aip', urlSource };
-      }
-      
-      // Pattern: app.aave.com/governance/v3/proposal/?proposalId={id}
-      const appV3Match = url.match(/app\.aave\.com\/governance\/v3\/proposal\/\?.*proposalId=(\d+)/i);
-      if (appV3Match) {
-        proposalId = appV3Match[1];
-        urlSource = 'app.aave.com';
-        console.log("✅ Extracted from app.aave.com/governance/v3:", proposalId);
-        return { proposalId, type: 'aip', urlSource };
-      }
-      
-      // Pattern: governance.aave.com/t/{slug}/{id} - extract numeric ID from path
-      const forumMatch = url.match(/governance\.aave\.com\/t\/[^\/]+\/(\d+)/i);
-      if (forumMatch) {
-        proposalId = forumMatch[1];
-        urlSource = 'app.aave.com'; // Default to app.aave.com for forum links
-        console.log("✅ Extracted from governance.aave.com forum:", proposalId);
-        return { proposalId, type: 'aip', urlSource };
-      }
-      
-      // Pattern: app.aave.com/governance/{id} or app.aave.com/governance/proposal/{id}
-      const appMatch = url.match(/app\.aave\.com\/governance\/(?:proposal\/)?(\d+)/i);
-      if (appMatch) {
-        proposalId = appMatch[1];
-        urlSource = 'app.aave.com';
-        console.log("✅ Extracted from app.aave.com/governance:", proposalId);
-        return { proposalId, type: 'aip', urlSource };
-      }
-      
-      // Pattern: governance.aave.com/aip/{number}
-      const aipMatch = url.match(/governance\.aave\.com\/aip\/(\d+)/i);
-      if (aipMatch) {
-        proposalId = aipMatch[1];
-        urlSource = 'app.aave.com'; // Default to app.aave.com for AIP links
-        console.log("✅ Extracted from governance.aave.com/aip:", proposalId);
-        return { proposalId, type: 'aip', urlSource };
-      }
-      
-      console.warn("❌ Could not extract proposalId from URL:", url);
-      return null;
-      } catch (e) {
-      console.warn("❌ Error extracting AIP proposal info:", e);
-      return null;
-    }
-  }
+  // mergeProposalData, parseFrontMatter, and fetchAIPMarkdown are now imported from ../lib/services/aip-service
 
-  // Extract proposal info from URL (wrapper function that detects type)
-  function extractProposalInfo(url) {
-    if (!url) {return null;}
-    
-    // Try Snapshot first
-    const snapshotInfo = extractSnapshotProposalInfo(url);
-    if (snapshotInfo) {
-      // Return format compatible with existing code
-      return {
-        ...snapshotInfo,
-        urlProposalNumber: snapshotInfo.proposalId, // For compatibility
-        internalId: snapshotInfo.proposalId // For compatibility
-      };
-    }
-    
-    // Try AIP
-    const aipInfo = extractAIPProposalInfo(url);
-    if (aipInfo) {
-      // Return format compatible with existing code
-      // proposalId is now the primary key extracted from URL
-      return {
-        ...aipInfo,
-        proposalId: aipInfo.proposalId, // Primary key
-        urlProposalNumber: aipInfo.proposalId, // For compatibility
-        internalId: aipInfo.proposalId, // For compatibility
-        topicId: aipInfo.proposalId // For compatibility
-      };
-    }
-    
-    // No match
-    console.warn("❌ Could not extract proposal info from URL:", url);
-    return null;
-  }
+  // fetchAIPFromSubgraph, fetchAIPFromOnChain, getStateMapping, transformAIPDataFromOnChain are now imported from ../lib/services/aip-service
 
-  // Helper function to fetch with retry logic and exponential backoff
-  async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 1000) {
-    let lastError;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        // Add timeout to prevent hanging
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-        
-        const response = await fetch(url, {
-          ...options,
-          signal: controller.signal,
-          // Force HTTP/2 instead of HTTP/3 (QUIC) to avoid protocol errors
-          cache: 'no-cache',
-          mode: 'cors', // Explicitly set CORS mode
-          credentials: 'omit', // Don't send credentials to avoid CORS issues
-        });
-        
-        clearTimeout(timeoutId);
-        return response;
-      } catch (error) {
-        lastError = error;
-        
-        // Handle AbortError gracefully (timeout) - don't log as error, just retry
-        if (error.name === 'AbortError') {
-          if (attempt < maxRetries - 1) {
-            const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
-            console.warn(`⚠️ [FETCH] Request timeout (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
-            handledErrors.add(error);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-          // Last attempt - return null or throw
-          break;
-        }
-        
-        const isNetworkError = error.name === 'TypeError' || 
-                              error.name === 'NetworkError' ||
-                              error.message?.includes('Failed to fetch') ||
-                              error.message?.includes('QUIC') ||
-                              error.message?.includes('ERR_QUIC') ||
-                              error.message?.includes('NetworkError') ||
-                              error.message?.includes('network');
-        
-        if (isNetworkError && attempt < maxRetries - 1) {
-          const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
-          console.warn(`⚠️ [FETCH] Network error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, error.message || error.toString());
-          // Mark error as handled since we're retrying
-          handledErrors.add(error);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        // If it's the last attempt or not a network error, break to throw
-        break;
-      }
-    }
-    
-    // If we exhausted all retries, throw the last error with more context
-    if (lastError) {
-      const enhancedError = new Error(
-        `Failed to fetch after ${maxRetries} attempts: ${lastError.message || lastError.toString()}. URL: ${url}`
-      );
-      enhancedError.name = lastError.name || 'NetworkError';
-      enhancedError.cause = lastError;
-      // Mark the enhanced error as handled since it will be caught by our error handlers
-      handledErrors.add(enhancedError);
-      // Also mark the original error
-      handledErrors.add(lastError);
-      throw enhancedError;
-    }
-    
-    // This should never happen, but TypeScript/JS might require it
-    const unknownError = new Error(`Failed to fetch: Unknown error. URL: ${url}`);
-    handledErrors.add(unknownError);
-    throw unknownError;
-  }
-
-  // Fetch Snapshot proposal data
-  async function fetchSnapshotProposal(space, proposalId, cacheKey, isTestnet = false) {
-    // Use testnet endpoint if it's a testnet proposal
-    // Declare outside try block so it's accessible in catch block
-    const endpoint = isTestnet ? SNAPSHOT_TESTNET_GRAPHQL_ENDPOINT : SNAPSHOT_GRAPHQL_ENDPOINT;
-    
-    try {
-      console.log("🔵 [SNAPSHOT] Fetching proposal - space:", space, "proposalId:", proposalId, "isTestnet:", isTestnet);
-      console.log("🔵 [SNAPSHOT] Using endpoint:", endpoint);
-
-      // Query by full ID
-      const queryById = `
-        query Proposal($id: String!) {
-          proposal(id: $id) {
-            id
-              title
-            body
-            choices
-            start
-            end
-            snapshot
-            state
-            author
-            created
-            space {
-              id
-              name
-            }
-            scores
-            scores_by_strategy
-            scores_total
-            scores_updated
-            votes
-            plugins
-            network
-            type
-            strategies {
-              name
-              network
-              params
-            }
-            validation {
-              name
-              params
-            }
-            flagged
-          }
-        }
-      `;
-
-      // Snapshot proposal ID format: {space}/{proposal-id}
-      // Try multiple formats as Snapshot API can be inconsistent
-      // For testnet, space might have s-tn: prefix which should be kept
-      let cleanSpace = space;
-      if (space.startsWith('s:') && !isTestnet) {
-        cleanSpace = space.substring(2); // Remove 's:' prefix for API (mainnet only)
-      }
-      // For testnet, also try without s-tn: prefix
-      let spaceWithoutPrefix = space;
-      if (isTestnet && space.startsWith('s-tn:')) {
-        spaceWithoutPrefix = space.substring(5); // Remove 's-tn:' prefix for testnet alternative format
-      }
-      
-      // Generate all possible proposal ID formats
-      const fullProposalId1 = `${cleanSpace}/${proposalId}`; // With cleaned space
-      const fullProposalId2 = proposalId; // Just the proposal hash (works for testnet)
-      const fullProposalId3 = `${space}/${proposalId}`; // With original space (s-tn: prefix)
-      const fullProposalId4 = isTestnet ? `${spaceWithoutPrefix}/${proposalId}` : null; // Without s-tn: prefix (testnet only)
-      
-      // For testnet, try proposal hash first (based on user's example code)
-      // For mainnet, try space/proposal format first
-      const formatOrder = isTestnet 
-        ? [fullProposalId2, fullProposalId1, fullProposalId3, fullProposalId4].filter(Boolean)
-        : [fullProposalId1, fullProposalId2, fullProposalId3].filter(Boolean);
-      
-      console.log("🔵 [SNAPSHOT] Trying proposal ID formats (testnet:", isTestnet, "):");
-      formatOrder.forEach((fmt, idx) => {
-        console.log(`  Format ${idx + 1}:`, fmt);
-      });
-
-      // Try formats in order
-      let fullProposalId = formatOrder[0];
-      const requestBody = {
-        query: queryById,
-        variables: { id: fullProposalId }
-      };
-      console.log("🔵 [SNAPSHOT] Making request to:", endpoint);
-      console.log("🔵 [SNAPSHOT] Request body:", JSON.stringify(requestBody, null, 2));
-      
-      const response = await fetchWithRetry(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      console.log("🔵 [SNAPSHOT] Response status:", response.status, response.statusText);
-      console.log("🔵 [SNAPSHOT] Response ok:", response.ok);
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log("🔵 [SNAPSHOT] API Response:", JSON.stringify(result, null, 2));
-        
-        if (result.errors) {
-          console.error("❌ [SNAPSHOT] GraphQL errors:", result.errors);
-          return null;
-        }
-
-        const proposal = result.data?.proposal;
-        if (proposal) {
-          console.log("✅ [SNAPSHOT] Proposal fetched successfully with format:", formatOrder[0]);
-          const transformedProposal = transformSnapshotData(proposal, space);
-          transformedProposal._cachedAt = Date.now();
-          proposalCache.set(cacheKey, transformedProposal);
-          return transformedProposal;
-        } else {
-          // Try remaining formats in order
-          for (let i = 1; i < formatOrder.length; i++) {
-            const formatId = formatOrder[i];
-            console.warn(`⚠️ [SNAPSHOT] Format ${i} failed, trying format ${i + 1}...`);
-            
-            const retryResponse = await fetchWithRetry(endpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                query: queryById,
-                variables: { id: formatId }
-              }),
-            });
-            
-            if (retryResponse.ok) {
-              const retryResult = await retryResponse.json();
-              if (retryResult.data?.proposal) {
-                console.log(`✅ [SNAPSHOT] Proposal fetched with format ${i + 1}:`, formatId);
-                const transformedProposal = transformSnapshotData(retryResult.data.proposal, space);
-                transformedProposal._cachedAt = Date.now();
-                proposalCache.set(cacheKey, transformedProposal);
-                return transformedProposal;
-              }
-            }
-          }
-          
-          console.error("❌ [SNAPSHOT] All proposal ID formats failed. Last response:", result.data);
-        }
-      } else {
-        const errorText = await response.text();
-        console.error("❌ [SNAPSHOT] HTTP error:", response.status, errorText);
-      }
-    } catch (error) {
-      // Enhanced error logging with more context
-      const errorMessage = error.message || error.toString();
-      const errorName = error.name || 'UnknownError';
-      
-      console.error("❌ [SNAPSHOT] Error fetching proposal:", {
-        name: errorName,
-        message: errorMessage,
-        url: endpoint,
-        proposalId,
-        isTestnet,
-        fullError: error
-      });
-      
-      // Provide specific guidance based on error type
-      if (errorName === 'AbortError' || errorMessage.includes('aborted')) {
-        console.error("❌ [SNAPSHOT] Request timed out after 10 seconds. The Snapshot API may be slow or unavailable.");
-      } else if (errorName === 'TypeError' || errorMessage.includes('Failed to fetch')) {
-        console.error("❌ [SNAPSHOT] Network error - possible causes:");
-        console.error("   - CORS policy blocking the request");
-        console.error("   - Network connectivity issues");
-        console.error("   - Snapshot API is temporarily unavailable");
-        console.error("   - Browser security restrictions");
-        if (error.cause) {
-          console.error("   - Original error:", error.cause);
-        }
-      } else if (errorMessage.includes('QUIC') || errorMessage.includes('ERR_QUIC')) {
-        console.error("❌ [SNAPSHOT] Network protocol error (QUIC) - this may be a temporary issue. Please try again later.");
-      } else {
-        console.error("❌ [SNAPSHOT] Unexpected error occurred. Please check the console for details.");
-      }
-    }
-    return null;
-  }
-
-  // Fetch Aave AIP proposal data using The Graph API (method from ava.mjs)
+  // Old function definitions removed - using service imports instead
   // eslint-disable-next-line no-unused-vars
-  async function fetchAIPProposal(proposalId, cacheKey, chain = 'mainnet', urlSource = 'app.aave.com') {
-    try {
-      console.log("🔵 [AIP] Fetching proposal from The Graph API - proposalId:", proposalId, "URL Source:", urlSource);
-      
-      const result = await fetchAIPFromSubgraph(proposalId);
-      if (result) {
-        console.log("✅ [AIP] Successfully fetched from The Graph API");
-        result._cachedAt = Date.now();
-        result.chain = 'thegraph';
-        result.urlSource = urlSource; // Store URL source for state mapping
-        proposalCache.set(cacheKey, result);
-        return result;
-      }
-      
-      // Try on-chain fetch as fallback
-      const onChainResult = await fetchAIPFromOnChain(proposalId, urlSource);
-      if (onChainResult) {
-        console.log("✅ [AIP] Successfully fetched from on-chain");
-        onChainResult._cachedAt = Date.now();
-        onChainResult.chain = 'onchain';
-        onChainResult.urlSource = urlSource; // Store URL source for state mapping
-        proposalCache.set(cacheKey, onChainResult);
-        return onChainResult;
-      }
-      
-      console.warn("⚠️ [AIP] Failed to fetch proposal from The Graph API and on-chain");
-      return null;
-    } catch (error) {
-      console.error("❌ [AIP] Error fetching proposal:", error);
-      return null;
-    }
-  }
-
-  // Merge on-chain data with markdown and subgraph metadata
-  // Priority: markdown > subgraph > on-chain defaults
-  // On-chain data is the source of truth for votes/state
-  // Subgraph can provide voting data if on-chain is unavailable
-  // eslint-disable-next-line no-unused-vars
-  function mergeProposalData(onChainData, markdownData, subgraphMetadata) {
-    // Start with on-chain data (source of truth for votes/state)
-    const merged = { ...onChainData };
-
-    // Enrich with markdown (richest source for content)
-    if (markdownData) {
-      merged.title = markdownData.title || merged.title;
-      merged.description = markdownData.description || merged.description;
-      merged.markdown = markdownData.markdown;
-      merged.markdownMetadata = markdownData.metadata;
-      merged._contentSource = 'markdown';
-    } else if (subgraphMetadata) {
-      // Fallback to subgraph if no markdown
-      merged.title = subgraphMetadata.title || merged.title;
-      merged.description = subgraphMetadata.description || merged.description;
-      merged._contentSource = 'subgraph';
-      
-      // If on-chain votes are missing, use subgraph votes as fallback
-      if (!merged.forVotes && subgraphMetadata.forVotes) {
-        merged.forVotes = subgraphMetadata.forVotes;
-      }
-      if (!merged.againstVotes && subgraphMetadata.againstVotes) {
-        merged.againstVotes = subgraphMetadata.againstVotes;
-      }
-      
-      // Enrich with additional subgraph data
-      if (subgraphMetadata.creator && !merged.creator) {
-        merged.creator = subgraphMetadata.creator;
-      }
-      if (subgraphMetadata.votingDuration && !merged.votingDuration) {
-        merged.votingDuration = subgraphMetadata.votingDuration;
-      }
-      // votingActivationTimestamp comes from on-chain startTime, not subgraph
-      if (subgraphMetadata.ipfsHash && !merged.ipfsHash) {
-        merged.ipfsHash = subgraphMetadata.ipfsHash;
-      }
-    }
-
-    // Keep on-chain data for votes/state (source of truth) if available
-    if (onChainData.forVotes !== undefined) {
-      merged.forVotes = onChainData.forVotes;
-    }
-    if (onChainData.againstVotes !== undefined) {
-      merged.againstVotes = onChainData.againstVotes;
-    }
-    if (onChainData.status !== undefined) {
-      merged.status = onChainData.status; // On-chain state is authoritative
-    }
-    merged._dataSource = onChainData ? 'on-chain' : (subgraphMetadata ? 'subgraph' : 'unknown');
-
-    return merged;
-  }
-
-  // Parse front-matter from markdown (browser-compatible, no gray-matter needed)
-  // Handles YAML front-matter in markdown files
-  function parseFrontMatter(text) {
-    if (!text || !text.startsWith('---')) {
-      return { metadata: {}, markdown: text, raw: text };
-    }
-
-    // Find the end of front-matter (second ---)
-    const endIndex = text.indexOf('\n---', 4);
-    if (endIndex === -1) {
-      return { metadata: {}, markdown: text, raw: text };
-    }
-
-    // Extract front-matter and content
-    const frontMatterText = text.substring(4, endIndex).trim();
-    const markdown = text.substring(endIndex + 5).trim();
-
-    // Simple YAML parser for basic key-value pairs
-    const metadata = {};
-    const lines = frontMatterText.split('\n');
-    for (const line of lines) {
-      const colonIndex = line.indexOf(':');
-      if (colonIndex > 0) {
-        const key = line.substring(0, colonIndex).trim();
-        let value = line.substring(colonIndex + 1).trim();
-        // Remove quotes if present
-        if ((value.startsWith('"') && value.endsWith('"')) || 
-            (value.startsWith("'") && value.endsWith("'"))) {
-          value = value.slice(1, -1);
-        }
-        metadata[key] = value;
-      }
-    }
-
-    return { metadata, markdown, raw: text };
-  }
-
-  // Fetch proposal markdown from vote.onaave.com
-  // This provides rich content: title, description, full markdown body
-  // Returns markdown with front-matter parsed
-  // eslint-disable-next-line no-unused-vars
-  async function fetchAIPMarkdown(proposalId) {
-    try {
-      // eslint-disable-next-line no-undef
-      const apiUrl = `${AAVE_VOTE_SITE}?proposalId=${proposalId}`;
-      const response = await fetchWithRetry(apiUrl, {
-        method: "GET",
-        headers: {
-          "Content-Type": "text/plain",
-        },
-      });
-
-      if (response.ok) {
-        const text = await response.text();
-        const parsed = parseFrontMatter(text);
-        
-        return {
-          title: parsed.metadata.title || parsed.metadata.name || null,
-          description: parsed.metadata.description || parsed.markdown.substring(0, 200) || null,
-          markdown: parsed.markdown,
-          metadata: parsed.metadata,
-          raw: parsed.raw
-        };
-      }
-      return null;
-    } catch (error) {
-      console.debug("🔵 [AIP] Markdown fetch error:", error.message);
-      return null;
-    }
-  }
-
-  // Fetch proposal metadata from subgraph (for enrichment only)
-  // This provides titles, descriptions, voting data, and other metadata
-  // NOTE: This is an enhancement, not the primary source
-  // If this fails due to CORS, the Data API or on-chain data will be used as fallback
-  // Fetch Aave proposal from The Graph API (method from ava.mjs)
-  async function fetchAIPFromSubgraph(proposalId) {
+  async function fetchAIPFromSubgraphOld(proposalId) {
     try {
       // Convert proposalId to string and ensure it's a number
       const proposalIdStr = String(proposalId).trim();
@@ -833,7 +236,7 @@ export default apiInitializer((api) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ query }),
-      });
+      }, 3, 1000, handledErrors);
 
       if (response.ok) {
         const result = await response.json();
@@ -940,33 +343,11 @@ export default apiInitializer((api) => {
           const votingDuration = Number(p.votingDuration);
           const endTimestamp = votingActivationTimestamp + votingDuration;
           
-          // Convert to milliseconds for Date calculations
-          const endTimestampMs = endTimestamp * 1000;
-          const now = Date.now();
-          const diffTime = endTimestampMs - now;
-          const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+          const timeRemaining = calculateTimeRemaining(endTimestamp);
+          daysLeft = timeRemaining.daysLeft;
+          hoursLeft = timeRemaining.hoursLeft;
           
-          // Use Math.floor for positive values (remaining full days)
-          // Use Math.ceil for negative values (past dates)
-          let diffDays;
-          if (diffTimeInDays >= 0) {
-            diffDays = Math.floor(diffTimeInDays);
-          } else {
-            diffDays = Math.ceil(diffTimeInDays);
-          }
-          
-          // Validate that diffDays is a valid number
-          if (!isNaN(diffDays) && isFinite(diffDays)) {
-            daysLeft = diffDays;
-            
-            // If it ends today (daysLeft === 0), calculate hours left
-            if (diffDays === 0 && diffTime > 0) {
-              const diffTimeInHours = diffTime / (1000 * 60 * 60);
-              hoursLeft = Math.floor(diffTimeInHours);
-            }
-            
-            console.log("🔵 [AIP] Calculated dates - Activation:", new Date(votingActivationTimestamp * 1000).toISOString(), "End:", new Date(endTimestampMs).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
-          }
+          console.log("🔵 [AIP] Calculated dates - Activation:", new Date(votingActivationTimestamp * 1000).toISOString(), "End:", new Date(endTimestamp * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
         } else {
           console.log("⚠️ [AIP] Cannot calculate end date: votingActivationTimestamp or votingDuration missing");
           console.log("   votingActivationTimestamp:", votingActivationTimestamp, "votingDuration:", p.votingDuration);
@@ -1144,32 +525,11 @@ export default apiInitializer((api) => {
     
     if (endTime && endTime > 0) {
       // endTime is in seconds (Unix timestamp)
-      const endTimestampMs = endTime * 1000;
-      const now = Date.now();
-      const diffTime = endTimestampMs - now;
-      const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+      const timeRemaining = calculateTimeRemaining(endTime);
+      daysLeft = timeRemaining.daysLeft;
+      hoursLeft = timeRemaining.hoursLeft;
       
-      // Use Math.floor for positive values (remaining full days)
-      // Use Math.ceil for negative values (past dates)
-      let diffDays;
-      if (diffTimeInDays >= 0) {
-        diffDays = Math.floor(diffTimeInDays);
-      } else {
-        diffDays = Math.ceil(diffTimeInDays);
-      }
-      
-      // Validate that diffDays is a valid number
-      if (!isNaN(diffDays) && isFinite(diffDays)) {
-        daysLeft = diffDays;
-        
-        // If it ends today (daysLeft === 0), calculate hours left
-        if (diffDays === 0 && diffTime > 0) {
-          const diffTimeInHours = diffTime / (1000 * 60 * 60);
-          hoursLeft = Math.floor(diffTimeInHours);
-        }
-        
-        console.log("🔵 [AIP] Calculated dates from on-chain - Start:", startTime ? new Date(startTime * 1000).toISOString() : 'N/A', "End:", new Date(endTimestampMs).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
-      }
+      console.log("🔵 [AIP] Calculated dates from on-chain - Start:", startTime ? new Date(startTime * 1000).toISOString() : 'N/A', "End:", new Date(endTime * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
     }
     
     return {
@@ -1236,7 +596,7 @@ export default apiInitializer((api) => {
           query,
           variables: { id: topicId }
         }),
-      });
+      }, 3, 1000, handledErrors);
 
       if (response.ok) {
         const result = await response.json();
@@ -1270,7 +630,7 @@ export default apiInitializer((api) => {
         "Content-Type": "application/json",
       },
       // Note: CORS issues expected with this endpoint
-    });
+    }, 3, 1000, handledErrors);
 
     if (response.ok) {
       const data = await response.json();
@@ -1707,179 +1067,7 @@ export default apiInitializer((api) => {
   }
 
   // Transform Snapshot proposal data to widget format
-  function transformSnapshotData(proposal, space) {
-    console.log("🔵 [TRANSFORM] Raw proposal data from API:", JSON.stringify(proposal, null, 2));
-    
-    // Determine proposal stage (Temp Check or ARFC) based on title/tags
-    let stage = 'snapshot';
-    const title = proposal.title || '';
-    const body = proposal.body || '';
-    const titleLower = title.toLowerCase();
-    const bodyLower = body.toLowerCase();
-    
-    // Check for Temp Check (various formats)
-    if (titleLower.includes('temp check') || 
-        titleLower.includes('tempcheck') ||
-        bodyLower.includes('temp check') || 
-        bodyLower.includes('tempcheck') ||
-        titleLower.includes('[temp check]') ||
-        titleLower.startsWith('temp check')) {
-      stage = 'temp-check';
-      console.log("🔵 [TRANSFORM] Detected stage: Temp Check");
-    } 
-    // Check for ARFC (various formats)
-    else if (titleLower.includes('arfc') || 
-             bodyLower.includes('arfc') ||
-             titleLower.includes('[arfc]')) {
-      stage = 'arfc';
-      console.log("🔵 [TRANSFORM] Detected stage: ARFC");
-    } else {
-      console.log("🔵 [TRANSFORM] Stage not detected, defaulting to 'snapshot'");
-    }
-    
-    // Calculate voting results
-    const choices = proposal.choices || [];
-    const scores = proposal.scores || [];
-    const scoresTotal = proposal.scores_total || 0;
-    
-    console.log("🔵 [TRANSFORM] Choices:", choices);
-    console.log("🔵 [TRANSFORM] Scores:", scores);
-    console.log("🔵 [TRANSFORM] Scores Total:", scoresTotal);
-    
-    // Snapshot can have various choice formats:
-    // - "For" / "Against"
-    // - "Yes" / "No"
-    // - "YAE" / "NAY" (Aave format)
-    // - "For" / "Against" / "Abstain"
-    let forVotes = 0;
-    let againstVotes = 0;
-    let abstainVotes = 0;
-    
-    if (choices.length > 0 && scores.length > 0) {
-      // Try to find "For" or "Yes" or "YAE" (various formats)
-      const forIndex = choices.findIndex(c => {
-        const lower = c.toLowerCase();
-        return lower.includes('for') || lower.includes('yes') || lower === 'yae' || lower.includes('yae');
-      });
-      
-      // Try to find "Against" or "No" or "NAY"
-      const againstIndex = choices.findIndex(c => {
-        const lower = c.toLowerCase();
-        return lower.includes('against') || lower.includes('no') || lower === 'nay' || lower.includes('nay');
-      });
-      
-      // Try to find "Abstain"
-      const abstainIndex = choices.findIndex(c => {
-        const lower = c.toLowerCase();
-        return lower.includes('abstain');
-      });
-      
-      console.log("🔵 [TRANSFORM] Found indices - For:", forIndex, "Against:", againstIndex, "Abstain:", abstainIndex);
-      
-      if (forIndex >= 0 && forIndex < scores.length) {
-        forVotes = Number(scores[forIndex]) || 0;
-      }
-      if (againstIndex >= 0 && againstIndex < scores.length) {
-        againstVotes = Number(scores[againstIndex]) || 0;
-      }
-      if (abstainIndex >= 0 && abstainIndex < scores.length) {
-        abstainVotes = Number(scores[abstainIndex]) || 0;
-      }
-      
-      // If we didn't find specific choices, use first two as For/Against
-      if (forIndex < 0 && againstIndex < 0 && scores.length >= 2) {
-        console.log("🔵 [TRANSFORM] No matching choices found, using first two scores as For/Against");
-        forVotes = Number(scores[0]) || 0;
-        againstVotes = Number(scores[1]) || 0;
-      }
-    } else if (scores.length >= 2) {
-      // Fallback: assume first is For, second is Against
-      console.log("🔵 [TRANSFORM] No choices array, using first two scores as For/Against");
-      forVotes = Number(scores[0]) || 0;
-      againstVotes = Number(scores[1]) || 0;
-    }
-    
-    // Calculate total votes (sum of all scores if scoresTotal is 0 or missing)
-    const calculatedTotal = scores.reduce((sum, score) => sum + (Number(score) || 0), 0);
-    const totalVotes = scoresTotal > 0 ? scoresTotal : calculatedTotal;
-    
-    console.log("🔵 [TRANSFORM] Vote counts - For:", forVotes, "Against:", againstVotes, "Abstain:", abstainVotes, "Total:", totalVotes);
-    
-    const forPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
-    const againstPercent = totalVotes > 0 ? (againstVotes / totalVotes) * 100 : 0;
-    const abstainPercent = totalVotes > 0 ? (abstainVotes / totalVotes) * 100 : 0;
-    
-    console.log("🔵 [TRANSFORM] Percentages - For:", forPercent, "Against:", againstPercent, "Abstain:", abstainPercent);
-    
-    // Calculate time remaining
-    let daysLeft = null;
-    let hoursLeft = null;
-    const now = Date.now() / 1000; // Snapshot uses Unix timestamp in seconds
-    const endTime = proposal.end || 0;
-    
-    if (endTime > 0) {
-      const diffTime = endTime - now;
-      const diffDays = diffTime / (24 * 60 * 60);
-      
-      if (diffDays >= 0) {
-        daysLeft = Math.floor(diffDays);
-        if (daysLeft === 0 && diffTime > 0) {
-          hoursLeft = Math.floor(diffTime / (60 * 60));
-        }
-      } else {
-        daysLeft = Math.ceil(diffDays); // Negative for past dates
-      }
-    }
-    
-    // Determine status
-    let status = 'unknown';
-    if (proposal.state === 'active' || proposal.state === 'open') {
-      status = 'active';
-    } else if (proposal.state === 'closed') {
-      // For closed proposals, determine if it passed based on votes
-      // A proposal passes if For votes > Against votes
-      if (forVotes > againstVotes && totalVotes > 0) {
-        status = 'passed';
-      } else {
-        status = 'closed';
-      }
-    } else if (proposal.state === 'pending') {
-      status = 'pending';
-    } else {
-      // Fallback: use state as-is if it's a valid status
-      status = proposal.state || 'unknown';
-    }
-    
-    console.log("🔵 [TRANSFORM] Proposal state:", proposal.state, "→ Final status:", status);
-    
-    // Calculate support percentage (For votes / Total votes)
-    const supportPercent = totalVotes > 0 ? (forVotes / totalVotes) * 100 : 0;
-    
-    console.log("🔵 [TRANSFORM] Final support percent:", supportPercent);
-    
-    return {
-      id: proposal.id,
-      title: proposal.title || 'Untitled Proposal',
-      description: proposal.body || '', // Used for display
-      body: proposal.body || '', // Preserve raw body for cascading search
-      status,
-      stage,
-      space,
-      daysLeft,
-      hoursLeft,
-      endTime,
-      supportPercent, // Add support percentage for easy access
-      voteStats: {
-        for: { count: forVotes, voters: 0, percent: forPercent },
-        against: { count: againstVotes, voters: 0, percent: againstPercent },
-        abstain: { count: abstainVotes, voters: 0, percent: abstainPercent },
-        total: totalVotes
-      },
-      url: `https://snapshot.org/#/${space}/${proposal.id.split('/')[1]}`,
-      type: 'snapshot',
-      _rawProposal: proposal // Preserve raw API response for cascading search
-    };
-  }
+  // transformSnapshotData is now imported from ../lib/services/snapshot-service
 
   // Transform AIP proposal data to widget format
   // eslint-disable-next-line no-unused-vars
@@ -1908,54 +1096,16 @@ export default apiInitializer((api) => {
       // Calculate end timestamp: activation + duration
       const endTimestamp = activationTimestamp + votingDuration;
       
-      // Convert to milliseconds for Date calculations
-      const endTimestampMs = endTimestamp * 1000;
-      const now = Date.now();
-      const diffTime = endTimestampMs - now;
-      const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
+      const timeRemaining = calculateTimeRemaining(endTimestamp);
+      daysLeft = timeRemaining.daysLeft;
+      hoursLeft = timeRemaining.hoursLeft;
       
-      // Use Math.floor for positive values (remaining full days)
-      // Use Math.ceil for negative values (past dates)
-      let diffDays;
-      if (diffTimeInDays >= 0) {
-        diffDays = Math.floor(diffTimeInDays);
-      } else {
-        diffDays = Math.ceil(diffTimeInDays);
-      }
-      
-      // Validate that diffDays is a valid number
-      if (!isNaN(diffDays) && isFinite(diffDays)) {
-        daysLeft = diffDays;
-        
-        // If it ends today (daysLeft === 0), calculate hours left
-        if (diffDays === 0 && diffTime > 0) {
-          const diffTimeInHours = diffTime / (1000 * 60 * 60);
-          hoursLeft = Math.floor(diffTimeInHours);
-        }
-        
-        console.log("🔵 [AIP] Calculated dates in transformAIPData - Activation:", new Date(activationTimestamp * 1000).toISOString(), "End:", new Date(endTimestampMs).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
-      }
+      console.log("🔵 [AIP] Calculated dates in transformAIPData - Activation:", new Date(activationTimestamp * 1000).toISOString(), "End:", new Date(endTimestamp * 1000).toISOString(), "Days left:", daysLeft, "Hours left:", hoursLeft);
     } else if (daysLeft === null && proposal.endTime) {
       // Fallback: use endTime directly if available
-      const endTimestampMs = Number(proposal.endTime) * 1000;
-      const now = Date.now();
-      const diffTime = endTimestampMs - now;
-      const diffTimeInDays = diffTime / (1000 * 60 * 60 * 24);
-      
-      let diffDays;
-      if (diffTimeInDays >= 0) {
-        diffDays = Math.floor(diffTimeInDays);
-      } else {
-        diffDays = Math.ceil(diffTimeInDays);
-      }
-      
-      if (!isNaN(diffDays) && isFinite(diffDays)) {
-        daysLeft = diffDays;
-        if (diffDays === 0 && diffTime > 0) {
-          const diffTimeInHours = diffTime / (1000 * 60 * 60);
-          hoursLeft = Math.floor(diffTimeInHours);
-        }
-      }
+      const timeRemaining = calculateTimeRemaining(Number(proposal.endTime));
+      daysLeft = timeRemaining.daysLeft;
+      hoursLeft = timeRemaining.hoursLeft;
     }
     
     // Determine status
@@ -1995,129 +1145,21 @@ export default apiInitializer((api) => {
     };
   }
 
-  function formatVoteAmount(amount) {
-    if (!amount || amount === 0) {return "0";}
-    
-    // Convert from wei (18 decimals) to tokens
-    // Always assume amounts are in wei if they're very large
-    let tokens = amount;
-    if (amount >= 1000000000000000) {
-      // Convert from wei to tokens (divide by 10^18)
-      tokens = amount / 1000000000000000000;
-    }
-    
-    // Format numbers: 1.14M, 0.03, 51.74K, etc.
-    if (tokens >= 1000000) {
-      const millions = tokens / 1000000;
-      // Remove trailing zeros: 1.14M not 1.14M
-      return parseFloat(millions.toFixed(2)) + "M";
-    }
-    if (tokens >= 1000) {
-      const thousands = tokens / 1000;
-      // Remove trailing zeros: 51.74K not 51.74K
-      return parseFloat(thousands.toFixed(2)) + "K";
-    }
-    // For numbers less than 1000, show 2 decimal places, remove trailing zeros
-    const formatted = parseFloat(tokens.toFixed(2));
-    return formatted.toString();
+  // formatVoteAmount is now imported from ../lib/utils/formatting
+  // renderProposalWidget is now imported from ../lib/dom/renderer
+
+  // renderProposalWidget is now imported from ../lib/dom/renderer - use directly
+
+  // getOrCreateWidgetsContainer, updateContainerPosition are now imported from ../lib/dom/renderer
+  // renderMultiStageWidget is now imported from ../lib/dom/multi-stage-widget
+
+  // Wrapper to use imported function
+  function getOrCreateWidgetsContainerLocal() {
+    return getOrCreateWidgetsContainer();
   }
 
-  function renderProposalWidget(container, proposalData, originalUrl) {
-    console.log("🎨 [RENDER] Rendering widget with data:", proposalData);
-    
-    if (!container) {
-      console.error("❌ [RENDER] Container is null!");
-      return;
-    }
-
-    const activeStatuses = ["active", "pending", "open"];
-    const executedStatuses = ["executed", "crosschainexecuted", "completed"];
-    const isActive = activeStatuses.includes(proposalData.status?.toLowerCase());
-    const isExecuted = executedStatuses.includes(proposalData.status?.toLowerCase());
-
-    const voteStats = proposalData.voteStats || {};
-    const votesFor = voteStats.for?.count || 0;
-    const votesAgainst = voteStats.against?.count || 0;
-    const votesAbstain = voteStats.abstain?.count || 0;
-    const totalVotes = voteStats.total || 0;
-
-    const percentFor = voteStats.for?.percent ? Number(voteStats.for.percent).toFixed(2) : (totalVotes > 0 ? ((votesFor / totalVotes) * 100).toFixed(2) : "0.00");
-    const percentAgainst = voteStats.against?.percent ? Number(voteStats.against.percent).toFixed(2) : (totalVotes > 0 ? ((votesAgainst / totalVotes) * 100).toFixed(2) : "0.00");
-    const percentAbstain = voteStats.abstain?.percent ? Number(voteStats.abstain.percent).toFixed(2) : (totalVotes > 0 ? ((votesAbstain / totalVotes) * 100).toFixed(2) : "0.00");
-
-    // Use title from API, not ID
-    const displayTitle = proposalData.title || "Snapshot Proposal";
-    console.log("🎨 [RENDER] Display title:", displayTitle);
-
-    container.innerHTML = `
-      <div class="arbitrium-proposal-widget">
-        <div class="proposal-content">
-          <h4 class="proposal-title">
-            <a href="${originalUrl}" target="_blank" rel="noopener">
-              ${displayTitle}
-            </a>
-          </h4>
-          ${proposalData.description ? (() => {
-            const descLines = proposalData.description.split('\n');
-            const preview = descLines.slice(0, 5).join('\n');
-            const hasMore = descLines.length > 5;
-            return `<div class="proposal-description">${preview.replace(/`/g, '\\`').replace(/\${/g, '\\${')}${hasMore ? '...' : ''}</div>`;
-          })() : ""}
-          ${proposalData.proposer?.name ? `<div class="proposal-author"><span class="author-label">Author:</span><span class="author-name">${(proposalData.proposer.name || '').replace(/`/g, '\\`')}</span></div>` : ""}
-        </div>
-        <div class="proposal-sidebar">
-          <div class="status-badge ${isActive ? 'active' : isExecuted ? 'executed' : 'inactive'}">
-            ${isActive ? 'ACTIVE' : isExecuted ? 'EXECUTED' : 'INACTIVE'}
-          </div>
-          ${totalVotes > 0 ? `
-            <div class="voting-section">
-              <div class="voting-bar">
-                <div class="vote-option vote-for">
-                  <div class="vote-label-row">
-                    <span class="vote-label">For</span>
-                    <span class="vote-amount">${formatVoteAmount(votesFor)}</span>
-                  </div>
-                  <div class="vote-bar">
-                    <div class="vote-fill vote-for" style="width: ${percentFor}%">${percentFor}%</div>
-                  </div>
-                </div>
-                <div class="vote-option vote-against">
-                  <div class="vote-label-row">
-                    <span class="vote-label">Against</span>
-                    <span class="vote-amount">${formatVoteAmount(votesAgainst)}</span>
-                  </div>
-                  <div class="vote-bar">
-                    <div class="vote-fill vote-against" style="width: ${percentAgainst}%">${percentAgainst}%</div>
-                  </div>
-                </div>
-                <div class="vote-option vote-abstain">
-                  <div class="vote-label-row">
-                    <span class="vote-label">Abstain</span>
-                    <span class="vote-amount">${formatVoteAmount(votesAbstain)}</span>
-                  </div>
-                  <div class="vote-bar">
-                    <div class="vote-fill vote-abstain" style="width: ${percentAbstain}%">${percentAbstain}%</div>
-                  </div>
-                </div>
-              </div>
-              <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
-                Vote on Snapshot
-              </a>
-            </div>
-          ` : `
-            <a href="${originalUrl}" target="_blank" rel="noopener" class="vote-button">
-              View on Snapshot
-            </a>
-          `}
-        </div>
-      </div>
-    `;
-  }
-
-  // Render status widget on the right side (outside post box) - like the image
-  // Render multi-stage widget showing Temp Check, ARFC, and AIP all together
-  // Get or create the widgets container for column layout
-  function getOrCreateWidgetsContainer() {
+  // Old function definitions removed - using imported versions
+  function getOrCreateWidgetsContainerOld() {
     // Don't create container on mobile - widgets should be inline
     const isMobile = window.innerWidth <= 1024;
     if (isMobile) {
@@ -2170,8 +1212,10 @@ export default apiInitializer((api) => {
     return container;
   }
   
-  // Update container position - keep fixed on right side like tally widget
-  function updateContainerPosition(container) {
+  // updateContainerPosition is now imported from ../lib/dom/renderer
+
+  // Old function definition removed - using imported version
+  function updateContainerPositionOld(container) {
     // Position like tally widget - fixed on right side, same position
     container.style.right = '50px';
     container.style.left = 'auto';
@@ -2196,7 +1240,16 @@ export default apiInitializer((api) => {
     });
   }
 
-  function renderMultiStageWidget(stages, widgetId, proposalOrder = null) {
+  // formatStatusForDisplay is now imported from ../lib/utils/formatting
+  // renderMultiStageWidget is now imported from ../lib/dom/multi-stage-widget
+
+  // Wrapper to use imported function with shared state
+  function renderMultiStageWidgetLocal(stages, widgetId, proposalOrder = null) {
+    return renderMultiStageWidget(stages, widgetId, proposalOrder, renderingUrls, fetchingUrls);
+  }
+
+  // Old function definition removed - using imported version
+  function renderMultiStageWidgetOld(stages, widgetId, proposalOrder = null) {
     const statusWidgetId = `aave-governance-widget-${widgetId}`;
     
     // Determine widget type - if all stages are present, use 'combined', otherwise use specific type
@@ -2390,13 +1443,29 @@ export default apiInitializer((api) => {
       
       console.log(`🔵 [RENDER] ${stageName} - For: ${forVotes}, Against: ${againstVotes}, Total: ${totalVotes}, Support: ${supportPercent}%`);
       
-      const isActive = stageData.status === 'active' || stageData.status === 'open';
-      const isPassed = stageData.status === 'passed' || 
-                       stageData.status === 'closed' || 
-                       (stageData.status === 'executed' && supportPercent > 50) ||
-                       (stageData.status !== 'active' && stageData.status !== 'open' && supportPercent > 50);
-      const status = isPassed ? 'Passed' : (isActive ? 'Active' : 'Closed');
-      const statusClass = isPassed ? 'executed' : (isActive ? 'active' : 'inactive');
+      // Use actual status from API and format it properly (shows Defeated, Rejected, Failed, etc.)
+      const rawStatus = stageData.status || 'unknown';
+      const status = formatStatusForDisplay(rawStatus);
+      
+      // Determine CSS class based on status for styling
+      const statusLower = rawStatus.toLowerCase();
+      const isActive = statusLower === 'active' || statusLower === 'open' || statusLower === 'voting';
+      const isExecuted = statusLower === 'executed' || statusLower === 'crosschainexecuted' || statusLower === 'completed' || statusLower === 'passed';
+      const isDefeated = statusLower === 'defeated' || statusLower === 'defeat' || statusLower === 'rejected' || statusLower === 'failed';
+      const isQuorumNotReached = statusLower.includes('quorum not reached') || statusLower.includes('quorumnotreached');
+      const isCancelled = statusLower === 'cancelled' || statusLower === 'canceled';
+      const isExpired = statusLower === 'expired';
+      const isQueued = statusLower === 'queued' || statusLower === 'queuing';
+      const isPending = statusLower === 'pending' || statusLower.includes('pending execution');
+      
+      const statusClass = isActive ? 'active' :
+                         isExecuted ? 'executed' :
+                         isDefeated || isQuorumNotReached ? 'defeated' :
+                         isCancelled ? 'cancelled' :
+                         isExpired ? 'expired' :
+                         isQueued ? 'queued' :
+                         isPending ? 'pending' :
+                         'inactive';
       const timeDisplay = formatTimeDisplay(stageData.daysLeft, stageData.hoursLeft);
       
       // Calculate percentages for progress bar
@@ -2522,8 +1591,9 @@ export default apiInitializer((api) => {
       
       console.log('🔵 [RENDER] Rendering AIP stage with data:', stageData);
       
-      // Use exact status from API (no mapping)
-      const status = stageData.status || 'unknown';
+      // Use exact status from API and format it properly
+      const rawStatus = stageData.status || 'unknown';
+      const status = formatStatusForDisplay(rawStatus);
       // Map status to CSS class for styling
       // "passed" means proposal passed voting but hasn't been executed yet (different from "executed")
       const statusClass = stageData.status === 'active' ? 'active' : 
@@ -2645,8 +1715,8 @@ export default apiInitializer((api) => {
         endDateText = 'Ended';
       }
       
-      // Use exact status from API - show as-is (capitalize first letter only)
-      const statusBadgeText = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      // Use formatted status (already formatted by formatStatusForDisplay)
+      const statusBadgeText = status;
       
       // For cancelled and failed proposals, voting never happened - don't show vote data
       const isCancelledOrFailed = stageData.status === 'cancelled' || stageData.status === 'failed';
@@ -3296,16 +2366,75 @@ export default apiInitializer((api) => {
     const finalIsQuorumNotReached = isActuallyQuorumNotReached;
     const finalIsDefeat = isDefeat && !finalIsQuorumNotReached && quorumReached;
     
-    // Determine display status (match Tally website behavior)
+    // Determine display status - show actual status from proposal
+    // Format: Capitalize first letter, keep rest as-is for specific statuses
+    function formatStatusForDisplay(statusValue) {
+      if (!statusValue) return 'Unknown';
+      
+      const normalized = (statusValue || '').toLowerCase().trim();
+      
+      // Map specific statuses to their display format (show actual status)
+      const statusMap = {
+        'defeated': 'Defeated',
+        'defeat': 'Defeated',
+        'rejected': 'Rejected',
+        'failed': 'Failed',
+        'cancelled': 'Cancelled',
+        'canceled': 'Cancelled',
+        'expired': 'Expired',
+        'executed': 'Executed',
+        'crosschainexecuted': 'Executed',
+        'completed': 'Completed',
+        'passed': 'Passed',
+        'active': 'Active',
+        'open': 'Active',
+        'voting': 'Active',
+        'created': 'Created',
+        'pending': 'Pending',
+        'queued': 'Queued',
+        'closed': 'Closed',
+        'ended': 'Ended',
+        'quorum not reached': 'Quorum Not Reached',
+        'quorumnotreached': 'Quorum Not Reached',
+        'pending execution': 'Pending Execution',
+        'pendingexecution': 'Pending Execution'
+      };
+      
+      // Check exact match first
+      if (statusMap[normalized]) {
+        return statusMap[normalized];
+      }
+      
+      // Check for partial matches (e.g., "quorum not reached" in status)
+      for (const [key, display] of Object.entries(statusMap)) {
+        if (normalized.includes(key) || key.includes(normalized)) {
+          return display;
+        }
+      }
+      
+      // Default: capitalize first letter, preserve rest
+      return statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
+    }
+    
+    // Determine display status - prioritize showing actual status from proposal
     let displayStatus = exactStatus;
+    
+    // Special cases that need override (quorum/execution logic)
     if (isPendingExecution && status === "queued") {
-      displayStatus = "Pending execution";
-      console.log("🔵 [WIDGET] Overriding status: 'queued' → 'Pending execution' (proposal passed, like Tally website)");
+      displayStatus = "Pending Execution";
+      console.log("🔵 [WIDGET] Overriding status: 'queued' → 'Pending Execution' (proposal passed)");
     } else if (finalIsQuorumNotReached && !isQuorumNotReached) {
-      displayStatus = "Quorum not reached";
-      console.log("🔵 [WIDGET] Overriding status: 'defeated' → 'Quorum not reached' (quorum not met, like Tally website)");
+      displayStatus = "Quorum Not Reached";
+      console.log("🔵 [WIDGET] Overriding status: 'defeated' → 'Quorum Not Reached' (quorum not met)");
     } else if (finalIsDefeat && quorumReached) {
+      // Show "Defeated" if quorum was reached but proposal was defeated
       displayStatus = "Defeated";
+      console.log("🔵 [WIDGET] Status: 'Defeated' (quorum reached but proposal defeated)");
+    } else {
+      // Use the actual status from the proposal, properly formatted
+      // This ensures we show "Rejected", "Failed", "Cancelled", etc. as they are
+      displayStatus = formatStatusForDisplay(exactStatus);
+      console.log("🔵 [WIDGET] Using actual status from proposal:", displayStatus, "(raw:", exactStatus, ")");
     }
     
     console.log("🔵 [WIDGET] Raw vote counts:", { 
@@ -3917,79 +3046,11 @@ export default apiInitializer((api) => {
     return proposals;
   }
 
-  // Hide widget if no Snapshot proposal is visible
-  // Show error widget when proposals fail to load
-  function showNetworkErrorWidget(count, type) {
-    const errorWidgetId = 'governance-error-widget';
-    const existingError = document.getElementById(errorWidgetId);
-    if (existingError) {
-      existingError.remove();
-    }
-    
-    const errorWidget = document.createElement("div");
-    errorWidget.id = errorWidgetId;
-    errorWidget.className = "tally-status-widget-container";
-    errorWidget.setAttribute("data-widget-type", "error");
-    
-    errorWidget.innerHTML = `
-      <div class="tally-status-widget" style="background: #fff; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px;">
-        <div style="font-weight: 700; font-size: 1em; margin-bottom: 12px; color: #dc2626;">⚠️ Network Error</div>
-        <div style="font-size: 0.9em; color: #6b7280; line-height: 1.5; margin-bottom: 12px;">
-          Unable to load ${count} ${type} proposal(s). This may be a temporary network issue.
-        </div>
-        <div style="font-size: 0.85em; color: #9ca3af;">
-          The Snapshot API may be temporarily unavailable. Please try refreshing the page.
-        </div>
-      </div>
-    `;
-    
-    // Add to container if it exists, otherwise create one
-    const container = getOrCreateWidgetsContainer();
-    container.appendChild(errorWidget);
-    console.log(`⚠️ [ERROR] Showing error widget for ${count} failed ${type} proposal(s)`);
-  }
+  // showNetworkErrorWidget, hideWidgetIfNoProposal, showWidget are now imported from ../lib/dom/renderer
 
-  function hideWidgetIfNoProposal() {
-    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-    const widgetCount = allWidgets.length;
-    allWidgets.forEach(widget => {
-      // Remove widget from DOM completely, not just hide it
-      widget.remove();
-      // Clean up stored data
-      const widgetId = widget.getAttribute('data-tally-status-id');
-      if (widgetId) {
-        delete window[`tallyWidget_${widgetId}`];
-        // Clear any auto-refresh intervals
-        const refreshKey = `tally_refresh_${widgetId}`;
-        if (window[refreshKey]) {
-          clearInterval(window[refreshKey]);
-          delete window[refreshKey];
-        }
-      }
-    });
-    
-    // Clean up empty container
-    const container = document.getElementById('governance-widgets-wrapper');
-    if (container && container.children.length === 0) {
-      container.remove();
-      console.log("🔵 [CONTAINER] Removed empty widgets container");
-    }
-    
-    if (widgetCount > 0) {
-      console.log("🔵 [WIDGET] Removed", widgetCount, "widget(s) - no proposal in current post");
-    }
-    // Reset current visible proposal
-    currentVisibleProposal = null;
-  }
-
-  // Show widget
-  // eslint-disable-next-line no-unused-vars
-  function showWidget() {
-    const allWidgets = document.querySelectorAll('.tally-status-widget-container');
-    allWidgets.forEach(widget => {
-      widget.style.display = '';
-      widget.style.visibility = '';
-    });
+  // Wrapper to use imported function with shared state
+  function showNetworkErrorWidgetLocal(count, type) {
+    return showNetworkErrorWidget(count, type, getOrCreateWidgetsContainer);
   }
 
   // Fetch proposal data (wrapper for compatibility with old code)
@@ -4033,7 +3094,7 @@ export default apiInitializer((api) => {
         if (!proposalInfo) {
           return null;
         }
-        return await fetchSnapshotProposal(proposalInfo.space, proposalInfo.proposalId, cacheKey, proposalInfo.isTestnet || false);
+        return await fetchSnapshotProposalLocal(proposalInfo.space, proposalInfo.proposalId, cacheKey, proposalInfo.isTestnet || false);
       } else if (type === 'aip') {
         const proposalInfo = extractAIPProposalInfo(url);
         if (!proposalInfo) {
@@ -4048,7 +3109,7 @@ export default apiInitializer((api) => {
         }
         // Pass URL source to use correct state enum mapping
         const urlSource = proposalInfo.urlSource || 'app.aave.com';
-        return await fetchAIPProposal(proposalId, cacheKey, 'mainnet', urlSource);
+        return await fetchAIPProposalLocal(proposalId, cacheKey, 'mainnet', urlSource);
       }
       
       return null;
@@ -4392,7 +3453,7 @@ export default apiInitializer((api) => {
     }
     
     const totalProposals = uniqueSnapshotUrls.length + uniqueAipUrls.length;
-    console.log(`🔵 [TOPIC] Rendering ${totalProposals} widget(s) - one per unique proposal URL`);
+    console.log(`🔵 [TOPIC] Found ${totalProposals} unique proposal(s), will select max 3 based on priority`);
     
     // Create combined ordered list of all proposals (maintain order: snapshot first, then aip)
     // This preserves the order proposals appear in the content
@@ -4403,6 +3464,169 @@ export default apiInitializer((api) => {
     uniqueAipUrls.forEach((url, index) => {
       orderedProposals.push({ url, type: 'aip', originalIndex: index });
     });
+    
+    // ============================================================================
+    // WIDGET SELECTION LOGIC - Max 3 widgets, prioritized by state
+    // Priority: active > created > pending > executed > ended > failed
+    // ============================================================================
+    
+    /**
+     * Get priority score for proposal state (lower number = higher priority)
+     * Priority order: active(1) > created(2) > pending(3) > executed(4) > ended(5) > failed(6)
+     */
+    function getStatePriority(status) {
+      const normalizedStatus = (status || '').toLowerCase().trim();
+      
+      // Active states (highest priority)
+      if (normalizedStatus === 'active' || normalizedStatus === 'open' || normalizedStatus === 'voting') {
+        return 1;
+      }
+      
+      // Created states
+      if (normalizedStatus === 'created') {
+        return 2;
+      }
+      
+      // Pending states
+      if (normalizedStatus === 'pending' || normalizedStatus === 'pendingexecution' || 
+          normalizedStatus.includes('pending execution') || normalizedStatus === 'queued') {
+        return 3;
+      }
+      
+      // Executed states
+      if (normalizedStatus === 'executed' || normalizedStatus === 'crosschainexecuted' || 
+          normalizedStatus === 'completed' || normalizedStatus === 'passed') {
+        return 4;
+      }
+      
+      // Ended/Closed states
+      if (normalizedStatus === 'closed' || normalizedStatus === 'ended' || normalizedStatus === 'expired') {
+        return 5;
+      }
+      
+      // Failed states (lowest priority)
+      if (normalizedStatus === 'failed' || normalizedStatus === 'defeated' || 
+          normalizedStatus === 'defeat' || normalizedStatus === 'rejected' ||
+          normalizedStatus.includes('quorum not reached') || normalizedStatus === 'cancelled') {
+        return 6;
+      }
+      
+      // Unknown/other states - put at end
+      return 7;
+    }
+    
+    /**
+     * Select top 3 proposals based on priority, with type variety consideration
+     * Strategy: Prioritize by state, but try to show variety of types if possible
+     */
+    function selectTopProposals(allProposals) {
+      // Sort all proposals by priority (lower priority number = higher priority)
+      const sorted = allProposals.sort((a, b) => {
+        const priorityA = getStatePriority(a.status);
+        const priorityB = getStatePriority(b.status);
+        
+        // First sort by priority
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+        
+        // If same priority, maintain original order
+        return a.originalOrder - b.originalOrder;
+      });
+      
+      // Select top 3, but try to show variety of types
+      const selected = [];
+      const typeCounts = { tempcheck: 0, arfc: 0, aip: 0 };
+      const maxPerType = 2; // Max 2 of same type
+      
+      for (const proposal of sorted) {
+        if (selected.length >= 3) break;
+        
+        const proposalType = proposal.stage || proposal.type || 'arfc';
+        const typeKey = proposalType === 'temp-check' ? 'tempcheck' : 
+                       proposalType === 'aip' ? 'aip' : 'arfc';
+        
+        // Check if we can add this proposal
+        const canAdd = typeCounts[typeKey] < maxPerType || 
+                      (selected.length < 3 && Object.values(typeCounts).every(count => count === 0));
+        
+        if (canAdd) {
+          selected.push(proposal);
+          typeCounts[typeKey]++;
+        }
+      }
+      
+      console.log(`🔵 [SELECTION] Selected ${selected.length} proposal(s) from ${allProposals.length} total:`);
+      selected.forEach((p, idx) => {
+        const type = p.stage || p.type || 'arfc';
+        console.log(`  [${idx + 1}] ${p.title?.substring(0, 50)}... (${type}, status: ${p.status}, priority: ${getStatePriority(p.status)})`);
+      });
+      
+      return selected;
+    }
+    
+    /**
+     * Render only the selected proposals (max 3, prioritized by state)
+     */
+    function renderSelectedProposals(snapshotProposals, aipProposals) {
+      // Combine all proposals
+      const allProposals = [...snapshotProposals, ...aipProposals];
+      
+      if (allProposals.length === 0) {
+        console.log("🔵 [RENDER] No valid proposals to render");
+        return;
+      }
+      
+      // Select top 3 based on priority
+      const selected = selectTopProposals(allProposals);
+      
+      console.log(`🔵 [RENDER] Rendering ${selected.length} selected widget(s) out of ${allProposals.length} total proposal(s)`);
+      
+      // Render each selected proposal
+      selected.forEach((proposal, index) => {
+        if (renderingUrls.has(proposal.url)) {
+          console.log(`🔵 [RENDER] URL ${proposal.url} is already being rendered, skipping duplicate`);
+          return;
+        }
+        
+        renderingUrls.add(proposal.url);
+        
+        const stage = proposal.stage || proposal.type || 'arfc';
+        const stageName = stage === 'temp-check' ? 'Temp Check' : 
+                         stage === 'arfc' ? 'ARFC' : 
+                         stage === 'aip' ? 'AIP' : 'Snapshot';
+        
+        console.log(`🔵 [RENDER] Creating widget ${index + 1}/${selected.length} for ${stageName} (status: ${proposal.status})`);
+        console.log(`   Title: ${proposal.title?.substring(0, 60)}...`);
+        console.log(`   URL: ${proposal.url}`);
+        
+        const widgetId = `${stage}-widget-${index}-${Date.now()}`;
+        
+        // Render based on proposal type
+        if (proposal.type === 'aip') {
+          renderMultiStageWidget({
+            tempCheck: null,
+            tempCheckUrl: null,
+            arfc: null,
+            arfcUrl: null,
+            aip: proposal.data,
+            aipUrl: proposal.url
+          }, widgetId, index, renderingUrls, fetchingUrls);
+        } else {
+          // Snapshot proposal
+          renderMultiStageWidget({
+            tempCheck: stage === 'temp-check' ? proposal.data : null,
+            tempCheckUrl: stage === 'temp-check' ? proposal.url : null,
+            arfc: (stage === 'arfc' || stage === 'snapshot') ? proposal.data : null,
+            arfcUrl: (stage === 'arfc' || stage === 'snapshot') ? proposal.url : null,
+            aip: null,
+            aipUrl: null
+          }, widgetId, index, renderingUrls, fetchingUrls);
+        }
+        
+        console.log(`✅ [RENDER] Widget ${index + 1} rendered`);
+      });
+    }
     
     // ===== SNAPSHOT WIDGETS - One per URL =====
     if (uniqueSnapshotUrls.length > 0) {
@@ -4460,41 +3684,28 @@ export default apiInitializer((api) => {
           
           console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
           
-          // Render one widget per Snapshot proposal
-          validSnapshots.forEach((snapshot, index) => {
-            // Check again if URL is being rendered (in case another fetch completed first)
-            if (renderingUrls.has(snapshot.url)) {
-              console.log(`🔵 [TOPIC] Snapshot URL ${snapshot.url} is already being rendered, skipping duplicate render`);
-              return;
-            }
-            
+          // Store snapshot results for later selection (don't render yet)
+          const snapshotProposals = validSnapshots.map((snapshot, index) => {
             const stage = snapshot.data.stage || 'snapshot';
-            const stageName = stage === 'temp-check' ? 'Temp Check' : 
-                             stage === 'arfc' ? 'ARFC' : 'Snapshot';
-            
-            // Find proposal order in combined list (order in content)
-            const proposalOrderIndex = orderedProposals.findIndex(p => p.url === snapshot.url && p.type === 'snapshot');
-            const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : index;
-            
-            console.log(`🔵 [RENDER] Creating Snapshot widget ${index + 1}/${validSnapshots.length} for ${stageName} (order: ${proposalOrder})`);
-            console.log(`   Title: ${snapshot.data.title?.substring(0, 60)}...`);
-            console.log(`   URL: ${snapshot.url}`);
-            
-            // Create unique widget ID for each proposal
-            const widgetId = `snapshot-widget-${index}-${Date.now()}`;
-            
-            // Render single proposal widget based on its stage, with proposal order
-            renderMultiStageWidget({
-              tempCheck: stage === 'temp-check' ? snapshot.data : null,
-              tempCheckUrl: stage === 'temp-check' ? snapshot.url : null,
-              arfc: (stage === 'arfc' || stage === 'snapshot') ? snapshot.data : null,
-              arfcUrl: (stage === 'arfc' || stage === 'snapshot') ? snapshot.url : null,
-              aip: null,
-              aipUrl: null
-            }, widgetId, proposalOrder);
-            
-            console.log(`✅ [RENDER] Snapshot widget ${index + 1} rendered`);
+            return {
+              url: snapshot.url,
+              data: snapshot.data,
+              type: 'snapshot',
+              stage: stage,
+              status: snapshot.data.status || snapshot.data.state || 'unknown',
+              title: snapshot.data.title,
+              originalOrder: orderedProposals.findIndex(p => p.url === snapshot.url && p.type === 'snapshot')
+            };
           });
+          
+          // Check if we have AIP proposals to wait for
+          if (uniqueAipUrls.length === 0) {
+            // No AIP proposals, proceed with selection and rendering
+            renderSelectedProposals(snapshotProposals, []);
+          } else {
+            // Store for later when AIPs are ready
+            window._snapshotProposals = snapshotProposals;
+          }
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing Snapshot proposals:", error);
@@ -4503,55 +3714,69 @@ export default apiInitializer((api) => {
     
     // ===== AIP WIDGETS - One per URL =====
     if (uniqueAipUrls.length > 0) {
-      uniqueAipUrls.forEach((aipUrl, aipIndex) => {
-        // Check if this URL is already being fetched or rendered
-        if (fetchingUrls.has(aipUrl) || renderingUrls.has(aipUrl)) {
-          console.log(`🔵 [TOPIC] AIP URL ${aipUrl} is already being fetched/rendered, skipping duplicate`);
-          return;
+      const aipUrlsToFetch = uniqueAipUrls.filter(url => {
+        if (fetchingUrls.has(url) || renderingUrls.has(url)) {
+          console.log(`🔵 [TOPIC] AIP URL ${url} is already being fetched/rendered, skipping duplicate`);
+          return false;
         }
-        
-        // Find proposal order in combined list (order in content)
-        const proposalOrderIndex = orderedProposals.findIndex(p => p.url === aipUrl && p.type === 'aip');
-        const proposalOrder = proposalOrderIndex >= 0 ? proposalOrderIndex : (uniqueSnapshotUrls.length + aipIndex);
-        
-        // Mark URL as being fetched
-        fetchingUrls.add(aipUrl);
-        
-        fetchProposalDataByType(aipUrl, 'aip')
-          .then(aipData => {
-            // Remove from fetching set when fetch completes
-            fetchingUrls.delete(aipUrl);
-            
-            // Check again if URL is being rendered (in case another fetch completed first)
-            if (renderingUrls.has(aipUrl)) {
-              console.log(`🔵 [TOPIC] AIP URL ${aipUrl} is already being rendered, skipping duplicate render`);
-              return;
-            }
-            
-            if (aipData && aipData.title) {
-              const aipWidgetId = `aip-widget-${aipIndex}-${Date.now()}`;
-              console.log(`🔵 [RENDER] Creating AIP widget ${aipIndex + 1} (order: ${proposalOrder})`);
-              renderMultiStageWidget({
-                tempCheck: null,
-                tempCheckUrl: null,
-                arfc: null,
-                arfcUrl: null,
-                aip: aipData,
-                aipUrl
-              }, aipWidgetId, proposalOrder);
-              console.log(`✅ [RENDER] AIP widget ${aipIndex + 1} rendered`);
-        } else {
-              console.warn(`⚠️ [TOPIC] AIP data fetched but missing title:`, aipData);
-        }
-      })
-      .catch(error => {
-            // Remove from fetching set on error
-            fetchingUrls.delete(aipUrl);
-            console.warn(`⚠️ [TOPIC] Error fetching AIP ${aipIndex + 1} from ${aipUrl}:`, error.message || error);
-            // Don't throw - just log and continue with other widgets
-          });
+        fetchingUrls.add(url);
+        return true;
       });
+      
+      Promise.allSettled(aipUrlsToFetch.map(aipUrl => {
+        return Promise.resolve()
+          .then(() => fetchProposalDataByType(aipUrl, 'aip'))
+          .then(aipData => {
+            fetchingUrls.delete(aipUrl);
+            return { url: aipUrl, data: aipData, type: 'aip' };
+          })
+          .catch(error => {
+            fetchingUrls.delete(aipUrl);
+            handledErrors.add(error);
+            if (error.cause) {
+              handledErrors.add(error.cause);
+            }
+            console.warn(`⚠️ [TOPIC] Failed to fetch AIP proposal from ${aipUrl}:`, error.message || error);
+            return { url: aipUrl, data: null, type: 'aip', error: error.message || String(error) };
+          });
+      }))
+        .then(aipResults => {
+          const validAips = aipResults
+            .filter(result => result.status === 'fulfilled' && result.value && result.value.data && result.value.data.title)
+            .map(result => result.value);
+          
+          console.log(`🔵 [TOPIC] Found ${validAips.length} valid AIP proposal(s) out of ${aipUrlsToFetch.length} unique URL(s)`);
+          
+          // Store AIP results
+          window._aipProposals = validAips.map((aip, index) => {
+            return {
+              url: aip.url,
+              data: aip.data,
+              type: 'aip',
+              stage: 'aip',
+              status: aip.data.status || 'unknown',
+              title: aip.data.title,
+              originalOrder: orderedProposals.findIndex(p => p.url === aip.url && p.type === 'aip')
+            };
+          });
+          
+          // Now we have both snapshot and AIP proposals, proceed with selection and rendering
+          renderSelectedProposals(window._snapshotProposals || [], window._aipProposals || []);
+        })
+        .catch(error => {
+          console.error("❌ [TOPIC] Error processing AIP proposals:", error);
+          // Still try to render snapshots if available
+          renderSelectedProposals(window._snapshotProposals || [], []);
+        });
+    } else {
+      // No AIP proposals, but we might have snapshots - check if they're ready
+      if (uniqueSnapshotUrls.length === 0) {
+        // No proposals at all
+        console.log("🔵 [TOPIC] No proposals to render");
+      }
+      // If we have snapshots, they will be handled in the snapshot Promise.allSettled
     }
+    
   }
   
   // Debounce widget setup to prevent duplicate widgets
@@ -4629,323 +3854,6 @@ export default apiInitializer((api) => {
   }
 
   // OLD SCROLL TRACKING FUNCTIONS REMOVED - Using setupTopicWidget instead
-  /*
-  function updateWidgetForVisibleProposal_OLD() {
-    // Clear any pending updates
-    if (scrollUpdateTimeout) {
-      clearTimeout(scrollUpdateTimeout);
-    }
-
-    // Debounce scroll updates
-    scrollUpdateTimeout = setTimeout(() => {
-      // First, try to get current post number from Discourse timeline
-      const postInfo = getCurrentPostNumber();
-      
-      if (postInfo) {
-        // Get the proposal URL for this post number
-        const proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
-        
-        // Always check if current post has a proposal - remove widgets if not
-        if (!proposalUrl) {
-          // No Snapshot proposal in this post - remove all widgets immediately
-          console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "has no Snapshot proposal - removing all widgets");
-          hideWidgetIfNoProposal();
-          return;
-        }
-        
-        // If we have a proposal URL and it's different from current, update widget
-        if (proposalUrl && proposalUrl !== currentVisibleProposal) {
-          currentVisibleProposal = proposalUrl;
-          
-          console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "- Proposal URL:", proposalUrl);
-          
-          // Extract proposal info
-          const proposalInfo = extractProposalInfo(proposalUrl);
-          if (proposalInfo) {
-            // Create widget ID
-            let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
-            if (!widgetId) {
-              const urlHash = proposalUrl.split('').reduce((acc, char) => {
-                return ((acc << 5) - acc) + char.charCodeAt(0);
-              }, 0);
-              widgetId = `proposal_${Math.abs(urlHash)}`;
-            }
-            
-            // Fetch and display proposal data
-            const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
-            fetchProposalData(proposalId, proposalUrl, proposalInfo.govId, proposalInfo.urlProposalNumber)
-              .then(data => {
-                if (data && data.title && data.title !== "Snapshot Proposal") {
-                  console.log("🔵 [SCROLL] Updating widget for post", postInfo.current, "-", data.title);
-                  renderStatusWidget(data, proposalUrl, widgetId, proposalInfo);
-                  showWidget(); // Make sure widget is visible
-                  setupAutoRefresh(widgetId, proposalInfo, proposalUrl);
-                } else {
-                  // Invalid data - hide widget
-                  console.log("🔵 [SCROLL] Invalid proposal data - hiding widget");
-                  hideWidgetIfNoProposal();
-                }
-              })
-              .catch(error => {
-                console.error("❌ [SCROLL] Error fetching proposal data:", error);
-                hideWidgetIfNoProposal();
-              });
-          } else {
-            // Could not extract proposal info - hide widget
-            console.log("🔵 [SCROLL] Could not extract proposal info - hiding widget");
-            hideWidgetIfNoProposal();
-          }
-          return; // Exit early if we found post number
-        } else if (proposalUrl === currentVisibleProposal) {
-          // Same proposal - widget should already be showing, just ensure it's visible
-          showWidget();
-          return;
-        }
-      } else {
-        // No post info from timeline - check fallback but hide widget if no proposal found
-        console.log("🔵 [SCROLL] No post info from timeline - checking fallback");
-      }
-      
-      // Fallback: Find the link that's most visible in viewport (original logic)
-      const allTallyLinks = document.querySelectorAll('a[href*="tally.xyz"], a[href*="tally.so"]');
-      
-      // If no Tally links found at all, hide widget
-      if (allTallyLinks.length === 0) {
-        console.log("🔵 [SCROLL] No Snapshot links found on page - hiding widget");
-        hideWidgetIfNoProposal();
-        currentVisibleProposal = null;
-        return;
-      }
-      
-      let mostVisibleLink = null;
-      let maxVisibility = 0;
-
-      allTallyLinks.forEach(link => {
-        const rect = link.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        
-        const linkTop = Math.max(0, rect.top);
-        const linkBottom = Math.min(viewportHeight, rect.bottom);
-        const visibleHeight = Math.max(0, linkBottom - linkTop);
-        
-        const postElement = link.closest('.topic-post, .post, [data-post-id]');
-        if (postElement) {
-          const postRect = postElement.getBoundingClientRect();
-          const postTop = Math.max(0, postRect.top);
-          const postBottom = Math.min(viewportHeight, postRect.bottom);
-          const postVisibleHeight = Math.max(0, postBottom - postTop);
-          
-          if (postVisibleHeight > maxVisibility && visibleHeight > 0) {
-            maxVisibility = postVisibleHeight;
-            mostVisibleLink = link;
-          }
-        }
-      });
-
-      // If we found a visible proposal link, update the widget
-      if (mostVisibleLink && mostVisibleLink.href !== currentVisibleProposal) {
-        const url = mostVisibleLink.href;
-        currentVisibleProposal = url;
-        
-        console.log("🔵 [SCROLL] New proposal visible (fallback):", url);
-        
-        const proposalInfo = extractProposalInfo(url);
-        if (proposalInfo) {
-          let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
-          if (!widgetId) {
-            const urlHash = url.split('').reduce((acc, char) => {
-              return ((acc << 5) - acc) + char.charCodeAt(0);
-            }, 0);
-            widgetId = `proposal_${Math.abs(urlHash)}`;
-          }
-          
-          const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
-          fetchProposalData(proposalId, url, proposalInfo.govId, proposalInfo.urlProposalNumber)
-            .then(data => {
-              if (data && data.title && data.title !== "Snapshot Proposal") {
-                console.log("🔵 [SCROLL] Updating widget for visible proposal:", data.title);
-                renderStatusWidget(data, url, widgetId, proposalInfo);
-                showWidget(); // Make sure widget is visible
-                setupAutoRefresh(widgetId, proposalInfo, url);
-              } else {
-                // Invalid data - hide widget
-                hideWidgetIfNoProposal();
-              }
-            })
-            .catch(error => {
-              console.error("❌ [SCROLL] Error fetching proposal data:", error);
-              hideWidgetIfNoProposal();
-            });
-        } else {
-          // Could not extract proposal info - hide widget
-          hideWidgetIfNoProposal();
-        }
-      } else if (!mostVisibleLink) {
-        // No visible proposal link found - remove all widgets
-        console.log("🔵 [SCROLL] No visible proposal link found - removing all widgets");
-        hideWidgetIfNoProposal();
-      }
-    }, 150); // Debounce scroll events
-  }
-  */
-
-  // OLD SCROLL TRACKING FUNCTION - REMOVED (replaced with setupTopicWidget)
-  /*
-  function setupScrollTracking() {
-    // Use Intersection Observer for better performance
-    const observerOptions = {
-      root: null,
-      rootMargin: '-20% 0px -20% 0px', // Trigger when post is in middle 60% of viewport
-      threshold: [0, 0.25, 0.5, 0.75, 1]
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-      // Find the entry with highest intersection ratio
-      let mostVisible = null;
-      let maxRatio = 0;
-
-      entries.forEach(entry => {
-        if (entry.intersectionRatio > maxRatio) {
-          maxRatio = entry.intersectionRatio;
-          mostVisible = entry;
-        }
-      });
-
-      if (mostVisible && mostVisible.isIntersecting) {
-        // First, try to get current post number from Discourse timeline
-        const postInfo = getCurrentPostNumber();
-        
-        let proposalUrl = null;
-        
-        if (postInfo) {
-          // Use the post number from timeline to get the correct proposal
-          proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
-          console.log("🔵 [SCROLL] IntersectionObserver - Post", postInfo.current, "/", postInfo.total);
-          
-          // If no proposal in this post, remove all widgets
-          if (!proposalUrl) {
-            console.log("🔵 [SCROLL] Post", postInfo.current, "/", postInfo.total, "has no Snapshot proposal - removing all widgets");
-            hideWidgetIfNoProposal();
-            return;
-          }
-        }
-        
-        // Fallback: Find Tally link in this post
-        if (!proposalUrl) {
-          const postElement = mostVisible.target;
-          const tallyLink = postElement.querySelector('a[href*="tally.xyz"], a[href*="tally.so"]');
-          if (tallyLink) {
-            proposalUrl = tallyLink.href;
-          } else {
-            // No Snapshot link in this post - hide widget
-            hideWidgetIfNoProposal();
-            currentVisibleProposal = null;
-            return;
-          }
-        }
-        
-        if (proposalUrl && proposalUrl !== currentVisibleProposal) {
-          currentVisibleProposal = proposalUrl;
-          
-          console.log("🔵 [SCROLL] New proposal visible via IntersectionObserver:", proposalUrl);
-          
-          const proposalInfo = extractProposalInfo(proposalUrl);
-          if (proposalInfo) {
-            let widgetId = proposalInfo.internalId || proposalInfo.urlProposalNumber;
-            if (!widgetId) {
-              const urlHash = proposalUrl.split('').reduce((acc, char) => {
-                return ((acc << 5) - acc) + char.charCodeAt(0);
-              }, 0);
-              widgetId = `proposal_${Math.abs(urlHash)}`;
-            }
-            
-            const proposalId = proposalInfo.isInternalId ? proposalInfo.internalId : null;
-            fetchProposalData(proposalId, proposalUrl, proposalInfo.govId, proposalInfo.urlProposalNumber)
-              .then(data => {
-                if (data && data.title && data.title !== "Snapshot Proposal") {
-                  console.log("🔵 [SCROLL] Updating widget for visible proposal:", data.title);
-                  renderStatusWidget(data, proposalUrl, widgetId, proposalInfo);
-                  showWidget(); // Make sure widget is visible
-                  setupAutoRefresh(widgetId, proposalInfo, proposalUrl);
-                } else {
-                  // Invalid data - hide widget
-                  hideWidgetIfNoProposal();
-                }
-              })
-              .catch(error => {
-                console.error("❌ [SCROLL] Error fetching proposal data:", error);
-                hideWidgetIfNoProposal();
-              });
-          } else {
-            // Could not extract proposal info - hide widget
-            hideWidgetIfNoProposal();
-          }
-        } else {
-          // No proposal URL found - remove all widgets
-          console.log("🔵 [SCROLL] No proposal URL found - removing all widgets");
-          hideWidgetIfNoProposal();
-        }
-      }
-    }, observerOptions);
-
-    // Observe all posts
-    const observePosts = () => {
-      const posts = document.querySelectorAll('.topic-post, .post, [data-post-id]');
-      posts.forEach(post => {
-        observer.observe(post);
-      });
-    };
-
-    // Initial observation
-    observePosts();
-
-    // Also observe new posts as they're added
-    const postObserver = new MutationObserver(() => {
-      observePosts();
-    });
-
-    const postStream = document.querySelector('.post-stream, .topic-body');
-    if (postStream) {
-      postObserver.observe(postStream, { childList: true, subtree: true });
-    }
-
-    // Fallback: also use scroll event for posts not yet observed
-    window.addEventListener('scroll', updateWidgetForVisibleProposal, { passive: true });
-    
-      // Initial check: remove all widgets by default, then show only if current post has proposal
-      const initialCheck = () => {
-        // First, remove all widgets by default
-        hideWidgetIfNoProposal();
-        
-        const postInfo = getCurrentPostNumber();
-        if (postInfo) {
-          const proposalUrl = getProposalLinkFromPostNumber(postInfo.current);
-          if (!proposalUrl) {
-            console.log("🔵 [INIT] Initial post", postInfo.current, "/", postInfo.total, "has no Snapshot proposal - all widgets removed");
-            // Widgets already removed above
-          } else {
-            console.log("🔵 [INIT] Initial post", postInfo.current, "/", postInfo.total, "has proposal - showing widget");
-            // Trigger update to show widget for current post
-            updateWidgetForVisibleProposal();
-          }
-        } else {
-          // No post info - check if any visible post has proposal
-          console.log("🔵 [INIT] No post info from timeline, checking visible posts");
-          updateWidgetForVisibleProposal();
-        }
-      };
-      
-      // Run immediately
-      initialCheck();
-      
-      // Also run after delays to catch late-loading content
-      setTimeout(initialCheck, 500);
-      setTimeout(initialCheck, 1000);
-      setTimeout(initialCheck, 2000);
-    
-    console.log("✅ [SCROLL] Scroll tracking set up for widget updates");
-  }
-  */
 
   // Auto-refresh widget when Tally data changes
   // eslint-disable-next-line no-unused-vars
