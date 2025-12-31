@@ -8,7 +8,7 @@ export function calculateTimeRemaining(endTimestampSeconds) {
   if (!endTimestampSeconds || endTimestampSeconds <= 0) {
     return { daysLeft: null, hoursLeft: null };
   }
-  
+
   const endTimestampMs = endTimestampSeconds * 1000;
   const now = Date.now();
   const diffTime = endTimestampMs - now;
@@ -27,7 +27,7 @@ export function calculateTimeRemaining(endTimestampSeconds) {
   if (!isNaN(diffDays) && isFinite(diffDays)) {
     const daysLeft = diffDays;
     let hoursLeft = null;
-    
+
     // If it ends today (daysLeft === 0), calculate hours left
     if (diffDays === 0 && diffTime > 0) {
       const diffTimeInHours = diffTime / (1000 * 60 * 60);

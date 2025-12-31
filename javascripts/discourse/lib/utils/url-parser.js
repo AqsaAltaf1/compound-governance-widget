@@ -8,7 +8,7 @@
  */
 export function extractSnapshotProposalInfo(url) {
   console.log("🔍 Extracting Snapshot proposal info from URL:", url);
-  
+
   try {
     // Check if it's a testnet URL
     const isTestnet = url.includes('testnet.snapshot.box');
@@ -23,7 +23,7 @@ export function extractSnapshotProposalInfo(url) {
         console.log("✅ Extracted Snapshot testnet format:", { space, proposalId });
         return { space, proposalId, type: 'snapshot', isTestnet: true };
       }
-      
+
       // Match pattern: testnet.snapshot.box/#/s-tn:{space}/{proposal-id} (without /proposal/)
       const testnetDirectMatch = url.match(/testnet\.snapshot\.box\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
       if (testnetDirectMatch) {
@@ -36,7 +36,7 @@ export function extractSnapshotProposalInfo(url) {
         }
       }
     }
-    
+
     // Match pattern: snapshot.org/#/{space}/proposal/{proposal-id}
     const proposalMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/proposal\/([a-zA-Z0-9]+)/i);
     if (proposalMatch) {
@@ -45,7 +45,7 @@ export function extractSnapshotProposalInfo(url) {
       console.log("✅ Extracted Snapshot format:", { space, proposalId });
       return { space, proposalId, type: 'snapshot', isTestnet: false };
     }
-    
+
     // Match pattern: snapshot.org/#/{space}/{proposal-id} (without /proposal/)
     const directMatch = url.match(/snapshot\.org\/#\/([^\/]+)\/([a-zA-Z0-9]+)/i);
     if (directMatch) {
@@ -77,7 +77,7 @@ export function extractSnapshotProposalInfo(url) {
  */
 export function extractAIPProposalInfo(url) {
   console.log("🔍 Extracting AIP proposal ID from URL:", url);
-  
+
   try {
     let proposalId = null;
     let urlSource = 'app.aave.com'; // Default to app.aave.com (Aave V3 enum mapping)
@@ -103,7 +103,7 @@ export function extractAIPProposalInfo(url) {
     } catch {
       // URL parsing failed, try regex fallback
     }
-    
+
     // Step 2: Try regex patterns for various URL formats
     const voteMatch = url.match(/vote\.onaave\.com\/proposal\/\?.*proposalId=(\d+)/i);
     if (voteMatch) {

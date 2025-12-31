@@ -199,10 +199,10 @@ export function transformAIPData(proposal) {
       for: { count: forVotes, voters: 0, percent: forPercent },
       against: { count: againstVotes, voters: 0, percent: againstPercent },
       abstain: { count: abstainVotes, voters: 0, percent: abstainPercent },
-      total: totalVotes
+      total: totalVotes,
     },
     url: `${AAVE_GOVERNANCE_PORTAL}/t/${proposal.id}`,
-    type: 'aip'
+    type: 'aip',
   };
 }
 

@@ -8,7 +8,7 @@ import { fetchWithRetry } from "./fetch-service";
  */
 export function transformSnapshotData(proposal, space) {
   console.log("🔵 [TRANSFORM] Raw proposal data from API:", JSON.stringify(proposal, null, 2));
-  
+
   // Determine proposal stage (Temp Check or ARFC) based on title/tags
   let stage = 'snapshot';
   const title = proposal.title || '';
@@ -35,7 +35,7 @@ export function transformSnapshotData(proposal, space) {
   } else {
     console.log("🔵 [TRANSFORM] Stage not detected, defaulting to 'snapshot'");
   }
-  
+
   // Calculate voting results
   const choices = proposal.choices || [];
   const scores = proposal.scores || [];
@@ -172,11 +172,11 @@ export function transformSnapshotData(proposal, space) {
       for: { count: forVotes, voters: 0, percent: forPercent },
       against: { count: againstVotes, voters: 0, percent: againstPercent },
       abstain: { count: abstainVotes, voters: 0, percent: abstainPercent },
-      total: totalVotes
+      total: totalVotes,
     },
     url: `https://snapshot.org/#/${space}/${proposal.id.split('/')[1]}`,
     type: 'snapshot',
-    _rawProposal: proposal // Preserve raw API response for cascading search
+    _rawProposal: proposal, // Preserve raw API response for cascading search
   };
 }
 
