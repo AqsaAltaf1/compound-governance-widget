@@ -33,112 +33,6 @@ console.log("✅ Aave Governance Widget: JavaScript file loaded!");
 export default apiInitializer((api) => {
   console.log("✅ Aave Governance Widget: apiInitializer called!");
 
-  // CRITICAL: Force scroll to top (0, 0) on page load
-  // User wants to stay at top, no auto-scroll to proposals
-  // This prevents Discourse from auto-scrolling to posts/proposals
-  
-  // Immediately force scroll to top
-  window.scrollTo(0, 0);
-  document.documentElement.scrollLeft = 0;
-  document.documentElement.scrollTop = 0;
-  document.body.scrollLeft = 0;
-  document.body.scrollTop = 0;
-  
-  // Lock scroll position during initial widget setup to prevent auto-scrolling
-  let scrollLocked = true;
-  let widgetsInserting = false; // Track when widgets are being inserted
-  
-  const restoreScroll = () => {
-    if (scrollLocked || widgetsInserting) {
-      // Always restore to top (0, 0) - user wants to stay at top
-      window.scrollTo(0, 0);
-      document.documentElement.scrollLeft = 0;
-      document.documentElement.scrollTop = 0;
-      document.body.scrollLeft = 0;
-      document.body.scrollTop = 0;
-    }
-  };
-  
-  const lockScrollUntilWidgetsReady = () => {
-    // Stop locking after widgets are ready (reduced to 500ms to allow immediate scrolling)
-    // Note: We rely on MutationObserver and scroll event listener instead of fixed intervals
-    setTimeout(() => {
-      scrollLocked = false;
-      // Final restore to top
-      restoreScroll();
-    }, 500);
-  };
-  
-  // Start scroll locking immediately
-  lockScrollUntilWidgetsReady();
-  
-  // CRITICAL: Aggressively restore scroll position on any scroll event during lock/insertion
-  // This prevents Discourse or browser from auto-scrolling to widgets or posts
-  const aggressiveScrollRestore = (e) => {
-    if (scrollLocked || widgetsInserting) {
-      // Prevent default scroll behavior and force to top
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      restoreScroll();
-    }
-  };
-  
-  // Listen for scroll events and restore position if locked (non-passive to allow preventDefault)
-  window.addEventListener('scroll', aggressiveScrollRestore, { passive: false, capture: true });
-  
-  // Also restore on any DOM mutations that might trigger scrolling
-  const scrollRestoreOnMutation = () => {
-    if (scrollLocked || widgetsInserting) {
-      // Use multiple methods to ensure scroll is restored
-      requestAnimationFrame(() => {
-        restoreScroll();
-        setTimeout(() => restoreScroll(), 0);
-        setTimeout(() => restoreScroll(), 10);
-        setTimeout(() => restoreScroll(), 50);
-      });
-    }
-  };
-  
-  // CRITICAL: Also prevent scrolling when widgets are added to DOM via MutationObserver
-  // This catches any scroll events triggered by DOM changes
-  const scrollPreventionObserver = new MutationObserver((mutations) => {
-    // Check if widgets are being added
-    const hasWidgetAddition = mutations.some(mutation => {
-      return Array.from(mutation.addedNodes).some(node => {
-        if (node.nodeType === 1) { // Element node
-          return node.classList?.contains('tally-status-widget-container') ||
-                 node.classList?.contains('governance-widgets-wrapper') ||
-                 node.querySelector?.('.tally-status-widget-container') ||
-                 node.querySelector?.('.governance-widgets-wrapper');
-        }
-        return false;
-      });
-    });
-    
-    if (hasWidgetAddition) {
-      widgetsInserting = true;
-      scrollRestoreOnMutation();
-      // Keep preventing scroll for 500ms after widget insertion
-      setTimeout(() => {
-        widgetsInserting = false;
-      }, 500);
-    }
-    
-    if (scrollLocked || widgetsInserting) {
-      scrollRestoreOnMutation();
-    }
-  });
-  
-  // Observe document body for widget additions
-  if (document.body) {
-    scrollPreventionObserver.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-
   // Track errors that are being handled to avoid false positives in unhandled rejection handler
   const handledErrors = new WeakSet();
   
@@ -3572,12 +3466,6 @@ export default apiInitializer((api) => {
         return; // Exit early - widget updated in place (close button handler already attached above)
       }
       
-      // CRITICAL: Prevent scroll during widget insertion
-      widgetsInserting = true;
-      // Declare scroll position variables outside try block so they're accessible in catch block
-      const currentScrollY = window.scrollY;
-      const currentScrollX = window.scrollX;
-      
       // Mobile: Insert widgets sequentially so all are visible
       // Find existing widgets and insert after the last one, or before first post if none exist
       try {
@@ -3674,16 +3562,6 @@ export default apiInitializer((api) => {
         statusWidget.style.marginLeft = '0';
         statusWidget.style.marginRight = '0';
         statusWidget.style.zIndex = '1';
-        
-        // CRITICAL: Restore scroll position after insertion to prevent auto-scroll
-        requestAnimationFrame(() => {
-          window.scrollTo(currentScrollX, currentScrollY);
-          document.documentElement.scrollLeft = currentScrollX;
-          document.documentElement.scrollTop = currentScrollY;
-          document.body.scrollLeft = currentScrollX;
-          document.body.scrollTop = currentScrollY;
-          widgetsInserting = false;
-        });
       } catch (error) {
         console.error("❌ [MOBILE] Error inserting status widget:", error);
         // Fallback: try to append to a safe location
@@ -3693,15 +3571,6 @@ export default apiInitializer((api) => {
         } else {
           document.body.insertBefore(statusWidget, document.body.firstChild);
         }
-        // CRITICAL: Restore scroll position after fallback insertion to prevent auto-scroll
-        requestAnimationFrame(() => {
-          window.scrollTo(currentScrollX, currentScrollY);
-          document.documentElement.scrollLeft = currentScrollX;
-          document.documentElement.scrollTop = currentScrollY;
-          document.body.scrollLeft = currentScrollX;
-          document.body.scrollTop = currentScrollY;
-          widgetsInserting = false;
-        });
       }
     } else {
       // Desktop: Position widget next to timeline scroll indicator
@@ -5934,18 +5803,6 @@ export default apiInitializer((api) => {
 
   // Re-initialize topic widget on page changes
   api.onPageChange(() => {
-    // CRITICAL: Force scroll to top when navigating to a new topic page
-    // This prevents Discourse from auto-scrolling to proposals
-    window.scrollTo(0, 0);
-    document.documentElement.scrollLeft = 0;
-    document.documentElement.scrollTop = 0;
-    document.body.scrollLeft = 0;
-    document.body.scrollTop = 0;
-    
-    // Re-lock scroll during widget setup to prevent auto-scrolling
-    scrollLocked = true;
-    lockScrollUntilWidgetsReady();
-    
     // Reset current proposal so we can detect the first one again
     currentVisibleProposal = null;
     setTimeout(() => {
