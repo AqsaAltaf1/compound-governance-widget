@@ -1067,7 +1067,9 @@ export default apiInitializer((api) => {
     
     // Normalize URLs for comparison (remove trailing slashes, query params, fragments)
     const normalizeUrl = (url) => {
-      if (!url) return '';
+      if (!url) {
+        return '';
+      }
       return url.replace(/[\/#\?].*$/, '').replace(/\/$/, '').toLowerCase().trim();
     };
     
