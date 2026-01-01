@@ -16,4 +16,3 @@ export default class ProposalManager extends Service {
     console.log("✅ [SERVICE] Cleared proposals");
   }
 }
-

@@ -849,7 +849,10 @@ export function renderMultiStageWidget(
         newButton.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (content.style.display === "none" || content.style.display === "") {
+          if (
+            content.style.display === "none" ||
+            content.style.display === ""
+          ) {
             content.style.display = "block";
             if (collapseContainer) {
               collapseContainer.style.display = "none";
@@ -868,7 +871,11 @@ export function renderMultiStageWidget(
         });
       });
     });
-    console.log("✅ [WIDGET]", widgetType === "aip" ? "AIP" : "Snapshot", "widget rendered");
+    console.log(
+      "✅ [WIDGET]",
+      widgetType === "aip" ? "AIP" : "Snapshot",
+      "widget rendered"
+    );
     return; // Exit early - widget is rendered in container
   }
 
