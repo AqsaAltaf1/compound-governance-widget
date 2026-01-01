@@ -1065,26 +1065,41 @@ export default apiInitializer((api) => {
     const snapshotUrls = Array.isArray(allProposals.snapshot) ? allProposals.snapshot : [];
     const aipUrls = Array.isArray(allProposals.aip) ? allProposals.aip : [];
     
+    // Normalize URLs for comparison (remove trailing slashes, query params, fragments)
+    const normalizeUrl = (url) => {
+      if (!url) return '';
+      return url.replace(/[\/#\?].*$/, '').replace(/\/$/, '').toLowerCase().trim();
+    };
+    
     // Check if widgets already exist and match current proposals - if so, don't clear them
     const existingWidgets = document.querySelectorAll('.tally-status-widget-container');
     const existingUrls = new Set();
     existingWidgets.forEach(widget => {
       const widgetUrl = widget.getAttribute('data-tally-url');
       if (widgetUrl) {
-        existingUrls.add(widgetUrl);
+        existingUrls.add(normalizeUrl(widgetUrl));
       }
     });
     
-    // Get all proposal URLs from current proposals
-    const currentUrls = new Set([...snapshotUrls, ...aipUrls]);
+    // Get all proposal URLs from current proposals (normalized)
+    const currentUrls = new Set([
+      ...snapshotUrls.map(normalizeUrl),
+      ...aipUrls.map(normalizeUrl)
+    ].filter(url => url)); // Filter out empty strings
     
     // Only clear widgets if the proposals have changed (different URLs)
+    // Use normalized URLs for comparison
     const urlsMatch = existingUrls.size === currentUrls.size && 
+                     existingUrls.size > 0 &&
                      [...existingUrls].every(url => currentUrls.has(url)) &&
                      [...currentUrls].every(url => existingUrls.has(url));
     
     if (urlsMatch && existingWidgets.length > 0) {
       console.log(`🔵 [TOPIC] Widgets already match current proposals (${existingWidgets.length} widget(s)), skipping re-render`);
+      // Ensure widgetsInitialized is set to prevent future re-renders
+      if (!widgetsInitialized) {
+        widgetsInitialized = true;
+      }
       return; // Don't re-render if widgets already match
     }
     
@@ -1099,18 +1114,21 @@ export default apiInitializer((api) => {
     }
     
     // If widgets are initialized and we found the same proposals, skip re-rendering
-    // Check if we have widgets for all current URLs
+    // Check if we have widgets for all current URLs (using normalized URLs)
     if (widgetsInitialized && existingWidgets.length > 0 && currentUrls.size > 0) {
-      // Check if all current URLs have corresponding widgets
+      // Check if all current URLs have corresponding widgets (using normalized comparison)
       const urlArray = Array.from(currentUrls);
       const allUrlsHaveWidgets = urlArray.every(url => {
         return Array.from(existingWidgets).some(widget => {
           const widgetUrl = widget.getAttribute('data-tally-url');
-          return widgetUrl === url || widgetUrl?.includes(url) || url.includes(widgetUrl);
+          const normalizedWidgetUrl = normalizeUrl(widgetUrl);
+          // Use normalized comparison for exact match
+          return normalizedWidgetUrl === url;
         });
       });
       
-      if (allUrlsHaveWidgets) {
+      // Also check if we have the same number of widgets as URLs
+      if (allUrlsHaveWidgets && existingWidgets.length >= currentUrls.size) {
         console.log(`🔵 [TOPIC] Widgets already initialized and match current proposals, skipping re-render`);
         return;
       }
@@ -1163,6 +1181,18 @@ export default apiInitializer((api) => {
     const totalProposals = uniqueSnapshotUrls.length + uniqueAipUrls.length;
     console.log(`🔵 [TOPIC] Found ${totalProposals} unique proposal(s), will select max 3 based on priority`);
     
+    // Store initial proposal URLs for comparison (before fetching/rendering)
+    // This helps prevent re-rendering when scrolling loads new posts with same proposals
+    if (totalProposals > 0) {
+      initialProposalUrls = new Set([...uniqueSnapshotUrls, ...uniqueAipUrls]);
+      console.log(`🔵 [TOPIC] Stored ${initialProposalUrls.size} initial proposal URL(s) for comparison`);
+    }
+    
+    // Show default loader before fetching
+    if (totalProposals > 0) {
+      showDefaultLoader();
+    }
+    
     // Create combined ordered list of all proposals (maintain order: snapshot first, then aip)
     // This preserves the order proposals appear in the content
     const orderedProposals = [];
@@ -1188,6 +1218,8 @@ export default apiInitializer((api) => {
       
       if (combinedProposals.length === 0) {
         console.log("🔵 [RENDER] No valid proposals to render");
+        // Hide loader if no proposals to render
+        hideDefaultLoader();
         return;
       }
       
@@ -1260,15 +1292,25 @@ export default apiInitializer((api) => {
               initialProposalUrls = new Set(allUrls);
             }
             console.log(`✅ [TOPIC] Widgets initialized successfully with ${renderedWidgets.length} widget(s) in DOM`);
+            
+            // Hide loader after widgets are rendered
+            hideDefaultLoader();
           } else {
             console.warn(`⚠️ [TOPIC] Expected ${selected.length} widget(s) but found ${renderedWidgets.length} in DOM, not marking as initialized`);
+            // Hide loader even if widgets didn't render (to prevent stuck loader)
+            hideDefaultLoader();
           }
         }, 100);
+      } else {
+        // No widgets to render, hide loader
+        hideDefaultLoader();
       }
     }
     
-    // ===== SNAPSHOT WIDGETS - One per URL =====
-    if (uniqueSnapshotUrls.length > 0) {
+    // ===== FETCH ALL PROPOSALS IN PARALLEL, THEN RENDER ALL AT ONCE =====
+    // Start both snapshot and AIP fetches in parallel, wait for ALL to complete before rendering
+    
+    const snapshotPromise = uniqueSnapshotUrls.length > 0 ? (() => {
       // Filter out URLs that are already being fetched or rendered
       const snapshotUrlsToFetch = uniqueSnapshotUrls.filter(url => {
         if (fetchingUrls.has(url) || renderingUrls.has(url)) {
@@ -1279,11 +1321,11 @@ export default apiInitializer((api) => {
         return true;
       });
       
-      Promise.allSettled(snapshotUrlsToFetch.map(url => {
+      return Promise.allSettled(snapshotUrlsToFetch.map(url => {
         // Wrap in Promise.resolve to ensure we always return a promise that resolves
         return Promise.resolve()
           .then(() => fetchProposalDataByType(url, 'snapshot'))
-      .then(data => {
+          .then(data => {
             // Remove from fetching set when fetch completes
             fetchingUrls.delete(url);
             return { url, data, type: 'snapshot' };
@@ -1323,8 +1365,8 @@ export default apiInitializer((api) => {
           
           console.log(`🔵 [TOPIC] Found ${validSnapshots.length} valid Snapshot proposal(s) out of ${snapshotUrlsToFetch.length} unique URL(s)`);
           
-          // Store snapshot results for later selection (don't render yet)
-          const snapshotProposals = validSnapshots.map((snapshot) => {
+          // Return snapshot results
+          return validSnapshots.map((snapshot) => {
             const stage = snapshot.data.stage || 'snapshot';
             return {
               url: snapshot.url,
@@ -1336,23 +1378,14 @@ export default apiInitializer((api) => {
               originalOrder: orderedProposals.findIndex(p => p.url === snapshot.url && p.type === 'snapshot')
             };
           });
-          
-          // Check if we have AIP proposals to wait for
-          if (uniqueAipUrls.length === 0) {
-            // No AIP proposals, proceed with selection and rendering
-            renderSelectedProposals(snapshotProposals, []);
-          } else {
-            // Store for later when AIPs are ready
-            window._snapshotProposals = snapshotProposals;
-          }
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing Snapshot proposals:", error);
+          return [];
         });
-    }
+    })() : Promise.resolve([]);
     
-    // ===== AIP WIDGETS - One per URL =====
-    if (uniqueAipUrls.length > 0) {
+    const aipPromise = uniqueAipUrls.length > 0 ? (() => {
       const aipUrlsToFetch = uniqueAipUrls.filter(url => {
         if (fetchingUrls.has(url) || renderingUrls.has(url)) {
           console.log(`🔵 [TOPIC] AIP URL ${url} is already being fetched/rendered, skipping duplicate`);
@@ -1362,7 +1395,7 @@ export default apiInitializer((api) => {
         return true;
       });
       
-      Promise.allSettled(aipUrlsToFetch.map(aipUrl => {
+      return Promise.allSettled(aipUrlsToFetch.map(aipUrl => {
         return Promise.resolve()
           .then(() => fetchProposalDataByType(aipUrl, 'aip'))
           .then(aipData => {
@@ -1386,8 +1419,8 @@ export default apiInitializer((api) => {
           
           console.log(`🔵 [TOPIC] Found ${validAips.length} valid AIP proposal(s) out of ${aipUrlsToFetch.length} unique URL(s)`);
           
-          // Store AIP results
-          window._aipProposals = validAips.map((aip) => {
+          // Return AIP results
+          return validAips.map((aip) => {
             return {
               url: aip.url,
               data: aip.data,
@@ -1398,23 +1431,25 @@ export default apiInitializer((api) => {
               originalOrder: orderedProposals.findIndex(p => p.url === aip.url && p.type === 'aip')
             };
           });
-          
-          // Now we have both snapshot and AIP proposals, proceed with selection and rendering
-          renderSelectedProposals(window._snapshotProposals || [], window._aipProposals || []);
         })
         .catch(error => {
           console.error("❌ [TOPIC] Error processing AIP proposals:", error);
-          // Still try to render snapshots if available
-          renderSelectedProposals(window._snapshotProposals || [], []);
+          return [];
         });
-    } else {
-      // No AIP proposals, but we might have snapshots - check if they're ready
-      if (uniqueSnapshotUrls.length === 0) {
-        // No proposals at all
-        console.log("🔵 [TOPIC] No proposals to render");
-      }
-      // If we have snapshots, they will be handled in the snapshot Promise.allSettled
-    }
+    })() : Promise.resolve([]);
+    
+    // Wait for ALL fetches to complete, then render all widgets at once
+    Promise.all([snapshotPromise, aipPromise])
+      .then(([snapshotProposals, aipProposals]) => {
+        console.log(`🔵 [TOPIC] All fetches complete - Snapshot: ${snapshotProposals.length}, AIP: ${aipProposals.length}`);
+        // Render all widgets at once after all data is fetched
+        renderSelectedProposals(snapshotProposals, aipProposals);
+      })
+      .catch(error => {
+        console.error("❌ [TOPIC] Error waiting for all fetches:", error);
+        // Still try to render what we have
+        hideDefaultLoader();
+      });
     
   }
   
@@ -1431,6 +1466,74 @@ export default apiInitializer((api) => {
   const renderingUrls = new Set();
   // Track URLs currently being fetched to prevent duplicate fetches
   const fetchingUrls = new Set();
+  
+  // Default loader functions
+  function showDefaultLoader() {
+    // Remove any existing loader
+    hideDefaultLoader();
+    
+    // Create loader element
+    const loader = document.createElement("div");
+    loader.id = "governance-widgets-default-loader";
+    loader.className = "governance-widgets-default-loader";
+    loader.style.cssText = `
+      position: fixed;
+      right: 50px;
+      top: 180px;
+      width: 320px;
+      max-width: 320px;
+      z-index: 500;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    `;
+    
+    loader.innerHTML = `
+      <div class="loading-spinner" style="
+        width: 32px;
+        height: 32px;
+        border: 4px solid #f3f4f6;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      "></div>
+      <span style="
+        font-size: 0.9em;
+        color: #6b7280;
+        text-align: center;
+      ">Loading governance widgets...</span>
+    `;
+    
+    // Add spinner animation if not already defined
+    if (!document.getElementById('governance-loader-styles')) {
+      const style = document.createElement('style');
+      style.id = 'governance-loader-styles';
+      style.textContent = `
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(loader);
+    console.log("🔵 [LOADER] Showing default loader");
+  }
+  
+  function hideDefaultLoader() {
+    const loader = document.getElementById("governance-widgets-default-loader");
+    if (loader) {
+      loader.remove();
+      console.log("🔵 [LOADER] Hiding default loader");
+    }
+  }
   
   function debouncedSetupTopicWidget(force = false) {
     // If widgets are already initialized and we're not forcing, skip
@@ -1461,6 +1564,9 @@ export default apiInitializer((api) => {
   function setupTopicWatcher() {
     // Track previous post count to detect actual new posts
     let previousPostCount = document.querySelectorAll('.topic-post, .post, [data-post-id]').length;
+    
+    // Debounce proposal checking to prevent excessive calls during scroll
+    let proposalCheckTimeout = null;
     
     // Watch for new posts being added
     const postObserver = new MutationObserver((mutations) => {
@@ -1505,10 +1611,42 @@ export default apiInitializer((api) => {
         const currentPostCount = document.querySelectorAll('.topic-post, .post, [data-post-id]').length;
         if (currentPostCount > previousPostCount) {
           previousPostCount = currentPostCount;
-          console.log(`🔵 [TOPIC] New post detected (total: ${currentPostCount}), re-checking for proposals`);
-          // Force re-initialization when new posts are added
-          widgetsInitialized = false;
-          debouncedSetupTopicWidget(true);
+          console.log(`🔵 [TOPIC] New post detected (total: ${currentPostCount}), will check if proposals changed`);
+          
+          // Debounce the proposal checking to avoid excessive calls during rapid scrolling
+          if (proposalCheckTimeout) {
+            clearTimeout(proposalCheckTimeout);
+          }
+          
+          proposalCheckTimeout = setTimeout(() => {
+            // Check if the new posts contain any proposal URLs we haven't seen before
+            // Only re-initialize if proposals actually changed
+            const newProposals = findAllProposalsInTopic();
+            const newUrls = new Set([
+              ...newProposals.snapshot.map(url => url.replace(/[\/#\?].*$/, '').replace(/\/$/, '').toLowerCase().trim()),
+              ...newProposals.aip.map(url => url.replace(/[\/#\?].*$/, '').replace(/\/$/, '').toLowerCase().trim())
+            ].filter(url => url));
+            
+            // Compare with initial proposal URLs
+            const initialUrlsNormalized = new Set(
+              Array.from(initialProposalUrls).map(url => url.replace(/[\/#\?].*$/, '').replace(/\/$/, '').toLowerCase().trim())
+            );
+            
+            // Check if proposals actually changed
+            const proposalsChanged = newUrls.size !== initialUrlsNormalized.size ||
+              ![...newUrls].every(url => initialUrlsNormalized.has(url)) ||
+              ![...initialUrlsNormalized].every(url => newUrls.has(url));
+            
+            if (proposalsChanged) {
+              console.log(`🔵 [TOPIC] Proposals changed in new posts, re-initializing widgets`);
+              widgetsInitialized = false;
+              debouncedSetupTopicWidget(true);
+            } else {
+              console.log(`🔵 [TOPIC] New posts detected but proposals unchanged, skipping re-render`);
+              // Update initial URLs to include any new ones (in case order changed)
+              initialProposalUrls = new Set([...newProposals.snapshot, ...newProposals.aip]);
+            }
+          }, 1000); // Wait 1 second after last post addition before checking
         }
       }
     });
