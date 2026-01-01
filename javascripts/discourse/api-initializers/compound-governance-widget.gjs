@@ -1212,7 +1212,8 @@ export default apiInitializer((api) => {
     // ============================================================================
     
     /**
-     * Render only the selected proposals (max 3, prioritized by state)
+     * Store selected proposals in service instead of rendering directly
+     * The component will handle rendering reactively
      */
     function renderSelectedProposals(snapshotProposals, aipProposals) {
       // Combine all proposals
@@ -1222,89 +1223,99 @@ export default apiInitializer((api) => {
         console.log("🔵 [RENDER] No valid proposals to render");
         // Hide loader if no proposals to render
         hideDefaultLoader();
+        // Clear service
+        try {
+          const proposalManager = Discourse.__container__.lookup("service:proposal-manager");
+          if (proposalManager) {
+            proposalManager.clearProposals();
+          }
+        } catch (e) {
+          console.warn("⚠️ [SERVICE] Could not access proposal-manager service:", e);
+        }
         return;
       }
       
       // Select top 3 based on priority
       const selected = selectTopProposals(combinedProposals);
       
-      console.log(`🔵 [RENDER] Rendering ${selected.length} selected widget(s) out of ${combinedProposals.length} total proposal(s)`);
+      console.log(`🔵 [RENDER] Storing ${selected.length} selected proposal(s) in service out of ${combinedProposals.length} total proposal(s)`);
       
-      // Render each selected proposal
-      selected.forEach((proposal, index) => {
-        if (renderingUrls.has(proposal.url)) {
-          console.log(`🔵 [RENDER] URL ${proposal.url} is already being rendered, skipping duplicate`);
-          return;
-        }
-        
-        renderingUrls.add(proposal.url);
-        
-        const stage = proposal.stage || proposal.type || 'arfc';
-        const stageName = stage === 'temp-check' ? 'Temp Check' : 
-                         stage === 'arfc' ? 'ARFC' : 
-                         stage === 'aip' ? 'AIP' : 'Snapshot';
-        
-        console.log(`🔵 [RENDER] Creating widget ${index + 1}/${selected.length} for ${stageName} (status: ${proposal.status})`);
-        console.log(`   Title: ${proposal.title?.substring(0, 60)}...`);
-        console.log(`   URL: ${proposal.url}`);
-        
-        const widgetId = `${stage}-widget-${index}-${Date.now()}`;
-        
-        // Render based on proposal type
-        if (proposal.type === 'aip') {
-          renderMultiStageWidget({
-            tempCheck: null,
-            tempCheckUrl: null,
-            arfc: null,
-            arfcUrl: null,
-            aip: proposal.data,
-            aipUrl: proposal.url
-          }, widgetId, index, renderingUrls, fetchingUrls);
-        } else {
-          // Snapshot proposal
-          renderMultiStageWidget({
-            tempCheck: stage === 'temp-check' ? proposal.data : null,
-            tempCheckUrl: stage === 'temp-check' ? proposal.url : null,
-            arfc: (stage === 'arfc' || stage === 'snapshot') ? proposal.data : null,
-            arfcUrl: (stage === 'arfc' || stage === 'snapshot') ? proposal.url : null,
-            aip: null,
-            aipUrl: null
-          }, widgetId, index, renderingUrls, fetchingUrls);
-        }
-        
-        console.log(`✅ [RENDER] Widget ${index + 1} rendered`);
-      });
-      
-      // Mark widgets as initialized after successful rendering
-      // Use a small delay to ensure widgets are actually in the DOM
-      if (selected.length > 0) {
-        setTimeout(() => {
-          // Verify widgets actually exist in DOM before marking as initialized
-          const renderedWidgets = document.querySelectorAll('.tally-status-widget-container');
-          if (renderedWidgets.length > 0) {
-            widgetsInitialized = true;
-            // Store initial URLs for comparison (use the deduplicated unique URLs)
-            // Safety check: ensure variables are defined (they should be via closure)
-            if (typeof uniqueSnapshotUrls !== 'undefined' && typeof uniqueAipUrls !== 'undefined') {
-              const allUrls = [...uniqueSnapshotUrls, ...uniqueAipUrls];
-              initialProposalUrls = new Set(allUrls);
-            } else {
-              // Fallback: extract URLs from rendered proposals
-              const allUrls = [...snapshotProposals.map(p => p.url), ...aipProposals.map(p => p.url)];
-              initialProposalUrls = new Set(allUrls);
-            }
-            console.log(`✅ [TOPIC] Widgets initialized successfully with ${renderedWidgets.length} widget(s) in DOM`);
-            
-            // Hide loader after widgets are rendered
-            hideDefaultLoader();
+      // Store proposals in service - component will render them reactively
+      try {
+        const proposalManager = Discourse.__container__.lookup("service:proposal-manager");
+        if (proposalManager) {
+          proposalManager.setProposals(selected);
+          console.log(`✅ [SERVICE] Stored ${selected.length} proposal(s) in service`);
+          
+          // Mark widgets as initialized
+          widgetsInitialized = true;
+          
+          // Store initial URLs for comparison
+          if (typeof uniqueSnapshotUrls !== 'undefined' && typeof uniqueAipUrls !== 'undefined') {
+            const allUrls = [...uniqueSnapshotUrls, ...uniqueAipUrls];
+            initialProposalUrls = new Set(allUrls);
           } else {
-            console.warn(`⚠️ [TOPIC] Expected ${selected.length} widget(s) but found ${renderedWidgets.length} in DOM, not marking as initialized`);
-            // Hide loader even if widgets didn't render (to prevent stuck loader)
+            // Fallback: extract URLs from proposals
+            const allUrls = [...snapshotProposals.map(p => p.url), ...aipProposals.map(p => p.url)];
+            initialProposalUrls = new Set(allUrls);
+          }
+          
+          // Hide loader after proposals are stored
+          hideDefaultLoader();
+        } else {
+          console.warn("⚠️ [SERVICE] proposal-manager service not found, falling back to direct rendering");
+          // Fallback to direct rendering if service is not available
+          selected.forEach((proposal, index) => {
+            if (renderingUrls.has(proposal.url)) {
+              console.log(`🔵 [RENDER] URL ${proposal.url} is already being rendered, skipping duplicate`);
+              return;
+            }
+            
+            renderingUrls.add(proposal.url);
+            
+            const stage = proposal.stage || proposal.type || 'arfc';
+            const widgetId = `${stage}-widget-${index}-${Date.now()}`;
+            
+            // Render based on proposal type
+            if (proposal.type === 'aip') {
+              renderMultiStageWidget({
+                tempCheck: null,
+                tempCheckUrl: null,
+                arfc: null,
+                arfcUrl: null,
+                aip: proposal.data,
+                aipUrl: proposal.url
+              }, widgetId, index, renderingUrls, fetchingUrls);
+            } else {
+              // Snapshot proposal
+              renderMultiStageWidget({
+                tempCheck: stage === 'temp-check' ? proposal.data : null,
+                tempCheckUrl: stage === 'temp-check' ? proposal.url : null,
+                arfc: (stage === 'arfc' || stage === 'snapshot') ? proposal.data : null,
+                arfcUrl: (stage === 'arfc' || stage === 'snapshot') ? proposal.url : null,
+                aip: null,
+                aipUrl: null
+              }, widgetId, index, renderingUrls, fetchingUrls);
+            }
+          });
+          
+          if (selected.length > 0) {
+            setTimeout(() => {
+              const renderedWidgets = document.querySelectorAll('.tally-status-widget-container');
+              if (renderedWidgets.length > 0) {
+                widgetsInitialized = true;
+                hideDefaultLoader();
+              } else {
+                hideDefaultLoader();
+              }
+            }, 100);
+          } else {
             hideDefaultLoader();
           }
-        }, 100);
-      } else {
-        // No widgets to render, hide loader
+        }
+      } catch (e) {
+        console.warn("⚠️ [SERVICE] Error accessing proposal-manager service:", e);
+        // Fallback to direct rendering
         hideDefaultLoader();
       }
     }

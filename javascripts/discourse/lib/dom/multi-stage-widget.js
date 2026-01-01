@@ -530,7 +530,8 @@ export function renderMultiStageWidget(
   widgetId,
   proposalOrder,
   renderingUrls,
-  fetchingUrls
+  fetchingUrls,
+  containerElement = null
 ) {
   const statusWidgetId = `aave-governance-widget-${widgetId}`;
 
@@ -799,6 +800,76 @@ export function renderMultiStageWidget(
     statusWidget.style.marginLeft = "0";
     statusWidget.style.marginRight = "0";
     statusWidget.style.zIndex = "1";
+  }
+
+  // If containerElement is provided, append to it directly (for component-based rendering)
+  if (containerElement) {
+    containerElement.appendChild(statusWidget);
+    console.log("✅ [COMPONENT] Widget appended to container element");
+    // Remove URL from rendering set now that widget is in DOM
+    if (proposalUrl) {
+      renderingUrls.delete(proposalUrl);
+    }
+    // Attach event listeners for collapse/expand buttons
+    requestAnimationFrame(() => {
+      const toggleButtons = statusWidget.querySelectorAll(
+        ".stage-toggle-btn[data-stage-id]"
+      );
+      toggleButtons.forEach((button) => {
+        const stageId = button.getAttribute("data-stage-id");
+        const content = document.getElementById(`${stageId}-content`);
+        const icon = document.getElementById(`${stageId}-icon`);
+        const collapsedText = document.getElementById(
+          `${stageId}-collapsed-text`
+        );
+
+        if (!content || !icon) {
+          console.warn(`⚠️ [COLLAPSE] Missing elements for stage ${stageId}`);
+          return;
+        }
+
+        // Remove any existing listeners by cloning the button
+        const newButton = button.cloneNode(true);
+        button.parentNode.replaceChild(newButton, button);
+
+        // Add hover effects
+        newButton.addEventListener("mouseenter", () => {
+          newButton.style.background = "#f3f4f6";
+          newButton.style.color = "#111827";
+        });
+        newButton.addEventListener("mouseleave", () => {
+          newButton.style.background = "transparent";
+          newButton.style.color = "#6b7280";
+        });
+
+        // Add click handler
+        const collapseContainer = document.getElementById(
+          `${stageId}-collapse-container`
+        );
+        newButton.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (content.style.display === "none" || content.style.display === "") {
+            content.style.display = "block";
+            if (collapseContainer) {
+              collapseContainer.style.display = "none";
+            }
+          } else {
+            content.style.display = "none";
+            if (collapseContainer) {
+              collapseContainer.style.display = "flex";
+            }
+            icon.textContent = "▶";
+            icon.setAttribute("title", "Expand");
+            if (collapsedText) {
+              collapsedText.style.display = "inline";
+            }
+          }
+        });
+      });
+    });
+    console.log("✅ [WIDGET]", widgetType === "aip" ? "AIP" : "Snapshot", "widget rendered");
+    return; // Exit early - widget is rendered in container
   }
 
   // Handle mobile positioning (complex logic - see original for full implementation)
