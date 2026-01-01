@@ -6,7 +6,9 @@ export default class ProposalManager extends Service {
 
   setProposals(proposals) {
     this.selectedProposals = proposals || [];
-    console.log(`✅ [SERVICE] Updated proposals: ${this.selectedProposals.length} proposal(s)`);
+    console.log(
+      `✅ [SERVICE] Updated proposals: ${this.selectedProposals.length} proposal(s)`
+    );
   }
 
   clearProposals() {

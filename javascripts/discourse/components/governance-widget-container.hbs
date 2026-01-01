@@ -1,12 +1,11 @@
-<template>
-  {{#if this.hasProposals}}
-    <div
-      class="governance-widgets-outlet-container"
-      {{did-insert this.renderWidgets}}
-      {{did-update this.renderWidgets this.proposals}}
-    >
-      {{!-- Widgets will be rendered here by the component action --}}
-    </div>
-  {{/if}}
-</template>
+{{! template-lint-disable require-strict-mode }}
+{{#if this.hasProposals}}
+  <div
+    class="governance-widgets-outlet-container"
+    {{did-insert this.renderWidgets}}
+    {{did-update this.renderWidgets this.proposals}}
+  >
+    {{!-- Widgets will be rendered here by the component action --}}
+  </div>
+{{/if}}
 
