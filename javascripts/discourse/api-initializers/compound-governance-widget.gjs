@@ -1225,6 +1225,7 @@ export default apiInitializer((api) => {
         hideDefaultLoader();
         // Clear service
         try {
+          // eslint-disable-next-line no-undef
           const proposalManager = Discourse.__container__.lookup("service:proposal-manager");
           if (proposalManager) {
             proposalManager.clearProposals();
@@ -1242,6 +1243,7 @@ export default apiInitializer((api) => {
       
       // Store proposals in service - component will render them reactively
       try {
+        // eslint-disable-next-line no-undef
         const proposalManager = Discourse.__container__.lookup("service:proposal-manager");
         if (proposalManager) {
           proposalManager.setProposals(selected);
