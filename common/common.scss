@@ -9,20 +9,84 @@
 }
 
 //
-// Status widget on the right side (outside post box) - compact, no overlap
-// Position next to scroll indicator, centered with 20px left margin
+// Widgets container wrapper for column layout
+// Holds multiple widgets stacked vertically
 //
-.tally-status-widget-container {
+.governance-widgets-wrapper {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
   position: fixed !important;
-  left: 1498.5px !important;
-  top: 180px !important;
-  transform: none !important;
-  right: 0 !important;
+  z-index: 500 !important;
   width: 320px !important;
   max-width: 320px !important;
-  z-index: 500 !important; // Lower than scroll numbers
   max-height: calc(100vh - 100px) !important;
   overflow-y: auto !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+
+  // Position like tally widget - fixed on right side
+  right: 10px !important;
+  top: 180px !important;
+  left: auto !important;
+
+  // Mobile: Show widgets inline in topic
+  @media (width <= 1024px) {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
+
+//
+// Status widget on the right side (outside post box) - compact, no overlap
+// Position next to scroll indicator, centered with 20px left margin
+// When inside wrapper, uses relative positioning
+//
+.tally-status-widget-container {
+  position: relative !important; // Changed from fixed - container handles positioning
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-bottom: 0 !important;
+
+  // When NOT in wrapper (legacy/fallback), use fixed positioning
+  &:not(.governance-widgets-wrapper > *) {
+    position: fixed !important;
+    left: 1498.5px !important;
+    top: 180px !important;
+    transform: none !important;
+    right: 0 !important;
+    width: 320px !important;
+    max-width: 320px !important;
+    z-index: 500 !important; // Lower than scroll numbers
+    max-height: calc(100vh - 100px) !important;
+    overflow-y: auto !important;
+
+    // Mobile: Override fixed positioning to show inline
+    @media (width <= 1024px) {
+      position: relative !important;
+      left: auto !important;
+      right: auto !important;
+      top: auto !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: none !important;
+      overflow-y: visible !important;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      margin-bottom: 20px !important;
+    }
+  }
 
   // Position will be set dynamically by JavaScript relative to timeline
   .tally-status-widget {
@@ -31,8 +95,43 @@
     border-radius: 8px;
     box-shadow: 0 4px 6px rgb(0 0 0 / 0.1);
     padding: 12px;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     font-family:
       -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    position: relative !important;
+
+    .widget-close-btn {
+      position: absolute !important;
+      top: 8px !important;
+      right: 8px !important;
+      background: transparent !important;
+      border: none !important;
+      font-size: 20px !important;
+      line-height: 1 !important;
+      cursor: pointer !important;
+      color: #6b7280 !important;
+      width: 24px !important;
+      height: 24px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      transition: all 0.2s !important;
+      z-index: 10 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+
+      &:hover {
+        background: #f3f4f6 !important;
+        color: #111827 !important;
+      }
+
+      &:active {
+        background: #e5e7eb !important;
+      }
+    }
 
     .status-badges-row {
       display: flex;
@@ -63,6 +162,12 @@
           border: 1px solid #93c5fd;
         }
 
+        &.passed {
+          background: #dcfce7;
+          color: #166534;
+          border: 1px solid #86efac;
+        }
+
         &.inactive {
           background: #f3f4f6;
           color: #6b7280;
@@ -71,11 +176,22 @@
 
         &.defeated,
         &.quorum-not-reached,
-        &.cancelled,
         &.failed {
           background: #fee2e2;
           color: #dc2626; // Red text like Tally website
           border: 1px solid #fca5a5;
+        }
+
+        &.cancelled {
+          background: #fee2e2;
+          color: #dc2626; // Red for cancelled
+          border: 1px solid #fca5a5;
+        }
+
+        &.expired {
+          background: #f3f4f6;
+          color: #6b7280; // Gray for expired
+          border: 1px solid #d1d5db;
         }
 
         &.queued {
@@ -96,10 +212,76 @@
         border-radius: 4px;
         font-size: 0.7em;
         font-weight: 600;
+        color: #6b7280;
+        white-space: nowrap;
+      }
+    }
+
+    // Status badge styling for governance-stage (when status is on same row as stage name)
+    .governance-stage .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.7em;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+
+      &.active {
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+
+      &.executed {
+        background: #dbeafe;
+        color: #1e40af;
+        border: 1px solid #93c5fd;
+      }
+
+      &.passed {
+        background: #ccfbf1;
+        color: #0f766e;
+        border: 1px solid #5eead4;
+      }
+
+      &.inactive {
         background: #f3f4f6;
         color: #6b7280;
         border: 1px solid #d1d5db;
-        white-space: nowrap;
+      }
+
+      &.defeated,
+      &.quorum-not-reached,
+      &.failed {
+        background: #fee2e2;
+        color: #dc2626; // Red text like Tally website
+        border: 1px solid #fca5a5;
+      }
+
+      &.cancelled {
+        background: #fee2e2;
+        color: #dc2626; // Red for cancelled
+        border: 1px solid #fca5a5;
+      }
+
+      &.expired {
+        background: #f3f4f6;
+        color: #6b7280; // Gray for expired
+        border: 1px solid #d1d5db;
+      }
+
+      &.queued {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+      }
+
+      &.pending {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
       }
     }
 
@@ -140,8 +322,8 @@
 
       .progress-bar {
         width: 100%;
-        height: 12px;
-        border-radius: 6px;
+        height: 6px; // Thinner progress bar
+        border-radius: 3px;
         overflow: hidden;
         display: flex;
         background: #f3f4f6; // Light grey background so empty bar is visible
@@ -208,6 +390,14 @@
         outline-offset: 2px;
       }
     }
+
+    // Prevent hover color change for buttons in governance stages
+    .governance-stage .vote-button {
+      &:hover {
+        background-color: var(--d-button-primary-bg-color, #2563eb) !important;
+        color: var(--d-button-primary-text-color, white) !important;
+      }
+    }
   }
 
   // Mobile: Show on top of post instead of side
@@ -221,6 +411,23 @@
     max-width: 100% !important;
     margin: 0 0 20px 0 !important;
     z-index: auto !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  // When inside wrapper, remove fixed positioning
+  .governance-widgets-wrapper & {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 0 !important;
     max-height: none !important;
     overflow-y: visible !important;
   }
@@ -444,11 +651,10 @@
         border: 1px solid #93c5fd;
       }
 
-      &.cancelled,
-      &.failed {
-        background: #fee2e2;
-        color: #dc2626; // Red text like Tally website
-        border: 1px solid #fca5a5;
+      &.passed {
+        background: #ccfbf1;
+        color: #0f766e;
+        border: 1px solid #5eead4;
       }
 
       &.inactive {

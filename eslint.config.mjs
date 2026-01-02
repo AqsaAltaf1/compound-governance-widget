@@ -3,6 +3,9 @@ import DiscourseRecommendedTheme from "@discourse/lint-configs/eslint-theme";
 export default [
   ...DiscourseRecommendedTheme,
   {
+    ignores: ["**/*.gjs"],
+  },
+  {
     languageOptions: {
       globals: {
         BigInt: "readonly",
