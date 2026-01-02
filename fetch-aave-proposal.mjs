@@ -22,7 +22,9 @@ const SUBGRAPH_URL = `https://gateway.thegraph.com/api/${GRAPH_API_KEY}/subgraph
  * @returns {string|null} - Extracted proposal ID or null
  */
 function extractProposalId(input) {
-  if (!input) return null;
+  if (!input) {
+    return null;
+  }
   
   // If it's just a number, return it
   if (/^\d+$/.test(input.trim())) {
@@ -85,16 +87,24 @@ function formatAAVE(amount) {
  * @returns {string} - Formatted duration
  */
 function formatDuration(seconds) {
-  if (!seconds || seconds === null) return "N/A";
+  if (!seconds || seconds === null) {
+    return "N/A";
+  }
   
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   
   const parts = [];
-  if (days > 0) parts.push(`${days} day${days !== 1 ? 's' : ''}`);
-  if (hours > 0) parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
-  if (minutes > 0) parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
+  if (days > 0) {
+    parts.push(`${days} day${days !== 1 ? 's' : ''}`);
+  }
+  if (hours > 0) {
+    parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
+  }
   
   return parts.length > 0 ? parts.join(', ') : `${seconds} seconds`;
 }
